@@ -13,19 +13,21 @@ Finance OS is a custom, manual-entry financial platform designed to replace YNAB
 * **`transactions`**: `id`, `created_at`, `date`, `amount`, `payee`, `category_id` (FK), `account_id` (FK), `to_account_id` (FK - for transfers), `type` ('Income', 'Expense', 'Transfer'), `purchase_rating` ('Good', 'Neutral', 'Regret'), `notes`.
 
 ## 3. KEY FILE STRUCTURE
-* `app/page.tsx` -> **Dashboard**. Features: Total Net Worth, Liquid Cash calculation, Account Management (CRUD with dynamic credit limit tracking), and a 10-item Recent Ledger feed. Includes 3-way Navigation.
-* `app/budget/page.tsx` -> **Budget Engine**. Features: Zero-based "Ready to Assign" banner, Category Group creation, Category envelope management (with advanced targets, due dates, debt tracking, and savings breakdown math).
-* `app/ledger/page.tsx` -> **Master Ledger**. Features: Transaction logging with automatic balance/envelope sync, purchase rating, and autofill payee suggestions.
+* `app/layout.tsx` & `app/components/Navigation.tsx` -> **Global Architecture**. Wraps the entire application in a consistent layout and navigation bar, removing redundant UI code.
+* `app/page.tsx` -> **Dashboard**. Features: Total Net Worth, Liquid Cash calculation, Monthly Cashflow (Income vs Expense), Account Management (with Manual vs Silent balance adjustments), Account Exports, and a Recent Ledger feed. Accounts serve as routing gateways to the Ledger.
+* `app/budget/page.tsx` -> **Budget Engine**. Features: Zero-based "Ready to Assign" banner, Category Group creation, Category envelope management (with advanced targets, due dates, debt tracking, savings breakdown math), View Filters (Underfunded/Available), and Budget Exporting.
+* `app/ledger/page.tsx` -> **Master Ledger**. Features: Transaction logging with automatic balance/envelope sync, purchase rating, autofill payees, and URL parameter listening (`?account=id&new=true`) for quick-entry routing from the Dashboard.
+* `app/calendar/page.tsx` -> **Bill Calendar**. Features: Dynamic CSS grid calendar utilizing `date-fns` to map categories visually based on their `due_date`, accompanied by monthly "Total Due" vs "Funded" stats.
 
 ## 4. DESIGN & LOGIC RULES
 * **Zero-Based Math:** `Ready to Assign` = Total Liquid Cash (Checking + Savings + Cash) minus total funds explicitly assigned to envelopes.
 * **Inline Math Evaluation:** The "Assigned" input accepts basic math operators (e.g., `+50`, `100-20`) to dynamically update assigned values.
-* **Liquid Transfers:** Clicking the "Available" bubble opens a transfer modal, allowing users to shift liquid cash between envelopes or back to "Ready to Assign".
 * **Math Reversal Sync:** Deleting or editing a transaction automatically reverses the old math impact on accounts and envelopes before applying new changes, ensuring the ledger and balances are always perfectly synced.
+* **Manual Adjustments vs Silent Updates:** When editing an account balance directly, the user can choose to let the system auto-calculate the difference and log a transaction ("Manual Adjustment") or bypass the ledger entirely ("Silent Update").
 * **Credit Card Math Inversion:** Outflow (Expenses) on Credit Card accounts INCREASES the balance (debt), while Inflow (Income/Payments) DECREASES the balance.
-* **Persistent Preferences:** Category sorting preferences (Name, Goal, Assigned, Due Date) are stored in `localStorage` (`finance_os_sort`) to persist across sessions.
-* **Visual Urgency:** Categories past their `due_date` auto-flag as "Late". `is_asap` overrides render red emergency backgrounds.
+* **URL Routing / Deep Linking:** The Dashboard pushes URL parameters to the Ledger (e.g., `?account=xyz`) to automatically filter the transaction list and pre-fill the transaction modal.
+* **Persistent Preferences:** Category sorting preferences, view filters, and expanded/collapsed group states are stored in `localStorage` to persist across sessions seamlessly.
+* **Visual Urgency:** Categories past their `due_date` auto-flag as "Late". `is_asap` overrides render red emergency backgrounds. The Calendar visualizes these statuses.
 * **Savings Breakdown:** Categories with targets and due dates dynamically calculate daily, weekly, and monthly funding requirements to meet goals on time.
 * **Cycle Advancement:** Repeating categories feature a "Fast-Forward" action to advance the due date based on frequency. If the new date exceeds the `end_date`, the category is auto-hidden.
-* **Behavioral Ratings:** Transactions include a Wallet-style `purchase_rating` (Good, Neutral, Regret) to track the emotional ROI of spending.
-* **Transfers:** Handled natively by supplying both an `account_id` (From) and `to_account_id` (To) on a single transaction record.
+* **Transfers:** Handled natively by supplying both an `account_id` (From) and `to_account_id` (To) on a single transaction record, keeping Net Worth flat.
