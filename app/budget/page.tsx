@@ -318,7 +318,7 @@ export default function BudgetPage() {
         <div className="flex flex-wrap gap-2 w-full xl:w-auto">
             <div className="flex items-center bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-sm flex-grow md:flex-grow-0">
                 <ArrowUpDown size={16} className="text-slate-400 mr-2"/>
-                <select value={categorySort} onChange={handleSortChange} className="bg-transparent font-bold text-sm text-slate-600 outline-none cursor-pointer w-full">
+                <select value={categorySort} onChange={handleSortChange} className="bg-transparent font-bold text-sm text-slate-900 outline-none cursor-pointer w-full">
                     <option value="default">Custom Order</option>
                     <option value="name">Sort by Name (A-Z)</option>
                     <option value="target">Sort by Goal (High-Low)</option>
@@ -407,7 +407,7 @@ export default function BudgetPage() {
                                                 <div className="min-w-0">
                                                     <h4 className="font-bold text-slate-700 truncate flex items-center gap-2">
                                                         {cat.name}
-                                                        {cat.notes && <FileText size={12} className="text-slate-300" title={cat.notes}/>}
+                                                        {cat.notes && <span title={cat.notes}><FileText size={12} className="text-slate-300" /></span>}
                                                         {isPastDue && !cat.is_asap && <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold uppercase flex items-center gap-1"><AlertTriangle size={10}/> Late</span>}
                                                     </h4>
                                                     <div className="flex flex-wrap items-center gap-2 mt-0.5">
@@ -438,7 +438,7 @@ export default function BudgetPage() {
                                                                 )}
                                                             </div>
                                                         )}
-                                                        {cat.is_repeating && <Repeat size={10} className="text-blue-400" title="Repeating Goal"/>}
+                                                        {cat.is_repeating && <span title="Repeating Goal"><Repeat size={10} className="text-blue-400" /></span>}
                                                     </div>
                                                 </div>
                                             </div>
@@ -454,7 +454,7 @@ export default function BudgetPage() {
                                                                 autoFocus
                                                                 type="text" 
                                                                 placeholder="e.g. +50 or 100-20"
-                                                                className="w-28 pl-5 pr-2 py-1 bg-white border-2 border-blue-400 rounded-lg text-sm font-bold text-slate-700 outline-none shadow-sm"
+                                                                className="w-28 pl-5 pr-2 py-1 bg-white border-2 border-blue-400 rounded-lg text-sm font-bold text-slate-900 outline-none shadow-sm"
                                                                 value={fundingAmount}
                                                                 onChange={e => setFundingAmount(e.target.value)}
                                                                 onBlur={saveFunding}
@@ -463,7 +463,7 @@ export default function BudgetPage() {
                                                     ) : (
                                                         <div 
                                                             onClick={(e) => openFundingMode(e, cat)}
-                                                            className={`font-bold px-3 py-1 rounded-lg text-sm transition-colors border cursor-pointer ${cat.is_asap || isPastDue ? 'bg-red-100 text-red-600 border-red-200 hover:bg-red-200' : 'bg-slate-100 text-slate-500 hover:bg-blue-100 hover:text-blue-700 border-transparent hover:border-blue-200'}`}
+                                                            className={`font-bold px-3 py-1 rounded-lg text-sm transition-colors border cursor-pointer ${cat.is_asap || isPastDue ? 'bg-red-100 text-red-600 border-red-200 hover:bg-red-200' : 'bg-slate-100 text-slate-700 hover:bg-blue-100 hover:text-blue-700 border-transparent hover:border-blue-200'}`}
                                                             title="Click to assign money (Math enabled: +50, 100-20)"
                                                         >
                                                             ${assigned.toLocaleString('en-US', { minimumFractionDigits: 2 })}
@@ -522,7 +522,7 @@ export default function BudgetPage() {
             <div className="space-y-4">
               <div>
                 <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Group Name</label>
-                <input required autoFocus placeholder="e.g. Fixed Costs" className="w-full p-3 bg-slate-50 rounded-xl font-bold border border-slate-100 outline-none focus:border-blue-300 focus:bg-white transition-all" value={groupFormName} onChange={e => setGroupFormName(e.target.value)} />
+                <input required autoFocus placeholder="e.g. Fixed Costs" className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-900 border border-slate-100 outline-none focus:border-blue-300 focus:bg-white transition-all" value={groupFormName} onChange={e => setGroupFormName(e.target.value)} />
               </div>
             </div>
             <button type="submit" className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold mt-8 shadow-lg hover:bg-slate-800 transition-colors">
@@ -551,16 +551,16 @@ export default function BudgetPage() {
                   <div className="flex gap-3">
                       <div className="w-1/4">
                           <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Emoji</label>
-                          <input maxLength={2} placeholder="🍕" className="w-full p-3 bg-slate-50 rounded-xl font-black text-center text-xl border border-slate-100 outline-none focus:border-blue-300 focus:bg-white transition-all" value={catForm.emoji} onChange={e => setCatForm({...catForm, emoji: e.target.value})} />
+                          <input maxLength={2} placeholder="🍕" className="w-full p-3 bg-slate-50 rounded-xl font-black text-center text-xl text-slate-900 border border-slate-100 outline-none focus:border-blue-300 focus:bg-white transition-all" value={catForm.emoji} onChange={e => setCatForm({...catForm, emoji: e.target.value})} />
                       </div>
                       <div className="w-3/4">
                           <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Category Name</label>
-                          <input required autoFocus placeholder="e.g. Groceries" className="w-full p-3 bg-slate-50 rounded-xl font-bold border border-slate-100 outline-none focus:border-blue-300 focus:bg-white transition-all" value={catForm.name} onChange={e => setCatForm({...catForm, name: e.target.value})} />
+                          <input required autoFocus placeholder="e.g. Groceries" className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-900 border border-slate-100 outline-none focus:border-blue-300 focus:bg-white transition-all" value={catForm.name} onChange={e => setCatForm({...catForm, name: e.target.value})} />
                       </div>
                   </div>
                   <div>
                       <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Parent Group</label>
-                      <select className="w-full p-3 bg-slate-50 rounded-xl font-bold border border-slate-100 text-slate-700 outline-none focus:border-blue-300 focus:bg-white transition-all cursor-pointer" value={catForm.group_id} onChange={e => setCatForm({...catForm, group_id: e.target.value})}>
+                      <select className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-900 border border-slate-100 outline-none focus:border-blue-300 focus:bg-white transition-all cursor-pointer" value={catForm.group_id} onChange={e => setCatForm({...catForm, group_id: e.target.value})}>
                           {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                       </select>
                   </div>
@@ -592,7 +592,7 @@ export default function BudgetPage() {
                   <div className="flex flex-col md:flex-row gap-3">
                       <div className="w-full md:w-1/2">
                           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Goal Type</label>
-                          <select className="w-full p-2.5 bg-white rounded-lg font-bold text-sm border border-slate-200 text-slate-700 outline-none focus:border-blue-300 cursor-pointer" value={catForm.target_type} onChange={e => setCatForm({...catForm, target_type: e.target.value})}>
+                          <select className="w-full p-2.5 bg-white rounded-lg font-bold text-sm text-slate-900 border border-slate-200 outline-none focus:border-blue-300 cursor-pointer" value={catForm.target_type} onChange={e => setCatForm({...catForm, target_type: e.target.value})}>
                               <option value="Set Aside">Set Aside (Build up over time)</option>
                               <option value="Fill Up To">Fill Up To (Cap at amount)</option>
                               <option value="Have Balance">Have a Balance (Target total)</option>
@@ -602,7 +602,7 @@ export default function BudgetPage() {
                           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Target Amount</label>
                           <div className="relative">
                               <span className="absolute left-3 top-2.5 font-bold text-slate-400">$</span>
-                              <input type="number" step="0.01" placeholder="0.00" className="w-full pl-7 p-2.5 bg-white rounded-lg font-black text-sm border border-slate-200 outline-none focus:border-blue-300 transition-all" value={catForm.target_amount} onChange={e => setCatForm({...catForm, target_amount: e.target.value})} />
+                              <input type="number" step="0.01" placeholder="0.00" className="w-full pl-7 p-2.5 bg-white rounded-lg font-black text-sm text-slate-900 border border-slate-200 outline-none focus:border-blue-300 transition-all" value={catForm.target_amount} onChange={e => setCatForm({...catForm, target_amount: e.target.value})} />
                           </div>
                       </div>
                   </div>
@@ -625,11 +625,11 @@ export default function BudgetPage() {
                   <div className="flex gap-3">
                       <div className="w-1/2">
                           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Due Date / Funding Date</label>
-                          <input type="date" className="w-full p-2.5 bg-white rounded-lg font-bold text-sm border border-slate-200 outline-none focus:border-blue-300 transition-all" value={catForm.due_date} onChange={e => setCatForm({...catForm, due_date: e.target.value})} />
+                          <input type="date" className="w-full p-2.5 bg-white rounded-lg font-bold text-sm text-slate-900 border border-slate-200 outline-none focus:border-blue-300 transition-all" value={catForm.due_date} onChange={e => setCatForm({...catForm, due_date: e.target.value})} />
                       </div>
                       <div className="w-1/2">
                           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Final Payment / End Date</label>
-                          <input type="date" className="w-full p-2.5 bg-white rounded-lg font-bold text-sm border border-slate-200 outline-none focus:border-blue-300 transition-all" value={catForm.end_date} onChange={e => setCatForm({...catForm, end_date: e.target.value})} />
+                          <input type="date" className="w-full p-2.5 bg-white rounded-lg font-bold text-sm text-slate-900 border border-slate-200 outline-none focus:border-blue-300 transition-all" value={catForm.end_date} onChange={e => setCatForm({...catForm, end_date: e.target.value})} />
                       </div>
                   </div>
                   
@@ -643,7 +643,7 @@ export default function BudgetPage() {
                   {catForm.is_repeating && (
                       <div className="animate-in slide-in-from-top-2 fade-in mt-2">
                           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Frequency</label>
-                          <select className="w-full p-2.5 bg-white rounded-lg font-bold text-sm border border-slate-200 text-slate-700 outline-none focus:border-blue-300 cursor-pointer" value={catForm.target_period} onChange={e => setCatForm({...catForm, target_period: e.target.value})}>
+                          <select className="w-full p-2.5 bg-white rounded-lg font-bold text-sm text-slate-900 border border-slate-200 outline-none focus:border-blue-300 cursor-pointer" value={catForm.target_period} onChange={e => setCatForm({...catForm, target_period: e.target.value})}>
                               <option value="Weekly">Weekly</option>
                               <option value="Bi-Weekly">Bi-Weekly</option>
                               <option value="Monthly">Monthly</option>
@@ -656,7 +656,7 @@ export default function BudgetPage() {
               {/* NOTES */}
               <div>
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2"><AlignLeft size={14}/> Category Notes</label>
-                  <textarea placeholder="Account numbers, vendor phone numbers, login details..." className="w-full p-3 bg-slate-50 rounded-xl font-bold text-sm border border-slate-100 outline-none focus:border-blue-300 focus:bg-white transition-all resize-none" rows={3} value={catForm.notes} onChange={e => setCatForm({...catForm, notes: e.target.value})} />
+                  <textarea placeholder="Account numbers, vendor phone numbers, login details..." className="w-full p-3 bg-slate-50 rounded-xl font-bold text-sm text-slate-900 placeholder-slate-400 border border-slate-100 outline-none focus:border-blue-300 focus:bg-white transition-all resize-none" rows={3} value={catForm.notes} onChange={e => setCatForm({...catForm, notes: e.target.value})} />
               </div>
             </div>
 
@@ -681,7 +681,7 @@ export default function BudgetPage() {
                     <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Amount to Move</label>
                     <div className="relative">
                         <span className="absolute left-4 top-3.5 font-bold text-slate-400">$</span>
-                        <input required autoFocus type="number" step="0.01" max={categories.find(c => c.id === transferForm.fromCatId)?.assigned_amount || 0} placeholder="0.00" className="w-full pl-8 p-3 bg-slate-50 rounded-xl font-black text-lg border border-slate-100 outline-none focus:border-emerald-300 focus:bg-white transition-all" value={transferForm.amount} onChange={e => setTransferForm({...transferForm, amount: e.target.value})} />
+                        <input required autoFocus type="number" step="0.01" max={categories.find(c => c.id === transferForm.fromCatId)?.assigned_amount || 0} placeholder="0.00" className="w-full pl-8 p-3 bg-slate-50 rounded-xl font-black text-lg text-slate-900 border border-slate-100 outline-none focus:border-emerald-300 focus:bg-white transition-all" value={transferForm.amount} onChange={e => setTransferForm({...transferForm, amount: e.target.value})} />
                     </div>
                 </div>
                 
@@ -692,7 +692,7 @@ export default function BudgetPage() {
 
                 <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-slate-400 uppercase tracking-wider w-12 shrink-0">To</span>
-                    <select className="flex-grow p-3 bg-white rounded-xl font-bold border border-slate-200 text-slate-700 outline-none focus:border-emerald-300 cursor-pointer" value={transferForm.toCatId} onChange={e => setTransferForm({...transferForm, toCatId: e.target.value})}>
+                    <select className="flex-grow p-3 bg-white rounded-xl font-bold text-slate-900 border border-slate-200 outline-none focus:border-emerald-300 cursor-pointer" value={transferForm.toCatId} onChange={e => setTransferForm({...transferForm, toCatId: e.target.value})}>
                         <option value="RTA">Ready to Assign (Unassign)</option>
                         <optgroup label="Categories">
                             {visibleCategories.filter(c => c.id !== transferForm.fromCatId).map(c => (

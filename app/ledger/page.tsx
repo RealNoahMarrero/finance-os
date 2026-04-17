@@ -292,7 +292,7 @@ export default function LedgerPage() {
                               </div>
                               
                               <div className="flex items-center justify-between md:justify-end w-full md:w-auto gap-4">
-                                  {txn.notes && <FileText size={16} className="text-slate-300" title={txn.notes}/>}
+                                  {txn.notes && <span title={txn.notes}><FileText size={16} className="text-slate-300"/></span>}
                                   <div className={`font-black text-xl md:text-2xl tracking-tight ${txn.type === 'Income' ? 'text-emerald-500' : txn.type === 'Expense' ? 'text-slate-900' : 'text-blue-500'}`}>
                                       {txn.type === 'Expense' ? '-' : txn.type === 'Income' ? '+' : ''}${Number(txn.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                   </div>
