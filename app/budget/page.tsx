@@ -7,7 +7,7 @@ import {
   ChevronDown, ChevronRight, Target, LayoutGrid, 
   Wallet, Calendar, FileText, Repeat, AlignLeft, PieChart,
   ArrowUpDown, AlertCircle, AlertTriangle, ArrowRightLeft,
-  FastForward, ListOrdered
+  FastForward, ListOrdered, Filter, Download
 } from 'lucide-react';
 import { format, parseISO, addWeeks, addMonths, addYears, isAfter } from 'date-fns';
 
@@ -17,9 +17,10 @@ export default function BudgetPage() {
   const [liquidCash, setLiquidCash] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  // UI States
+  // UI States (Persistent)
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
   const [categorySort, setCategorySort] = useState('default');
+  const [categoryFilter, setCategoryFilter] = useState('all');
 
   // Modals & Forms
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
@@ -47,8 +48,13 @@ export default function BudgetPage() {
   });
 
   useEffect(() => { 
+      // Load persistent filters and sorts
       const savedSort = localStorage.getItem('finance_os_sort');
       if (savedSort) setCategorySort(savedSort);
+
+      const savedFilter = localStorage.getItem('finance_os_filter');
+      if (savedFilter) setCategoryFilter(savedFilter);
+
       fetchData(); 
   }, []);
 
@@ -56,6 +62,19 @@ export default function BudgetPage() {
       const val = e.target.value;
       setCategorySort(val);
       localStorage.setItem('finance_os_sort', val);
+  };
+
+  const handleFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const val = e.target.value;
+      setCategoryFilter(val);
+      localStorage.setItem('finance_os_filter', val);
+  };
+
+  const toggleGroup = (id: number) => {
+      const next = new Set(expandedGroups);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      setExpandedGroups(next);
+      localStorage.setItem('finance_os_expanded', JSON.stringify(Array.from(next)));
   };
 
   async function fetchData() {
@@ -72,11 +91,57 @@ export default function BudgetPage() {
     
     if (g) {
         setGroups(g);
-        setExpandedGroups(new Set(g.map(group => group.id)));
+        // Load persistent expanded groups, or default to all open
+        const savedExpanded = localStorage.getItem('finance_os_expanded');
+        if (savedExpanded) {
+            setExpandedGroups(new Set(JSON.parse(savedExpanded)));
+        } else {
+            setExpandedGroups(new Set(g.map(group => group.id)));
+        }
     }
     if (c) setCategories(c);
     
     setLoading(false);
+  }
+
+  function exportBudget() {
+      const visibleCats = categories.filter(c => !c.is_hidden);
+      const totalAssigned = visibleCats.reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0);
+      const totalGoals = visibleCats.reduce((sum, c) => sum + Number(c.target_amount || 0), 0);
+      
+      let text = `FINANCE OS - BUDGET MASTER EXPORT\nDate: ${format(new Date(), 'MMM d, yyyy')}\n\n`;
+      text += `Liquid Cash: $${liquidCash.toLocaleString('en-US', { minimumFractionDigits: 2 })}\n`;
+      text += `Ready to Assign: $${(liquidCash - totalAssigned).toLocaleString('en-US', { minimumFractionDigits: 2 })}\n`;
+      text += `Total Goals Target: $${totalGoals.toLocaleString('en-US', { minimumFractionDigits: 2 })}\n\n`;
+
+      groups.forEach(g => {
+          const groupCats = visibleCats.filter(c => c.group_id === g.id);
+          if (groupCats.length === 0) return;
+          
+          text += `--- ${g.name.toUpperCase()} ---\n`;
+          groupCats.forEach(c => {
+              const assigned = Number(c.assigned_amount || 0);
+              const target = Number(c.target_amount || 0);
+              
+              text += `${c.emoji ? c.emoji + ' ' : ''}${c.name}\n`;
+              text += `  Assigned: $${assigned.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+              
+              if (target > 0) text += ` | Goal: $${target.toLocaleString('en-US', { minimumFractionDigits: 2 })} (${c.target_type}, ${c.is_repeating ? c.target_period : 'One-Time'})`;
+              if (c.due_date) text += ` | Due: ${c.due_date}`;
+              if (c.is_debt && c.balance > 0) text += ` | Debt Bal: $${Number(c.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+              if (c.is_asap) text += ` | [ASAP]`;
+              if (c.notes) text += ` | Notes: ${c.notes}`;
+              
+              text += `\n\n`;
+          });
+      });
+
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `FinanceOS_Budget_${format(new Date(), 'yyyy-MM-dd')}.txt`;
+      a.click();
   }
 
   // --- FUNDING & INLINE MATH LOGIC ---
@@ -260,12 +325,6 @@ export default function BudgetPage() {
       setIsCategoryModalOpen(false);
   }
 
-  const toggleGroup = (id: number) => {
-      const next = new Set(expandedGroups);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      setExpandedGroups(next);
-  };
-
   // Math (Only count visible categories for totals)
   const visibleCategories = categories.filter(c => !c.is_hidden);
   const totalAssigned = visibleCategories.reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0);
@@ -276,18 +335,7 @@ export default function BudgetPage() {
   return (
     <main className="p-4 md:p-8 min-h-screen bg-slate-50 pb-32">
       
-      {/* NAVIGATION */}
-      <div className="flex flex-wrap justify-center md:justify-start gap-2 mb-8 bg-white p-2 rounded-2xl shadow-sm border border-slate-100 w-fit mx-auto md:mx-0">
-        <Link href="/" className="px-5 py-2.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-xl font-bold text-sm flex items-center gap-2 transition-colors">
-          <PieChart size={16}/> Dashboard
-        </Link>
-        <Link href="/budget" className="px-5 py-2.5 bg-slate-900 text-white rounded-xl font-bold text-sm flex items-center gap-2 shadow-md">
-          <LayoutGrid size={16}/> Budget Planner
-        </Link>
-        <Link href="/ledger" className="px-5 py-2.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-xl font-bold text-sm flex items-center gap-2 transition-colors">
-          <ListOrdered size={16}/> Ledger
-        </Link>
-      </div>
+
 
       {/* READY TO ASSIGN BANNER */}
       <div className={`text-white rounded-3xl p-6 md:p-8 shadow-lg mb-8 relative overflow-hidden flex flex-col md:flex-row justify-between items-center md:items-start gap-4 transition-colors ${readyToAssign < 0 ? 'bg-red-500' : 'bg-emerald-500'}`}>
@@ -301,30 +349,47 @@ export default function BudgetPage() {
            </h1>
            {readyToAssign < 0 && <p className="font-bold text-white mt-2 bg-red-600 inline-block px-3 py-1 rounded-lg text-sm">You assigned more money than you have in liquid cash.</p>}
         </div>
-        <div className="relative z-10 bg-white/20 backdrop-blur-md border border-white/20 rounded-xl p-4 w-full md:w-auto text-center">
-            <p className="text-white/80 text-xs font-bold uppercase mb-1">Total Target Goals</p>
-            <p className="text-xl font-bold">
-                ${visibleCategories.reduce((sum, c) => sum + Number(c.target_amount), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-            </p>
+        <div className="relative z-10 flex flex-col items-center md:items-end gap-3">
+            <div className="bg-white/20 backdrop-blur-md border border-white/20 rounded-xl p-4 w-full md:w-auto text-center">
+                <p className="text-white/80 text-xs font-bold uppercase mb-1">Total Target Goals</p>
+                <p className="text-xl font-bold">
+                    ${visibleCategories.reduce((sum, c) => sum + Number(c.target_amount), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                </p>
+            </div>
         </div>
       </div>
 
       {/* HEADER & CONTROLS */}
       <div className="flex flex-col xl:flex-row justify-between items-center mb-6 gap-4">
-        <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2 w-full xl:w-auto">
-            <LayoutGrid size={24} className="text-blue-500"/> Budget Planner
-        </h2>
+        <div className="flex items-center gap-4 w-full xl:w-auto">
+            <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+                <LayoutGrid size={24} className="text-blue-500"/> Budget Planner
+            </h2>
+            <button onClick={exportBudget} className="text-slate-400 hover:text-slate-900 transition-colors" title="Export Budget to .txt">
+                <Download size={18}/>
+            </button>
+        </div>
         
         <div className="flex flex-wrap gap-2 w-full xl:w-auto">
-            <div className="flex items-center bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-sm flex-grow md:flex-grow-0">
-                <ArrowUpDown size={16} className="text-slate-400 mr-2"/>
-                <select value={categorySort} onChange={handleSortChange} className="bg-transparent font-bold text-sm text-slate-900 outline-none cursor-pointer w-full">
-                    <option value="default">Custom Order</option>
-                    <option value="name">Sort by Name (A-Z)</option>
-                    <option value="target">Sort by Goal (High-Low)</option>
-                    <option value="assigned">Sort by Assigned (High-Low)</option>
-                    <option value="date">Sort by Due Date (Earliest First)</option>
-                </select>
+            <div className="flex items-center bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-sm flex-grow md:flex-grow-0 gap-2 divide-x divide-slate-100">
+                <div className="flex items-center gap-2 pr-2">
+                    <ArrowUpDown size={14} className="text-slate-400 shrink-0"/>
+                    <select value={categorySort} onChange={handleSortChange} className="bg-transparent font-bold text-sm text-slate-900 outline-none cursor-pointer w-full">
+                        <option value="default">Sort: Custom</option>
+                        <option value="name">Sort: A-Z</option>
+                        <option value="target">Sort: Goal</option>
+                        <option value="assigned">Sort: Assigned</option>
+                        <option value="date">Sort: Due Date</option>
+                    </select>
+                </div>
+                <div className="flex items-center gap-2 pl-3">
+                    <Filter size={14} className="text-slate-400 shrink-0"/>
+                    <select value={categoryFilter} onChange={handleFilterChange} className="bg-transparent font-bold text-sm text-slate-900 outline-none cursor-pointer w-full">
+                        <option value="all">View: All</option>
+                        <option value="underfunded">View: Underfunded</option>
+                        <option value="available">View: Available</option>
+                    </select>
+                </div>
             </div>
             <button onClick={() => openGroupModal()} className="flex-1 md:flex-none bg-white text-slate-600 border border-slate-200 px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-slate-50 shadow-sm transition-colors">
                 <FolderPlus size={18}/> New Group
@@ -338,8 +403,25 @@ export default function BudgetPage() {
       {/* BUDGET GROUPS GRID */}
       <div className="space-y-6">
         {groups.map(group => {
-            let groupCats = visibleCategories.filter(c => c.group_id === group.id);
+            // Apply View Filter first
+            let groupCats = visibleCategories.filter(c => {
+                if (c.group_id !== group.id) return false;
+                
+                const assigned = Number(c.assigned_amount || 0);
+                const target = Number(c.target_amount || 0);
+                
+                if (categoryFilter === 'underfunded') {
+                    return target > 0 && assigned < target;
+                }
+                if (categoryFilter === 'available') {
+                    return assigned > 0;
+                }
+                return true;
+            });
             
+            // If filtering is active and group is empty, hide the entire group UI
+            if (categoryFilter !== 'all' && groupCats.length === 0) return null;
+
             // Apply Sorting
             if (categorySort === 'name') {
                 groupCats.sort((a, b) => a.name.localeCompare(b.name));
@@ -491,7 +573,7 @@ export default function BudgetPage() {
                                     );
                                 })
                             ) : (
-                                <div className="p-6 text-center text-sm text-slate-400 font-medium">No categories in this group yet.</div>
+                                <div className="p-6 text-center text-sm text-slate-400 font-medium">No items match the current filter.</div>
                             )}
                         </div>
                     )}

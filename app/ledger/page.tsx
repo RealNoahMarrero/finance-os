@@ -1,7 +1,8 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { supabase } from '../utils/supabase';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { 
   ArrowUpRight, ArrowDownRight, ArrowRightLeft, Activity, X, 
   Search, Plus, PieChart, LayoutGrid, ListOrdered, Calendar, Tag, 
@@ -9,7 +10,9 @@ import {
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
-export default function LedgerPage() {
+function LedgerEngine() {
+  const searchParams = useSearchParams();
+  
   const [transactions, setTransactions] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -40,10 +43,16 @@ export default function LedgerPage() {
   });
 
   useEffect(() => {
-    fetchData();
+    // Capture URL params safely via Next.js hook on mount
+    const urlAccountId = searchParams.get('account');
+    const isNew = searchParams.get('new') === 'true';
+    
+    fetchData(urlAccountId);
+    
+    if (isNew) setIsModalOpen(true);
   }, []);
 
-  async function fetchData() {
+  async function fetchData(urlAccountId: string | null = null) {
     setLoading(true);
     const { data: accs } = await supabase.from('accounts').select('*').order('name');
     const { data: cats } = await supabase.from('categories').select('id, name, group_id, emoji, assigned_amount').order('name');
@@ -51,7 +60,11 @@ export default function LedgerPage() {
     if (accs) setAccounts(accs);
     if (cats) setCategories(cats);
 
-    if (accs && accs.length > 0 && !txnForm.account_id) {
+    // Apply URL Filters or set Defaults
+    if (urlAccountId) {
+        setFilterAccount(urlAccountId);
+        setTxnForm(prev => ({ ...prev, account_id: urlAccountId }));
+    } else if (accs && accs.length > 0 && !txnForm.account_id) {
         setTxnForm(prev => ({ ...prev, account_id: accs[0].id.toString() }));
     }
 
@@ -70,7 +83,6 @@ export default function LedgerPage() {
   }
 
   // --- THE MASTER BRAIN: BALANCE ADJUSTMENT ---
-  // mode: 'apply' (adds txn impact) or 'reverse' (undoes txn impact)
   const handleBalanceAdjustment = async (txn: any, mode: 'apply' | 'reverse') => {
     const amount = Number(txn.amount);
     const sourceAcc = accounts.find(a => a.id === txn.account_id);
@@ -82,23 +94,19 @@ export default function LedgerPage() {
         return isStepInflow ? amount : -amount;
     };
 
-    // 1. Source Account Math
     if (sourceAcc) {
         const isCC = sourceAcc.type === 'Credit Card';
         const isInflow = txn.type === 'Income';
-        // For CC: Inflow decreases balance. For Cash: Inflow increases balance.
         const adjustment = isCC ? (isInflow ? -getAdj(true) : -getAdj(false)) : (isInflow ? getAdj(true) : getAdj(false));
         await supabase.from('accounts').update({ balance: Number(sourceAcc.balance) + adjustment }).eq('id', sourceAcc.id);
     }
 
-    // 2. Destination Account Math (Transfers)
     if (destAcc) {
         const isCC = destAcc.type === 'Credit Card';
         const adjustment = isCC ? -getAdj(true) : getAdj(true);
         await supabase.from('accounts').update({ balance: Number(destAcc.balance) + adjustment }).eq('id', destAcc.id);
     }
 
-    // 3. Category Envelope Math
     if (cat) {
         const adjustment = txn.type === 'Income' ? getAdj(true) : getAdj(false);
         await supabase.from('categories').update({ assigned_amount: Number(cat.assigned_amount || 0) + adjustment }).eq('id', cat.id);
@@ -123,7 +131,6 @@ export default function LedgerPage() {
       };
 
       if (editingTxn) {
-          // REVERSE OLD MATH FIRST
           await handleBalanceAdjustment(editingTxn, 'reverse');
           const { data: updated, error } = await supabase.from('transactions').update(payload).eq('id', editingTxn.id).select('*, categories(name, emoji), accounts!account_id(name, type)').single();
           if (updated) {
@@ -139,7 +146,7 @@ export default function LedgerPage() {
       }
 
       closeModal();
-      await fetchData(); // Refresh local state to ensure balances match DB
+      await fetchData(); 
       setIsSubmitting(false);
   }
 
@@ -170,6 +177,10 @@ export default function LedgerPage() {
   const closeModal = () => {
       setIsModalOpen(false);
       setEditingTxn(null);
+      
+      // Clean up URL if it was a "Quick Entry" to prevent loop
+      window.history.replaceState({}, document.title, window.location.pathname);
+      
       setTxnForm({ ...txnForm, amount: '', payee: '', notes: '' });
   };
 
@@ -203,18 +214,7 @@ export default function LedgerPage() {
   return (
     <main className="p-4 md:p-8 min-h-screen bg-slate-50 pb-32">
       
-      {/* NAVIGATION */}
-      <div className="flex flex-wrap justify-center md:justify-start gap-2 mb-8 bg-white p-2 rounded-2xl shadow-sm border border-slate-100 w-fit mx-auto md:mx-0">
-        <Link href="/" className="px-5 py-2.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-xl font-bold text-sm flex items-center gap-2 transition-colors">
-          <PieChart size={16}/> Dashboard
-        </Link>
-        <Link href="/budget" className="px-5 py-2.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-xl font-bold text-sm flex items-center gap-2 transition-colors">
-          <LayoutGrid size={16}/> Budget Planner
-        </Link>
-        <Link href="/ledger" className="px-5 py-2.5 bg-slate-900 text-white rounded-xl font-bold text-sm flex items-center gap-2 shadow-md">
-          <ListOrdered size={16}/> Ledger
-        </Link>
-      </div>
+
 
       <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
         <div>
@@ -429,5 +429,13 @@ export default function LedgerPage() {
       )}
 
     </main>
+  );
+}
+
+export default function LedgerWrapper() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-slate-400 font-bold animate-pulse">Loading Ledger...</div>}>
+      <LedgerEngine />
+    </Suspense>
   );
 }
