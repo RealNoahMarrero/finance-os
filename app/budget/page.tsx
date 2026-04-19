@@ -341,7 +341,7 @@ export default function BudgetPage() {
   // Math (Only count visible categories for totals)
   const visibleCategories = categories.filter(c => !c.is_hidden);
   const totalAssigned = visibleCategories.reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0);
-  const readyToAssign = liquidCash - totalAssigned;
+  const readyToAssign = Math.round((liquidCash - totalAssigned) * 100) / 100;
   const hasNegativeCategories = visibleCategories.some(c => Number(c.assigned_amount || 0) < 0);
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-slate-400 font-bold animate-pulse">Loading Budget Engine...</div>;

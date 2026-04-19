@@ -229,7 +229,7 @@ export default function Dashboard() {
 
   const netWorth = accounts.reduce((sum, acc) => acc.type === 'Credit Card' ? sum - Math.abs(acc.balance) : sum + acc.balance, 0);
   const liquidCash = accounts.filter(a => ['Checking', 'Savings', 'Cash'].includes(a.type)).reduce((sum, acc) => sum + acc.balance, 0);
-  const readyToAssign = liquidCash - totalAssigned;
+  const readyToAssign = Math.round((liquidCash - totalAssigned) * 100) / 100;
 
   const getAccountIcon = (type: string) => {
     switch(type) {
