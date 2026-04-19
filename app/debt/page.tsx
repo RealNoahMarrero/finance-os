@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '../utils/supabase';
+import Link from 'next/link';
 import { 
   TrendingDown, Snowflake, Flame, Trophy, 
   Calendar, Activity, AlertCircle 
