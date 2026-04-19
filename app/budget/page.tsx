@@ -341,7 +341,11 @@ export default function BudgetPage() {
   // Math (Only count visible categories for totals)
   const visibleCategories = categories.filter(c => !c.is_hidden);
   const totalAssigned = visibleCategories.reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0);
-  const readyToAssign = Math.round((liquidCash - totalAssigned) * 100) / 100;
+  
+  let calculatedRTA = liquidCash - totalAssigned;
+  if (Math.abs(calculatedRTA) < 0.01) calculatedRTA = 0; 
+  const readyToAssign = calculatedRTA;
+
   const hasNegativeCategories = visibleCategories.some(c => Number(c.assigned_amount || 0) < 0);
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-slate-400 font-bold animate-pulse">Loading Budget Engine...</div>;
@@ -490,7 +494,10 @@ export default function BudgetPage() {
                                     const remainingToFund = target > 0 ? Math.max(0, target - assigned) : 0;
                                     const available = assigned; 
                                     const isFunding = fundingCatId === cat.id;
+                                    
+                                    // Color logic variables
                                     const isNegative = available < 0;
+                                    const isFullyFunded = target > 0 && available >= target;
 
                                     // Time & Math Logic
                                     const today = new Date();
@@ -587,14 +594,17 @@ export default function BudgetPage() {
                                                     )}
                                                 </div>
                                                 <div>
-                                                    <p className={`text-[10px] font-bold uppercase mb-0.5 text-right ${isNegative ? 'text-red-400' : 'text-slate-400'}`}>Available</p>
+                                                    <p className={`text-[10px] font-bold uppercase mb-0.5 text-right transition-colors ${isNegative ? 'text-red-400' : isFullyFunded ? 'text-amber-500' : 'text-slate-400'}`}>Available</p>
                                                     <div 
                                                         onClick={(e) => { e.stopPropagation(); openTransferModal(cat); }}
-                                                        className={isNegative 
-                                                            ? "bg-red-500 text-white font-black px-3 py-1 rounded-lg text-sm border border-red-600 min-w-[80px] text-right cursor-pointer hover:bg-red-600 hover:border-red-700 transition-colors shadow-sm"
-                                                            : "bg-emerald-50 text-emerald-600 font-black px-3 py-1 rounded-lg text-sm border border-emerald-100 min-w-[80px] text-right cursor-pointer hover:bg-emerald-100 hover:border-emerald-300 transition-colors"
-                                                        }
-                                                        title="Click to transfer money"
+                                                        className={`font-black px-3 py-1 rounded-lg text-sm border min-w-[80px] text-right cursor-pointer transition-all ${
+                                                            isNegative 
+                                                            ? 'bg-red-500 text-white border-red-600 hover:bg-red-600 hover:border-red-700 shadow-sm'
+                                                            : isFullyFunded
+                                                            ? 'bg-gradient-to-br from-yellow-400 to-amber-500 text-white border-amber-500 hover:from-yellow-500 hover:to-amber-600 shadow-md shadow-amber-500/40'
+                                                            : 'bg-emerald-50 text-emerald-600 border-emerald-100 hover:bg-emerald-100 hover:border-emerald-300'
+                                                        }`}
+                                                        title={isFullyFunded ? "Goal fully funded! Click to transfer money" : "Click to transfer money"}
                                                     >
                                                         {isNegative ? `-$${Math.abs(available).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : `$${available.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
                                                     </div>
