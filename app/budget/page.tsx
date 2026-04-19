@@ -44,7 +44,7 @@ export default function BudgetPage() {
 
   // Transfer Mode States
   const [transferForm, setTransferForm] = useState({
-      fromCatId: 0, toCatId: 'RTA', amount: ''
+      fromCatId: '', toCatId: 'RTA', amount: ''
   });
 
   useEffect(() => { 
@@ -183,38 +183,51 @@ export default function BudgetPage() {
 
   // --- TRANSFER LOGIC ---
   function openTransferModal(cat: any) {
-      setTransferForm({ fromCatId: cat.id, toCatId: 'RTA', amount: '' });
+      setTransferForm({ fromCatId: cat.id.toString(), toCatId: 'RTA', amount: '' });
       setIsTransferModalOpen(true);
   }
+
+  const swapTransferDirection = () => {
+      setTransferForm(prev => ({
+          ...prev,
+          fromCatId: prev.toCatId,
+          toCatId: prev.fromCatId
+      }));
+  };
 
   async function executeTransfer(e: React.FormEvent) {
       e.preventDefault();
       const amt = parseFloat(transferForm.amount) || 0;
       if (amt <= 0) return;
 
-      const sourceCat = categories.find(c => c.id === transferForm.fromCatId);
-      if (!sourceCat) return;
+      const fromId = transferForm.fromCatId;
+      const toId = transferForm.toCatId;
+      
+      if (fromId === toId) return; // Prevent transferring to itself
 
-      const newSourceAmount = (Number(sourceCat.assigned_amount) || 0) - amt;
+      let updatedCategories = [...categories];
 
-      await supabase.from('categories').update({ assigned_amount: newSourceAmount }).eq('id', sourceCat.id);
-
-      if (transferForm.toCatId === 'RTA') {
-          setCategories(categories.map(c => c.id === sourceCat.id ? { ...c, assigned_amount: newSourceAmount } : c));
-      } else {
-          const destId = parseInt(transferForm.toCatId);
-          const destCat = categories.find(c => c.id === destId);
-          if (destCat) {
-              const newDestAmount = (Number(destCat.assigned_amount) || 0) + amt;
-              await supabase.from('categories').update({ assigned_amount: newDestAmount }).eq('id', destId);
-              
-              setCategories(categories.map(c => {
-                  if (c.id === sourceCat.id) return { ...c, assigned_amount: newSourceAmount };
-                  if (c.id === destCat.id) return { ...c, assigned_amount: newDestAmount };
-                  return c;
-              }));
+      // Handle DEDUCTION from Source
+      if (fromId !== 'RTA') {
+          const sourceCat = updatedCategories.find(c => c.id.toString() === fromId);
+          if (sourceCat) {
+              const newAmt = (Number(sourceCat.assigned_amount) || 0) - amt;
+              await supabase.from('categories').update({ assigned_amount: newAmt }).eq('id', sourceCat.id);
+              updatedCategories = updatedCategories.map(c => c.id.toString() === fromId ? { ...c, assigned_amount: newAmt } : c);
           }
       }
+
+      // Handle ADDITION to Destination
+      if (toId !== 'RTA') {
+          const destCat = updatedCategories.find(c => c.id.toString() === toId);
+          if (destCat) {
+              const newAmt = (Number(destCat.assigned_amount) || 0) + amt;
+              await supabase.from('categories').update({ assigned_amount: newAmt }).eq('id', destCat.id);
+              updatedCategories = updatedCategories.map(c => c.id.toString() === toId ? { ...c, assigned_amount: newAmt } : c);
+          }
+      }
+
+      setCategories(updatedCategories);
       setIsTransferModalOpen(false);
   }
 
@@ -329,13 +342,12 @@ export default function BudgetPage() {
   const visibleCategories = categories.filter(c => !c.is_hidden);
   const totalAssigned = visibleCategories.reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0);
   const readyToAssign = liquidCash - totalAssigned;
+  const hasNegativeCategories = visibleCategories.some(c => Number(c.assigned_amount || 0) < 0);
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-slate-400 font-bold animate-pulse">Loading Budget Engine...</div>;
 
   return (
-    <main className="p-4 md:p-8 min-h-screen bg-slate-50 pb-32">
-      
-
+    <main className="pb-32">
 
       {/* READY TO ASSIGN BANNER */}
       <div className={`text-white rounded-3xl p-6 md:p-8 shadow-lg mb-8 relative overflow-hidden flex flex-col md:flex-row justify-between items-center md:items-start gap-4 transition-colors ${readyToAssign < 0 ? 'bg-red-500' : 'bg-emerald-500'}`}>
@@ -358,6 +370,17 @@ export default function BudgetPage() {
             </div>
         </div>
       </div>
+
+      {/* OVERSPENDING WARNING BANNER */}
+      {hasNegativeCategories && (
+          <div className="bg-red-100 border border-red-200 text-red-700 p-4 rounded-2xl flex items-start md:items-center gap-3 mb-8 shadow-sm animate-in fade-in slide-in-from-top-2">
+            <AlertCircle size={20} className="shrink-0 mt-0.5 md:mt-0"/>
+            <div>
+                <h4 className="font-bold text-sm">Action Required: Overspent Categories</h4>
+                <p className="text-xs mt-0.5 opacity-90">You have categories with a negative available balance. Move money from other envelopes to cover the deficit.</p>
+            </div>
+          </div>
+      )}
 
       {/* HEADER & CONTROLS */}
       <div className="flex flex-col xl:flex-row justify-between items-center mb-6 gap-4">
@@ -388,6 +411,7 @@ export default function BudgetPage() {
                         <option value="all">View: All</option>
                         <option value="underfunded">View: Underfunded</option>
                         <option value="available">View: Available</option>
+                        <option value="overspent">View: Overspent</option>
                     </select>
                 </div>
             </div>
@@ -415,6 +439,9 @@ export default function BudgetPage() {
                 }
                 if (categoryFilter === 'available') {
                     return assigned > 0;
+                }
+                if (categoryFilter === 'overspent') {
+                    return assigned < 0;
                 }
                 return true;
             });
@@ -463,6 +490,7 @@ export default function BudgetPage() {
                                     const remainingToFund = target > 0 ? Math.max(0, target - assigned) : 0;
                                     const available = assigned; 
                                     const isFunding = fundingCatId === cat.id;
+                                    const isNegative = available < 0;
 
                                     // Time & Math Logic
                                     const today = new Date();
@@ -559,13 +587,16 @@ export default function BudgetPage() {
                                                     )}
                                                 </div>
                                                 <div>
-                                                    <p className="text-[10px] font-bold text-slate-400 uppercase mb-0.5 text-right">Available</p>
+                                                    <p className={`text-[10px] font-bold uppercase mb-0.5 text-right ${isNegative ? 'text-red-400' : 'text-slate-400'}`}>Available</p>
                                                     <div 
                                                         onClick={(e) => { e.stopPropagation(); openTransferModal(cat); }}
-                                                        className="bg-emerald-50 text-emerald-600 font-black px-3 py-1 rounded-lg text-sm border border-emerald-100 min-w-[80px] text-right cursor-pointer hover:bg-emerald-100 hover:border-emerald-300 transition-colors"
+                                                        className={isNegative 
+                                                            ? "bg-red-500 text-white font-black px-3 py-1 rounded-lg text-sm border border-red-600 min-w-[80px] text-right cursor-pointer hover:bg-red-600 hover:border-red-700 transition-colors shadow-sm"
+                                                            : "bg-emerald-50 text-emerald-600 font-black px-3 py-1 rounded-lg text-sm border border-emerald-100 min-w-[80px] text-right cursor-pointer hover:bg-emerald-100 hover:border-emerald-300 transition-colors"
+                                                        }
                                                         title="Click to transfer money"
                                                     >
-                                                        ${available.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                                        {isNegative ? `-$${Math.abs(available).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : `$${available.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
                                                     </div>
                                                 </div>
                                             </div>
@@ -763,25 +794,40 @@ export default function BudgetPage() {
                     <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Amount to Move</label>
                     <div className="relative">
                         <span className="absolute left-4 top-3.5 font-bold text-slate-400">$</span>
-                        <input required autoFocus type="number" step="0.01" max={categories.find(c => c.id === transferForm.fromCatId)?.assigned_amount || 0} placeholder="0.00" className="w-full pl-8 p-3 bg-slate-50 rounded-xl font-black text-lg text-slate-900 border border-slate-100 outline-none focus:border-emerald-300 focus:bg-white transition-all" value={transferForm.amount} onChange={e => setTransferForm({...transferForm, amount: e.target.value})} />
+                        <input required autoFocus type="number" step="0.01" max={transferForm.fromCatId !== 'RTA' ? (categories.find(c => c.id.toString() === transferForm.fromCatId)?.assigned_amount || 0) : undefined} placeholder="0.00" className="w-full pl-8 p-3 bg-slate-50 rounded-xl font-black text-lg text-slate-900 border border-slate-100 outline-none focus:border-emerald-300 focus:bg-white transition-all" value={transferForm.amount} onChange={e => setTransferForm({...transferForm, amount: e.target.value})} />
                     </div>
                 </div>
                 
-                <div className="flex items-center gap-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider w-12 shrink-0">From</span>
-                    <span className="font-bold text-slate-700 truncate">{categories.find(c => c.id === transferForm.fromCatId)?.name}</span>
-                </div>
+                <div className="flex flex-col gap-2 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider w-12 shrink-0">From</span>
+                        <select className="flex-1 min-w-0 p-3 bg-white rounded-xl font-bold text-slate-900 border border-slate-200 outline-none focus:border-emerald-300 cursor-pointer truncate" value={transferForm.fromCatId} onChange={e => setTransferForm({...transferForm, fromCatId: e.target.value})}>
+                            <option value="RTA">Ready to Assign</option>
+                            <optgroup label="Categories">
+                                {visibleCategories.map(c => (
+                                    <option key={`from-${c.id}`} value={c.id.toString()}>{c.name}</option>
+                                ))}
+                            </optgroup>
+                        </select>
+                    </div>
+                    
+                    <div className="flex justify-center -my-2 relative z-10">
+                        <button type="button" onClick={swapTransferDirection} className="bg-white p-2 rounded-full border border-slate-200 shadow-sm text-slate-400 hover:text-emerald-500 hover:border-emerald-200 transition-all hover:bg-emerald-50" title="Swap transfer direction">
+                            <ArrowUpDown size={16} />
+                        </button>
+                    </div>
 
-                <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider w-12 shrink-0">To</span>
-                    <select className="flex-grow p-3 bg-white rounded-xl font-bold text-slate-900 border border-slate-200 outline-none focus:border-emerald-300 cursor-pointer" value={transferForm.toCatId} onChange={e => setTransferForm({...transferForm, toCatId: e.target.value})}>
-                        <option value="RTA">Ready to Assign (Unassign)</option>
-                        <optgroup label="Categories">
-                            {visibleCategories.filter(c => c.id !== transferForm.fromCatId).map(c => (
-                                <option key={c.id} value={c.id}>{c.name}</option>
-                            ))}
-                        </optgroup>
-                    </select>
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider w-12 shrink-0">To</span>
+                        <select className="flex-1 min-w-0 p-3 bg-white rounded-xl font-bold text-slate-900 border border-slate-200 outline-none focus:border-emerald-300 cursor-pointer truncate" value={transferForm.toCatId} onChange={e => setTransferForm({...transferForm, toCatId: e.target.value})}>
+                            <option value="RTA">Ready to Assign</option>
+                            <optgroup label="Categories">
+                                {visibleCategories.map(c => (
+                                    <option key={`to-${c.id}`} value={c.id.toString()}>{c.name}</option>
+                                ))}
+                            </optgroup>
+                        </select>
+                    </div>
                 </div>
             </div>
 

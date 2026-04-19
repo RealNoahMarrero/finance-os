@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { PieChart, LayoutGrid, ListOrdered, Calendar as CalendarIcon } from 'lucide-react';
+import { PieChart, LayoutGrid, ListOrdered, Calendar as CalendarIcon, TrendingDown } from 'lucide-react';
 
 export default function Navigation() {
   const pathname = usePathname();
@@ -11,6 +11,7 @@ export default function Navigation() {
     { name: 'Budget', path: '/budget', icon: LayoutGrid },
     { name: 'Ledger', path: '/ledger', icon: ListOrdered },
     { name: 'Calendar', path: '/calendar', icon: CalendarIcon },
+    { name: 'Debt', path: '/debt', icon: TrendingDown },
   ];
 
   return (

@@ -7,14 +7,16 @@ import {
   Wallet, Landmark, CreditCard, Banknote, Plus, 
   ArrowUpRight, ArrowDownRight, ArrowRightLeft, Activity, X, 
   AlertCircle, Trash2, LayoutGrid, PieChart, ListOrdered, 
-  Calendar, FileText, Smile, Frown, Meh, Download, Zap, Edit2
+  Calendar, FileText, Download, Zap, Edit2, Tag, AlignLeft, Save, Loader2
 } from 'lucide-react';
 import { format } from 'date-fns';
 
 export default function Dashboard() {
   const router = useRouter();
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<any[]>([]);
+  const [payeeSuggestions, setPayeeSuggestions] = useState<string[]>([]);
   const [monthlyStats, setMonthlyStats] = useState({ income: 0, expense: 0 });
   const [totalAssigned, setTotalAssigned] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -23,11 +25,19 @@ export default function Dashboard() {
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
   const [editingAccountId, setEditingAccountId] = useState<number | null>(null);
   
+  const [isQuickEntryOpen, setIsQuickEntryOpen] = useState(false);
+  const [isSubmittingTxn, setIsSubmittingTxn] = useState(false);
+
   // Forms
   const [accountForm, setAccountForm] = useState({
     name: '', type: 'Checking', balance: '', credit_limit: ''
   });
-  const [adjustmentType, setAdjustmentType] = useState('transaction'); // 'transaction' or 'silent'
+  const [adjustmentType, setAdjustmentType] = useState('transaction');
+
+  const [quickForm, setQuickForm] = useState({
+    type: 'Expense', date: format(new Date(), 'yyyy-MM-dd'), amount: '', 
+    payee: '', category_id: '', account_id: '', to_account_id: '', notes: ''
+  });
 
   useEffect(() => {
     fetchDashboardData();
@@ -39,8 +49,11 @@ export default function Dashboard() {
     const { data: accs } = await supabase.from('accounts').select('*').order('type').order('name');
     if (accs) setAccounts(accs);
 
-    const { data: cats } = await supabase.from('categories').select('assigned_amount, is_hidden');
-    if (cats) setTotalAssigned(cats.filter(c => !c.is_hidden).reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0));
+    const { data: cats } = await supabase.from('categories').select('id, name, emoji, assigned_amount, is_hidden').order('name');
+    if (cats) {
+        setCategories(cats);
+        setTotalAssigned(cats.filter(c => !c.is_hidden).reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0));
+    }
 
     const { data: txns } = await supabase
       .from('transactions')
@@ -48,7 +61,12 @@ export default function Dashboard() {
       .order('date', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(10);
-    if (txns) setRecentTransactions(txns);
+      
+    if (txns) {
+        setRecentTransactions(txns);
+        const unique = Array.from(new Set(txns.map(t => t.payee).filter(Boolean)));
+        setPayeeSuggestions(unique as string[]);
+    }
 
     // Calculate Monthly Cashflow
     const startOfMonth = format(new Date(), 'yyyy-MM-01');
@@ -66,6 +84,7 @@ export default function Dashboard() {
     setLoading(false);
   }
 
+  // --- ACCOUNT CRUD LOGIC ---
   function openAccountModal(acc: any = null) {
     if (acc) {
       setEditingAccountId(acc.id);
@@ -93,15 +112,13 @@ export default function Dashboard() {
       credit_limit: parseFloat(accountForm.credit_limit) || 0
     };
 
-    // MANUAL ADJUSTMENT LOGIC
     if (editingAccountId && adjustmentType === 'transaction' && oldBalance !== newBalance) {
         const diff = newBalance - oldBalance;
         const isCC = accountForm.type === 'Credit Card';
         
-        // Determine if it's an expense or income based on account type
         let txnType = 'Expense';
-        if (isCC) txnType = diff > 0 ? 'Expense' : 'Income'; // CC goes up = Expense
-        else txnType = diff > 0 ? 'Income' : 'Expense';      // Cash goes up = Income
+        if (isCC) txnType = diff > 0 ? 'Expense' : 'Income'; 
+        else txnType = diff > 0 ? 'Income' : 'Expense';      
         
         const txnPayload = {
             date: format(new Date(), 'yyyy-MM-dd'),
@@ -109,30 +126,88 @@ export default function Dashboard() {
             payee: 'Manual Balance Adjustment',
             account_id: editingAccountId,
             type: txnType,
-            purchase_rating: txnType === 'Expense' ? 'Neutral' : null,
             notes: 'Auto-generated via account edit.'
         };
         await supabase.from('transactions').insert([txnPayload]);
     }
 
     if (editingAccountId) {
-      const { error } = await supabase.from('accounts').update(payload).eq('id', editingAccountId);
-      if (!error) setAccounts(accounts.map(a => a.id === editingAccountId ? { ...a, ...payload } : a));
+      await supabase.from('accounts').update(payload).eq('id', editingAccountId);
     } else {
-      const { data } = await supabase.from('accounts').insert([payload]).select().single();
-      if (data) setAccounts([...accounts, data]);
+      await supabase.from('accounts').insert([payload]);
     }
     
     setIsAccountModalOpen(false);
-    fetchDashboardData(); // Refresh UI
+    fetchDashboardData(); 
   }
 
   async function deleteAccount() {
     if (!editingAccountId) return;
     if (!confirm("Are you sure you want to delete this account? This will break associated transactions.")) return;
     await supabase.from('accounts').delete().eq('id', editingAccountId);
-    setAccounts(accounts.filter(a => a.id !== editingAccountId));
     setIsAccountModalOpen(false);
+    fetchDashboardData();
+  }
+
+  // --- QUICK ENTRY LOGIC ---
+  function openQuickEntry(accId: number) {
+      setQuickForm({
+        type: 'Expense', date: format(new Date(), 'yyyy-MM-dd'), amount: '', 
+        payee: '', category_id: '', account_id: accId.toString(), to_account_id: '', notes: ''
+      });
+      setIsQuickEntryOpen(true);
+  }
+
+  const handleBalanceAdjustment = async (txn: any) => {
+      const amount = Number(txn.amount);
+      const sourceAcc = accounts.find(a => a.id === txn.account_id);
+      const destAcc = txn.to_account_id ? accounts.find(a => a.id === txn.to_account_id) : null;
+      const cat = txn.category_id ? categories.find(c => c.id === txn.category_id) : null;
+  
+      const getAdj = (isStepInflow: boolean) => isStepInflow ? amount : -amount;
+  
+      if (sourceAcc) {
+          const isCC = sourceAcc.type === 'Credit Card';
+          const isInflow = txn.type === 'Income';
+          const adjustment = isCC ? (isInflow ? -getAdj(true) : -getAdj(false)) : (isInflow ? getAdj(true) : getAdj(false));
+          await supabase.from('accounts').update({ balance: Number(sourceAcc.balance) + adjustment }).eq('id', sourceAcc.id);
+      }
+  
+      if (destAcc) {
+          const isCC = destAcc.type === 'Credit Card';
+          const adjustment = isCC ? -getAdj(true) : getAdj(true);
+          await supabase.from('accounts').update({ balance: Number(destAcc.balance) + adjustment }).eq('id', destAcc.id);
+      }
+  
+      if (cat) {
+          const adjustment = txn.type === 'Income' ? getAdj(true) : getAdj(false);
+          await supabase.from('categories').update({ assigned_amount: Number(cat.assigned_amount || 0) + adjustment }).eq('id', cat.id);
+      }
+  };
+
+  async function saveQuickEntry(e: React.FormEvent) {
+      e.preventDefault();
+      setIsSubmittingTxn(true);
+
+      const amount = parseFloat(quickForm.amount) || 0;
+      const payload = {
+          date: quickForm.date,
+          amount: amount,
+          payee: quickForm.type === 'Transfer' ? 'Transfer' : quickForm.payee,
+          category_id: quickForm.type === 'Transfer' ? null : (quickForm.category_id ? parseInt(quickForm.category_id) : null),
+          account_id: parseInt(quickForm.account_id),
+          to_account_id: quickForm.type === 'Transfer' ? parseInt(quickForm.to_account_id) : null,
+          type: quickForm.type,
+          notes: quickForm.notes || null
+      };
+
+      const { data: inserted } = await supabase.from('transactions').insert([payload]).select().single();
+      if (inserted) {
+          await handleBalanceAdjustment(payload);
+          setIsQuickEntryOpen(false);
+          await fetchDashboardData(); 
+      }
+      setIsSubmittingTxn(false);
   }
 
   function exportAccounts() {
@@ -152,7 +227,6 @@ export default function Dashboard() {
       a.click();
   }
 
-  // Math
   const netWorth = accounts.reduce((sum, acc) => acc.type === 'Credit Card' ? sum - Math.abs(acc.balance) : sum + acc.balance, 0);
   const liquidCash = accounts.filter(a => ['Checking', 'Savings', 'Cash'].includes(a.type)).reduce((sum, acc) => sum + acc.balance, 0);
   const readyToAssign = liquidCash - totalAssigned;
@@ -176,18 +250,11 @@ export default function Dashboard() {
     }
   };
 
-  const getRatingIcon = (rating: string) => {
-      if (rating === 'Good') return <span className="flex items-center gap-1 text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold uppercase"><Smile size={10}/> Good</span>;
-      if (rating === 'Regret') return <span className="flex items-center gap-1 text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold uppercase"><Frown size={10}/> Regret</span>;
-      return <span className="flex items-center gap-1 text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold uppercase"><Meh size={10}/> Neutral</span>;
-  };
-
   if (loading) return <div className="min-h-screen flex items-center justify-center text-slate-400 font-bold animate-pulse">Booting Finance OS...</div>;
 
   return (
-    <main className="p-4 md:p-8 min-h-screen bg-slate-50 pb-32">
+    <main className="pb-32">
       
-
       {/* HEADER & NET WORTH */}
       <div className="mb-8">
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
@@ -251,7 +318,7 @@ export default function Dashboard() {
                     </div>
                 </div>
                 <div className="flex border-t border-slate-50 bg-slate-50/50">
-                    <button onClick={() => router.push(`/ledger?account=${acc.id}&new=true`)} className="flex-1 py-2.5 text-xs font-bold text-slate-500 hover:bg-emerald-50 hover:text-emerald-600 border-r border-slate-100 transition-colors flex items-center justify-center gap-1">
+                    <button onClick={() => openQuickEntry(acc.id)} className="flex-1 py-2.5 text-xs font-bold text-slate-500 hover:bg-emerald-50 hover:text-emerald-600 border-r border-slate-100 transition-colors flex items-center justify-center gap-1">
                         <Zap size={12}/> Quick Entry
                     </button>
                     <button onClick={() => openAccountModal(acc)} className="flex-1 py-2.5 text-xs font-bold text-slate-500 hover:bg-blue-50 hover:text-blue-600 transition-colors flex items-center justify-center gap-1">
@@ -279,7 +346,6 @@ export default function Dashboard() {
                             <div className="min-w-0">
                                 <div className="flex items-center gap-2">
                                     <h4 className="font-bold text-slate-800 text-lg truncate">{txn.payee || txn.type}</h4>
-                                    {txn.type === 'Expense' && getRatingIcon(txn.purchase_rating)}
                                 </div>
                                 <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5">
                                     <span className="font-bold flex items-center gap-1 text-slate-400"><Calendar size={10}/> {format(new Date(txn.date), 'MMM d, yyyy')}</span>
@@ -315,6 +381,97 @@ export default function Dashboard() {
         </div>
 
       </div>
+
+      {/* --- DASHBOARD QUICK ENTRY MODAL --- */}
+      {isQuickEntryOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <form onSubmit={saveQuickEntry} className="bg-white w-full max-w-lg rounded-3xl p-6 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto hide-scrollbar">
+            <div className="flex justify-between items-center mb-6 sticky top-0 bg-white z-10 pb-2 border-b border-slate-50">
+              <h3 className="font-bold text-xl flex items-center gap-2">
+                <Zap size={20} className="text-emerald-500"/> Quick Entry
+              </h3>
+              <button type="button" onClick={() => setIsQuickEntryOpen(false)} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors"><X size={18}/></button>
+            </div>
+
+            <div className="space-y-5">
+              <div className="flex bg-slate-100 p-1 rounded-xl">
+                  <button type="button" onClick={() => setQuickForm({...quickForm, type: 'Expense'})} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${quickForm.type === 'Expense' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>Expense</button>
+                  <button type="button" onClick={() => setQuickForm({...quickForm, type: 'Income'})} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${quickForm.type === 'Income' ? 'bg-white shadow-sm text-emerald-600' : 'text-slate-500'}`}>Income</button>
+                  <button type="button" onClick={() => setQuickForm({...quickForm, type: 'Transfer'})} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${quickForm.type === 'Transfer' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500'}`}>Transfer</button>
+              </div>
+
+              <div className="flex gap-4">
+                  <div className="w-2/3">
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Amount</label>
+                      <div className="relative">
+                          <span className={`absolute left-4 top-3.5 font-bold ${quickForm.type === 'Income' ? 'text-emerald-500' : 'text-slate-400'}`}>$</span>
+                          <input required autoFocus type="number" step="0.01" placeholder="0.00" className="w-full pl-8 p-3 bg-slate-50 rounded-xl font-black text-2xl text-slate-900 placeholder-slate-300 border border-slate-100 outline-none focus:border-blue-300 focus:bg-white transition-all" value={quickForm.amount} onChange={e => setQuickForm({...quickForm, amount: e.target.value})} />
+                      </div>
+                  </div>
+                  <div className="w-1/3">
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Date</label>
+                      <input required type="date" className="w-full p-3 bg-slate-50 rounded-xl font-bold text-sm text-slate-900 border border-slate-100 outline-none focus:border-blue-300 focus:bg-white transition-all" value={quickForm.date} onChange={e => setQuickForm({...quickForm, date: e.target.value})} />
+                  </div>
+              </div>
+
+              {quickForm.type !== 'Transfer' && (
+                  <div>
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">{quickForm.type === 'Income' ? 'Source / Payer' : 'Payee / Vendor'}</label>
+                      <input 
+                          required 
+                          list="payee-list"
+                          placeholder="e.g. Walmart, Chase, Salary" 
+                          className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-900 placeholder-slate-400 border border-slate-100 outline-none focus:border-blue-300 focus:bg-white transition-all" 
+                          value={quickForm.payee} 
+                          onChange={e => setQuickForm({...quickForm, payee: e.target.value})} 
+                      />
+                      <datalist id="payee-list">
+                          {payeeSuggestions.map((p, i) => <option key={i} value={p} />)}
+                      </datalist>
+                  </div>
+              )}
+
+              <div className="flex gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                  <div className={quickForm.type === 'Transfer' ? 'w-1/2' : 'w-full'}>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">{quickForm.type === 'Income' ? 'Deposit Into' : 'Pay From Account'}</label>
+                      <select required className="w-full p-3 bg-white rounded-xl font-bold text-sm text-slate-900 border border-slate-200 outline-none focus:border-blue-300 cursor-pointer" value={quickForm.account_id} onChange={e => setQuickForm({...quickForm, account_id: e.target.value})}>
+                          {accounts.map(a => <option key={a.id} value={a.id}>{a.name} (${Math.abs(Number(a.balance)).toFixed(2)})</option>)}
+                      </select>
+                  </div>
+                  
+                  {quickForm.type === 'Transfer' && (
+                      <div className="w-1/2">
+                          <label className="text-[10px] font-bold text-blue-400 uppercase tracking-wider mb-2 block">Transfer To</label>
+                          <select required className="w-full p-3 bg-white rounded-xl font-bold text-sm text-blue-900 border border-blue-200 outline-none focus:border-blue-400 cursor-pointer" value={quickForm.to_account_id} onChange={e => setQuickForm({...quickForm, to_account_id: e.target.value})}>
+                              <option value="" disabled>Select Destination...</option>
+                              {accounts.filter(a => a.id.toString() !== quickForm.account_id).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                          </select>
+                      </div>
+                  )}
+              </div>
+
+              {quickForm.type !== 'Transfer' && (
+                  <div>
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2"><Tag size={14}/> Budget Envelope</label>
+                      <select className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-900 border border-slate-100 outline-none focus:border-blue-300 cursor-pointer" value={quickForm.category_id} onChange={e => setQuickForm({...quickForm, category_id: e.target.value})}>
+                          <option value="">{quickForm.type === 'Income' ? 'Ready to Assign (Uncategorized)' : 'Uncategorized Expense'}</option>
+                          {categories.map(c => <option key={c.id} value={c.id}>{c.emoji || ''} {c.name}</option>)}
+                      </select>
+                  </div>
+              )}
+
+              <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2"><AlignLeft size={14}/> Notes (Optional)</label>
+                  <textarea placeholder="Write a note..." className="w-full p-3 bg-slate-50 rounded-xl font-bold text-sm text-slate-900 placeholder-slate-400 border border-slate-100 outline-none focus:border-blue-300 focus:bg-white transition-all resize-none" rows={2} value={quickForm.notes} onChange={e => setQuickForm({...quickForm, notes: e.target.value})} />
+              </div>
+            </div>
+
+            <button type="submit" disabled={isSubmittingTxn} className={`w-full text-white py-4 rounded-xl font-bold mt-8 shadow-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50 bg-emerald-500 hover:bg-emerald-600 shadow-emerald-200`}>
+              {isSubmittingTxn ? <Loader2 className="animate-spin" size={20}/> : <Save size={20}/>} {isSubmittingTxn ? 'Saving...' : 'Log Transaction'}
+            </button>
+          </form>
+        </div>
+      )}
 
       {/* MODAL: ADD/EDIT ACCOUNT */}
       {isAccountModalOpen && (

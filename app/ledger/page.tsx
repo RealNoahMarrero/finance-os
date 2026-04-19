@@ -6,7 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { 
   ArrowUpRight, ArrowDownRight, ArrowRightLeft, Activity, X, 
   Search, Plus, PieChart, LayoutGrid, ListOrdered, Calendar, Tag, 
-  FileText, Smile, Frown, Meh, Trash2, AlignLeft, Save, Loader2, Wallet, Edit2
+  FileText, Trash2, AlignLeft, Save, Loader2, Wallet, Edit2
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
@@ -38,7 +38,6 @@ function LedgerEngine() {
     category_id: '',
     account_id: '',
     to_account_id: '',
-    purchase_rating: 'Neutral',
     notes: ''
   });
 
@@ -126,7 +125,6 @@ function LedgerEngine() {
           account_id: parseInt(txnForm.account_id),
           to_account_id: txnForm.type === 'Transfer' ? parseInt(txnForm.to_account_id) : null,
           type: txnForm.type,
-          purchase_rating: txnForm.type === 'Expense' ? txnForm.purchase_rating : null,
           notes: txnForm.notes || null
       };
 
@@ -158,6 +156,22 @@ function LedgerEngine() {
       await fetchData();
   }
 
+  const openNewTransactionModal = () => {
+      setEditingTxn(null);
+      setTxnForm({
+          type: 'Expense',
+          date: format(new Date(), 'yyyy-MM-dd'),
+          amount: '',
+          payee: '',
+          category_id: '',
+          // Auto-select the filtered account if one is chosen, otherwise default to the first account
+          account_id: filterAccount !== 'All' ? filterAccount : (accounts.length > 0 ? accounts[0].id.toString() : ''),
+          to_account_id: '',
+          notes: ''
+      });
+      setIsModalOpen(true);
+  };
+
   const openEdit = (txn: any) => {
       setEditingTxn(txn);
       setTxnForm({
@@ -168,7 +182,6 @@ function LedgerEngine() {
           category_id: txn.category_id?.toString() || '',
           account_id: txn.account_id.toString(),
           to_account_id: txn.to_account_id?.toString() || '',
-          purchase_rating: txn.purchase_rating || 'Neutral',
           notes: txn.notes || ''
       });
       setIsModalOpen(true);
@@ -193,12 +206,6 @@ function LedgerEngine() {
     }
   };
 
-  const getRatingIcon = (rating: string) => {
-      if (rating === 'Good') return <span className="flex items-center gap-1 text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold uppercase"><Smile size={10}/> Good</span>;
-      if (rating === 'Regret') return <span className="flex items-center gap-1 text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold uppercase"><Frown size={10}/> Regret</span>;
-      return <span className="flex items-center gap-1 text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold uppercase"><Meh size={10}/> Neutral</span>;
-  };
-
   const processedTxns = transactions.filter(t => {
       if (filterType !== 'All' && t.type !== filterType) return false;
       if (filterAccount !== 'All' && t.account_id?.toString() !== filterAccount && t.to_account_id?.toString() !== filterAccount) return false;
@@ -212,9 +219,7 @@ function LedgerEngine() {
   if (loading) return <div className="min-h-screen flex items-center justify-center text-slate-400 font-bold animate-pulse">Syncing Ledger...</div>;
 
   return (
-    <main className="p-4 md:p-8 min-h-screen bg-slate-50 pb-32">
-      
-
+    <main className="pb-32">
 
       <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
         <div>
@@ -223,7 +228,7 @@ function LedgerEngine() {
           </h1>
           <p className="text-slate-500 font-bold mt-1 text-sm">{transactions.length} total entries</p>
         </div>
-        <button onClick={() => setIsModalOpen(true)} className="w-full md:w-auto px-6 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-200 transition-colors">
+        <button onClick={openNewTransactionModal} className="w-full md:w-auto px-6 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-200 transition-colors">
             <Plus size={18}/> Log Transaction
         </button>
       </div>
@@ -263,7 +268,6 @@ function LedgerEngine() {
                               <div className="min-w-0">
                                   <div className="flex items-center gap-2">
                                       <h4 className="font-bold text-slate-800 text-lg truncate">{txn.payee || txn.type}</h4>
-                                      {txn.type === 'Expense' && getRatingIcon(txn.purchase_rating)}
                                   </div>
                                   <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5">
                                       <span className="font-bold flex items-center gap-1 text-slate-400"><Calendar size={10}/> {format(parseISO(txn.date), 'MMM d, yyyy')}</span>
@@ -396,22 +400,6 @@ function LedgerEngine() {
                           <option value="">{txnForm.type === 'Income' ? 'Ready to Assign (Uncategorized)' : 'Uncategorized Expense'}</option>
                           {categories.map(c => <option key={c.id} value={c.id}>{c.emoji || ''} {c.name}</option>)}
                       </select>
-                  </div>
-              )}
-
-              {txnForm.type === 'Expense' && (
-                  <div>
-                      <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Purchase Rating</label>
-                      <div className="flex gap-2">
-                          {['Good', 'Neutral', 'Regret'].map(rating => (
-                             <button key={rating} type="button" onClick={() => setTxnForm({...txnForm, purchase_rating: rating})} className={`flex-1 py-2 rounded-xl text-sm font-bold flex flex-col items-center justify-center gap-1 border-2 transition-all ${txnForm.purchase_rating === rating ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-transparent bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>
-                                {rating === 'Good' && <Smile size={18}/>}
-                                {rating === 'Neutral' && <Meh size={18}/>}
-                                {rating === 'Regret' && <Frown size={18}/>}
-                                {rating}
-                             </button>
-                          ))}
-                      </div>
                   </div>
               )}
 
