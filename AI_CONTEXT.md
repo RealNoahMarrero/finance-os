@@ -21,13 +21,13 @@ Finance OS is a custom, manual-entry financial platform designed to replace YNAB
 * `app/debt/page.tsx` -> **Debt Engine**. Features: Custom mathematical simulation that isolates `is_debt` categories, assumes `target_amount` is the minimum payment, and calculates future payoff dates utilizing both Snowball and Avalanche strategies based on total monthly power.
 
 ## 4. DESIGN & LOGIC RULES
-* **Zero-Based Math:** `Ready to Assign` = Total Liquid Cash (Checking + Savings + Cash) minus total funds explicitly assigned to envelopes.
+* **Zero-Based Math:** `Ready to Assign` = Total Liquid Cash (Checking + Savings + Cash) minus total funds explicitly assigned to envelopes. The system uses a strict "snap to zero" rounding failsafe (`Math.abs(val) < 0.01`) to prevent JavaScript floating-point microscopic decimal bugs from throwing negative warnings.
 * **Inline Math Evaluation:** The "Assigned" input accepts basic math operators (e.g., `+50`, `100-20`) to dynamically update assigned values.
 * **Math Reversal Sync:** Deleting or editing a transaction automatically reverses the old math impact on accounts and envelopes before applying new changes, ensuring the ledger and balances are always perfectly synced.
 * **Manual Adjustments vs Silent Updates:** When editing an account balance directly, the user can choose to let the system auto-calculate the difference and log a transaction ("Manual Adjustment") or bypass the ledger entirely ("Silent Update").
 * **Credit Card Math Inversion:** Outflow (Expenses) on Credit Card accounts INCREASES the balance (debt), while Inflow (Income/Payments) DECREASES the balance.
 * **Persistent Preferences:** Category sorting preferences, view filters, and expanded/collapsed group states are stored in `localStorage` to persist across sessions seamlessly.
-* **Visual Urgency & Overspending:** Categories past their `due_date` auto-flag as "Late". `is_asap` overrides render red emergency backgrounds. **Overspent categories (negative available balance) turn red and trigger a global warning banner at the top of the budget.**
+* **Visual Urgency & Gamification:** Categories past their `due_date` auto-flag as "Late". `is_asap` overrides render red emergency backgrounds. **Overspent categories** (negative available balance) turn red and trigger a global warning banner at the top of the budget. **Fully funded categories** (Available >= Target) render with a glowing gold gradient to gamify goal completion.
 * **Savings Breakdown:** Categories with targets and due dates dynamically calculate daily, weekly, and monthly funding requirements to meet goals on time.
 * **Cycle Advancement:** Repeating categories feature a "Fast-Forward" action to advance the due date based on frequency. If the new date exceeds the `end_date`, the category is auto-hidden.
-* **Transfers:** Handled natively by supplying both an `account_id` (From) and `to_account_id` (To) on a single transaction record, keeping Net Worth flat. Budget envelope transfers feature an omnidirectional swap toggle.
+* **Transfers:** Handled natively by supplying both an `account_id` (From) and `to_account_id` (To) on a single transaction record, keeping Net Worth flat. Budget envelope transfers feature an omnidirectional swap toggle with text truncation to preserve flexbox layouts.
