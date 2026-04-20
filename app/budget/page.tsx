@@ -435,7 +435,10 @@ export default function BudgetPage() {
             let groupCats = visibleCategories.filter(c => {
                 if (c.group_id !== group.id) return false;
                 
-                const assigned = Number(c.assigned_amount || 0);
+                // MATH FIX: Snap to zero to kill floating point dust
+                let assigned = Number(c.assigned_amount || 0);
+                if (Math.abs(assigned) < 0.01) assigned = 0;
+                
                 const target = Number(c.target_amount || 0);
                 
                 if (categoryFilter === 'underfunded') {
@@ -489,7 +492,10 @@ export default function BudgetPage() {
                         <div className="divide-y divide-slate-50">
                             {groupCats.length > 0 ? (
                                 groupCats.map(cat => {
-                                    const assigned = Number(cat.assigned_amount || 0);
+                                    // MATH FIX: Snap to zero to kill floating point dust
+                                    let assigned = Number(cat.assigned_amount || 0);
+                                    if (Math.abs(assigned) < 0.01) assigned = 0;
+                                    
                                     const target = Number(cat.target_amount || 0);
                                     const remainingToFund = target > 0 ? Math.max(0, target - assigned) : 0;
                                     const available = assigned; 
