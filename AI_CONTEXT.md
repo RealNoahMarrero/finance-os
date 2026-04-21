@@ -21,7 +21,7 @@ Finance OS is a custom, manual-entry financial platform designed to replace YNAB
 * `app/debt/page.tsx` -> **Debt Engine**. Features: Custom mathematical simulation that isolates `is_debt` categories, assumes `target_amount` is the minimum payment, and calculates future payoff dates utilizing both Snowball and Avalanche strategies based on total monthly power.
 
 ## 4. DESIGN & LOGIC RULES
-* **Zero-Based Math:** `Ready to Assign` = Total Liquid Cash (Checking + Savings + Cash) minus total funds explicitly assigned to envelopes. The system uses a strict "snap to zero" rounding failsafe (`Math.abs(val) < 0.01`) to prevent JavaScript floating-point microscopic decimal bugs from throwing negative warnings.
+* **Zero-Based Math:** `Ready to Assign` = Total Liquid Cash (Checking + Savings + Cash) minus total funds explicitly assigned to envelopes. The system uses a strict "snap to zero" rounding failsafe (`Math.abs(val) < 0.01`) on both the global RTA banner and individual category balances. This prevents JavaScript floating-point microscopic decimal bugs from throwing false negative warnings or causing "ghost" envelopes to appear in active filters.
 * **Inline Math Evaluation:** The "Assigned" input accepts basic math operators (e.g., `+50`, `100-20`) to dynamically update assigned values.
 * **Math Reversal Sync:** Deleting or editing a transaction automatically reverses the old math impact on accounts and envelopes before applying new changes, ensuring the ledger and balances are always perfectly synced.
 * **Manual Adjustments vs Silent Updates:** When editing an account balance directly, the user can choose to let the system auto-calculate the difference and log a transaction ("Manual Adjustment") or bypass the ledger entirely ("Silent Update").

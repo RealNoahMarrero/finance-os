@@ -216,7 +216,7 @@ export default function Dashboard() {
       text += `Liquid Cash: $${liquidCash.toLocaleString('en-US', { minimumFractionDigits: 2 })}\n\n`;
       text += `--- ACCOUNTS ---\n`;
       accounts.forEach(a => {
-          text += `${a.name} (${a.type}): $${Math.abs(a.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}\n`;
+          text += `${a.name} (${a.type}): ${a.balance < 0 ? '-' : ''}$${Math.abs(a.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}\n`;
       });
 
       const blob = new Blob([text], { type: 'text/plain' });
@@ -314,7 +314,7 @@ export default function Dashboard() {
                     {acc.type === 'Credit Card' && acc.credit_limit > 0 && <div className="text-xs font-bold text-emerald-600">Avail: ${(acc.credit_limit - Math.abs(acc.balance)).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>}
                     </div>
                     <div className={`font-black text-lg ${acc.type === 'Credit Card' ? 'text-red-500' : 'text-slate-900'}`}>
-                    ${Math.abs(acc.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    {acc.balance < 0 ? '-' : ''}${Math.abs(acc.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </div>
                 </div>
                 <div className="flex border-t border-slate-50 bg-slate-50/50">
@@ -435,7 +435,7 @@ export default function Dashboard() {
                   <div className={quickForm.type === 'Transfer' ? 'w-1/2' : 'w-full'}>
                       <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">{quickForm.type === 'Income' ? 'Deposit Into' : 'Pay From Account'}</label>
                       <select required className="w-full p-3 bg-white rounded-xl font-bold text-sm text-slate-900 border border-slate-200 outline-none focus:border-blue-300 cursor-pointer" value={quickForm.account_id} onChange={e => setQuickForm({...quickForm, account_id: e.target.value})}>
-                          {accounts.map(a => <option key={a.id} value={a.id}>{a.name} (${Math.abs(Number(a.balance)).toFixed(2)})</option>)}
+                          {accounts.map(a => <option key={a.id} value={a.id}>{a.name} ({a.balance < 0 ? '-' : ''}${Math.abs(Number(a.balance)).toFixed(2)})</option>)}
                       </select>
                   </div>
                   
@@ -444,7 +444,7 @@ export default function Dashboard() {
                           <label className="text-[10px] font-bold text-blue-400 uppercase tracking-wider mb-2 block">Transfer To</label>
                           <select required className="w-full p-3 bg-white rounded-xl font-bold text-sm text-blue-900 border border-blue-200 outline-none focus:border-blue-400 cursor-pointer" value={quickForm.to_account_id} onChange={e => setQuickForm({...quickForm, to_account_id: e.target.value})}>
                               <option value="" disabled>Select Destination...</option>
-                              {accounts.filter(a => a.id.toString() !== quickForm.account_id).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                              {accounts.filter(a => a.id.toString() !== quickForm.account_id).map(a => <option key={a.id} value={a.id}>{a.name} ({a.balance < 0 ? '-' : ''}${Math.abs(Number(a.balance)).toFixed(2)})</option>)}
                           </select>
                       </div>
                   )}

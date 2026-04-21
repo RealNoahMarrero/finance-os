@@ -120,7 +120,9 @@ export default function BudgetPage() {
           
           text += `--- ${g.name.toUpperCase()} ---\n`;
           groupCats.forEach(c => {
-              const assigned = Number(c.assigned_amount || 0);
+              let assigned = Number(c.assigned_amount || 0);
+              if (Math.abs(assigned) < 0.01) assigned = 0; // Math fix for exports
+
               const target = Number(c.target_amount || 0);
               
               text += `${c.emoji ? c.emoji + ' ' : ''}${c.name}\n`;
@@ -346,7 +348,12 @@ export default function BudgetPage() {
   if (Math.abs(calculatedRTA) < 0.01) calculatedRTA = 0; 
   const readyToAssign = calculatedRTA;
 
-  const hasNegativeCategories = visibleCategories.some(c => Number(c.assigned_amount || 0) < 0);
+  // MATH FIX: Add the "snap to zero" logic to the global Overspent Check
+  const hasNegativeCategories = visibleCategories.some(c => {
+      let assigned = Number(c.assigned_amount || 0);
+      if (Math.abs(assigned) < 0.01) assigned = 0;
+      return assigned < 0;
+  });
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-slate-400 font-bold animate-pulse">Loading Budget Engine...</div>;
 
