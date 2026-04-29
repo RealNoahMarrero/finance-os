@@ -128,7 +128,7 @@ export default function CalendarPage() {
 
                       let statusClass = "bg-slate-50 border-slate-200 text-slate-600"; // Default
                       if (bill.is_asap || (isPastDue && !isFullyFunded)) statusClass = "bg-red-50 border-red-200 text-red-700 shadow-sm"; // Emergency
-                      else if (isFullyFunded && bill.target_amount > 0) statusClass = "bg-emerald-50 border-emerald-200 text-emerald-700"; // Good to go
+                      else if (isFullyFunded && bill.target_amount > 0) statusClass = "bg-gradient-to-br from-yellow-400 to-amber-500 text-white border-amber-500 shadow-sm"; // Gold Gamification Sync
 
                       return (
                           <div key={bill.id} className={`px-1.5 py-1 md:p-1.5 rounded border text-[9px] md:text-xs font-bold flex flex-col xl:flex-row xl:items-center justify-between gap-0.5 xl:gap-2 truncate ${statusClass}`}>

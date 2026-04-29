@@ -6,9 +6,10 @@ import { useSearchParams } from 'next/navigation';
 import { 
   ArrowUpRight, ArrowDownRight, ArrowRightLeft, Activity, X, 
   Search, Plus, PieChart, LayoutGrid, ListOrdered, Calendar, Tag, 
-  FileText, Trash2, AlignLeft, Save, Loader2, Wallet, Edit2
+  FileText, Trash2, AlignLeft, Save, Loader2, Wallet, Edit2, CheckCircle2, AlertTriangle, Zap
 } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, addWeeks, addMonths, addYears } from 'date-fns';
+import SearchableDropdown from '../components/SearchableDropdown';
 
 function LedgerEngine() {
   const searchParams = useSearchParams();
@@ -28,6 +29,14 @@ function LedgerEngine() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editingTxn, setEditingTxn] = useState<any>(null);
+
+  // Smart Bill Pay Logic States
+  const [smartBillPay, setSmartBillPay] = useState({
+      showToggle: false,
+      advanceCycle: true,
+      deductDebt: true,
+      category: null as any
+  });
   
   // Form
   const [txnForm, setTxnForm] = useState({
@@ -140,6 +149,32 @@ function LedgerEngine() {
           if (inserted) {
               await handleBalanceAdjustment(inserted, 'apply');
               setTransactions([inserted, ...transactions]);
+
+              // Feature 6: Smart Bill Pay Logic
+              if (smartBillPay.showToggle && smartBillPay.category) {
+                  const cat = smartBillPay.category;
+                  let catPayload: any = {};
+
+                  if (smartBillPay.advanceCycle && cat.is_repeating && cat.due_date) {
+                      let current = parseISO(cat.due_date);
+                      let nextDate = current;
+                      if (cat.target_period === 'Weekly') nextDate = addWeeks(current, 1);
+                      else if (cat.target_period === 'Bi-Weekly') nextDate = addWeeks(current, 2);
+                      else if (cat.target_period === 'Monthly') nextDate = addMonths(current, 1);
+                      else if (cat.target_period === 'Yearly') nextDate = addYears(current, 1);
+                      catPayload.due_date = format(nextDate, 'yyyy-MM-dd');
+                  }
+
+                  if (smartBillPay.deductDebt && cat.is_debt) {
+                      // Use target_amount (base bill) NOT raw transaction amount as per instructions
+                      const deduction = Number(cat.target_amount || 0);
+                      catPayload.balance = Math.max(0, Number(cat.balance || 0) - deduction);
+                  }
+
+                  if (Object.keys(catPayload).length > 0) {
+                      await supabase.from('categories').update(catPayload).eq('id', cat.id);
+                  }
+              }
           }
       }
 
@@ -190,11 +225,56 @@ function LedgerEngine() {
   const closeModal = () => {
       setIsModalOpen(false);
       setEditingTxn(null);
+      setSmartBillPay({ showToggle: false, advanceCycle: true, deductDebt: true, category: null });
       
       // Clean up URL if it was a "Quick Entry" to prevent loop
       window.history.replaceState({}, document.title, window.location.pathname);
       
       setTxnForm({ ...txnForm, amount: '', payee: '', notes: '' });
+  };
+
+  // Feature 1: Payee Memory
+  const handlePayeeChange = async (val: string) => {
+      setTxnForm(prev => ({ ...prev, payee: val }));
+      
+      if (val && !editingTxn) {
+          const { data } = await supabase
+              .from('transactions')
+              .select('category_id')
+              .eq('payee', val)
+              .order('date', { ascending: false })
+              .limit(1);
+          
+          if (data && data[0]?.category_id) {
+              const catId = data[0].category_id.toString();
+              setTxnForm(prev => ({ ...prev, category_id: catId }));
+              checkSmartBillPay(catId);
+          }
+      }
+  };
+
+  const checkSmartBillPay = (catId: string) => {
+      if (!catId) {
+          setSmartBillPay({ showToggle: false, advanceCycle: true, deductDebt: true, category: null });
+          return;
+      }
+      const cat = categories.find(c => c.id.toString() === catId);
+      if (cat && (cat.is_repeating || cat.is_debt)) {
+          // Fetch full category details to get target_amount and balance if needed
+          // (categories state already has most of this, but let's be sure)
+          supabase.from('categories').select('*').eq('id', catId).single().then(({ data }) => {
+              if (data) {
+                  setSmartBillPay({
+                      showToggle: true,
+                      advanceCycle: data.is_repeating,
+                      deductDebt: data.is_debt,
+                      category: data
+                  });
+              }
+          });
+      } else {
+          setSmartBillPay({ showToggle: false, advanceCycle: true, deductDebt: true, category: null });
+      }
   };
 
   const getTxnIcon = (type: string) => {
@@ -226,7 +306,18 @@ function LedgerEngine() {
           <h1 className="text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
               Master Ledger
           </h1>
-          <p className="text-slate-500 font-bold mt-1 text-sm">{transactions.length} total entries</p>
+          <div className="flex items-center gap-4 mt-1">
+            <p className="text-slate-500 font-bold text-sm">{transactions.length} total entries</p>
+            {filterAccount !== 'All' && accounts.find(a => a.id.toString() === filterAccount) && (
+              <div className="flex items-center gap-2 px-3 py-1 bg-slate-900 text-white rounded-lg text-sm font-black shadow-sm">
+                <span className="text-slate-400 font-bold uppercase text-[10px]">Current Balance:</span>
+                <span>
+                  {accounts.find(a => a.id.toString() === filterAccount).balance < 0 ? '-' : ''}
+                  ${Math.abs(accounts.find(a => a.id.toString() === filterAccount).balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
         <button onClick={openNewTransactionModal} className="w-full md:w-auto px-6 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-200 transition-colors">
             <Plus size={18}/> Log Transaction
@@ -297,7 +388,15 @@ function LedgerEngine() {
                               
                               <div className="flex items-center justify-between md:justify-end w-full md:w-auto gap-4">
                                   {txn.notes && <span title={txn.notes}><FileText size={16} className="text-slate-300"/></span>}
-                                  <div className={`font-black text-xl md:text-2xl tracking-tight ${txn.type === 'Income' ? 'text-emerald-500' : txn.type === 'Expense' ? 'text-slate-900' : 'text-blue-500'}`}>
+                                  <div className={`font-black text-xl md:text-2xl tracking-tight ${
+                                      txn.type === 'Income' 
+                                      ? 'text-emerald-500' 
+                                      : txn.type === 'Expense' 
+                                      ? 'text-red-500' 
+                                      : filterAccount !== 'All' 
+                                      ? (txn.account_id?.toString() === filterAccount ? 'text-red-500' : 'text-emerald-500')
+                                      : 'text-blue-500'
+                                  }`}>
                                       {txn.type === 'Expense' ? '-' : txn.type === 'Income' ? '+' : ''}${Number(txn.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                   </div>
                                   <div className="flex items-center gap-1">
@@ -366,7 +465,7 @@ function LedgerEngine() {
                           placeholder="e.g. Walmart, Chase, Salary" 
                           className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-900 placeholder-slate-400 border border-slate-100 outline-none focus:border-blue-300 focus:bg-white transition-all" 
                           value={txnForm.payee} 
-                          onChange={e => setTxnForm({...txnForm, payee: e.target.value})} 
+                          onChange={e => handlePayeeChange(e.target.value)} 
                       />
                       <datalist id="payee-list">
                           {payeeSuggestions.map((p, i) => <option key={i} value={p} />)}
@@ -395,11 +494,50 @@ function LedgerEngine() {
 
               {txnForm.type !== 'Transfer' && (
                   <div>
-                      <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2"><Tag size={14}/> Budget Envelope</label>
-                      <select className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-900 border border-slate-100 outline-none focus:border-blue-300 cursor-pointer" value={txnForm.category_id} onChange={e => setTxnForm({...txnForm, category_id: e.target.value})}>
-                          <option value="">{txnForm.type === 'Income' ? 'Ready to Assign (Uncategorized)' : 'Uncategorized Expense'}</option>
-                          {categories.map(c => <option key={c.id} value={c.id}>{c.emoji || ''} {c.name}</option>)}
-                      </select>
+                      <SearchableDropdown 
+                        label="Budget Envelope"
+                        icon={<Tag size={14}/>}
+                        options={[
+                            { id: '', name: txnForm.type === 'Income' ? 'Ready to Assign (Uncategorized)' : 'Uncategorized Expense' },
+                            ...categories.map(c => ({ id: c.id, name: c.name, emoji: c.emoji, group: 'Envelopes' }))
+                        ]}
+                        value={txnForm.category_id}
+                        onChange={(val) => {
+                            setTxnForm({...txnForm, category_id: val});
+                            checkSmartBillPay(val);
+                        }}
+                      />
+                  </div>
+              )}
+
+              {/* Feature 6: Smart Bill Pay UI */}
+              {!editingTxn && smartBillPay.showToggle && (
+                  <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-2xl space-y-3 animate-in slide-in-from-top-2">
+                      <div className="flex items-center gap-2 text-emerald-700 font-bold text-xs uppercase tracking-widest">
+                          <Zap size={14}/> Smart Bill Pay
+                      </div>
+                      <div className="space-y-2">
+                          {smartBillPay.category?.is_repeating && (
+                              <label className="flex items-center gap-3 cursor-pointer group">
+                                  <div className="relative">
+                                      <input type="checkbox" className="sr-only peer" checked={smartBillPay.advanceCycle} onChange={e => setSmartBillPay({...smartBillPay, advanceCycle: e.target.checked})} />
+                                      <div className="w-10 h-6 bg-slate-200 rounded-full peer peer-checked:bg-emerald-500 transition-colors"></div>
+                                      <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
+                                  </div>
+                                  <span className="text-xs font-bold text-slate-700 group-hover:text-emerald-600 transition-colors">Advance Due Date to next cycle</span>
+                              </label>
+                          )}
+                          {smartBillPay.category?.is_debt && (
+                              <label className="flex items-center gap-3 cursor-pointer group">
+                                  <div className="relative">
+                                      <input type="checkbox" className="sr-only peer" checked={smartBillPay.deductDebt} onChange={e => setSmartBillPay({...smartBillPay, deductDebt: e.target.checked})} />
+                                      <div className="w-10 h-6 bg-slate-200 rounded-full peer peer-checked:bg-emerald-500 transition-colors"></div>
+                                      <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
+                                  </div>
+                                  <span className="text-xs font-bold text-slate-700 group-hover:text-emerald-600 transition-colors">Deduct target amount from debt balance</span>
+                              </label>
+                          )}
+                      </div>
                   </div>
               )}
 

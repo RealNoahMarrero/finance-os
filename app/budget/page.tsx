@@ -7,7 +7,7 @@ import {
   ChevronDown, ChevronRight, Target, LayoutGrid, 
   Wallet, Calendar, FileText, Repeat, AlignLeft, PieChart,
   ArrowUpDown, AlertCircle, AlertTriangle, ArrowRightLeft,
-  FastForward, ListOrdered, Filter, Download
+  FastForward, ListOrdered, Filter, Download, Activity
 } from 'lucide-react';
 import { format, parseISO, addWeeks, addMonths, addYears, isAfter } from 'date-fns';
 
@@ -150,7 +150,11 @@ export default function BudgetPage() {
   function openFundingMode(e: React.MouseEvent, cat: any) {
       e.stopPropagation();
       setFundingCatId(cat.id);
-      setFundingAmount(cat.assigned_amount ? cat.assigned_amount.toString() : '0');
+      
+      // Feature 2: Floating-Point Math Fix
+      // Round to 2 decimal places to prevent microscopic remainders from breaking the UI
+      const cleanBalance = cat.assigned_amount ? Number(cat.assigned_amount).toFixed(2) : '0.00';
+      setFundingAmount(cleanBalance);
   }
 
   async function saveFunding(e: React.FormEvent) {
@@ -185,7 +189,20 @@ export default function BudgetPage() {
 
   // --- TRANSFER LOGIC ---
   function openTransferModal(cat: any) {
-      setTransferForm({ fromCatId: cat.id.toString(), toCatId: 'RTA', amount: '' });
+      // Feature 4: Autofill Amount and Smart Direction Defaults
+      const available = Number(cat.assigned_amount || 0);
+      const absAvailable = Math.abs(available).toFixed(2);
+      
+      // If balance is POSITIVE, default: Transfer Out (Category -> RTA)
+      // If balance is NEGATIVE, default: Transfer In (RTA -> Category)
+      const fromId = available < 0 ? 'RTA' : cat.id.toString();
+      const toId = available < 0 ? cat.id.toString() : 'RTA';
+
+      setTransferForm({ 
+          fromCatId: fromId, 
+          toCatId: toId, 
+          amount: absAvailable === '0.00' ? '' : absAvailable
+      });
       setIsTransferModalOpen(true);
   }
 
@@ -420,6 +437,7 @@ export default function BudgetPage() {
                     <Filter size={14} className="text-slate-400 shrink-0"/>
                     <select value={categoryFilter} onChange={handleFilterChange} className="bg-transparent font-bold text-sm text-slate-900 outline-none cursor-pointer w-full">
                         <option value="all">View: All</option>
+                        <option value="actionable">View: Actionable</option>
                         <option value="underfunded">View: Underfunded</option>
                         <option value="available">View: Available</option>
                         <option value="overspent">View: Overspent</option>
@@ -450,6 +468,10 @@ export default function BudgetPage() {
                 
                 if (categoryFilter === 'underfunded') {
                     return target > 0 && assigned < target;
+                }
+                if (categoryFilter === 'actionable') {
+                    // Show if either positive available (money to pull) or negative available (needs money)
+                    return Math.abs(assigned) >= 0.01;
                 }
                 if (categoryFilter === 'available') {
                     return assigned > 0;
@@ -851,6 +873,34 @@ export default function BudgetPage() {
                             </optgroup>
                         </select>
                     </div>
+                </div>
+            </div>
+
+            {/* Actionable Categories Quick Reference */}
+            <div className="mt-6 pt-6 border-t border-slate-100">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                    <Activity size={12}/> Envelopes with Funds
+                </p>
+                <div className="space-y-2 max-h-40 overflow-y-auto pr-2 hide-scrollbar">
+                    {visibleCategories.filter(c => Math.abs(Number(c.assigned_amount || 0)) >= 0.01).map(c => (
+                        <div key={`ref-${c.id}`} className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-100">
+                            <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-sm">{c.emoji}</span>
+                                <span className="text-xs font-bold text-slate-700 truncate">{c.name}</span>
+                            </div>
+                            <span className={`text-xs font-black ${Number(c.assigned_amount) < 0 ? 'text-red-500' : 'text-emerald-600'}`}>
+                                {Number(c.assigned_amount) < 0 ? '-' : ''}${Math.abs(Number(c.assigned_amount)).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                    ))}
+                    {readyToAssign !== 0 && (
+                        <div className="flex items-center justify-between p-2 rounded-lg bg-blue-50 border border-blue-100 mt-2">
+                            <span className="text-xs font-bold text-blue-700">Ready to Assign</span>
+                            <span className={`text-xs font-black ${readyToAssign < 0 ? 'text-red-500' : 'text-blue-600'}`}>
+                                {readyToAssign < 0 ? '-' : ''}${Math.abs(readyToAssign).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                    )}
                 </div>
             </div>
 

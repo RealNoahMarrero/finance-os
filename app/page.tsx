@@ -9,7 +9,8 @@ import {
   AlertCircle, Trash2, LayoutGrid, PieChart, ListOrdered, 
   Calendar, FileText, Download, Zap, Edit2, Tag, AlignLeft, Save, Loader2
 } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, parseISO, addWeeks, addMonths, addYears } from 'date-fns';
+import SearchableDropdown from './components/SearchableDropdown';
 
 export default function Dashboard() {
   const router = useRouter();
@@ -28,6 +29,14 @@ export default function Dashboard() {
   const [isQuickEntryOpen, setIsQuickEntryOpen] = useState(false);
   const [isSubmittingTxn, setIsSubmittingTxn] = useState(false);
 
+  // Smart Bill Pay Logic States
+  const [smartBillPay, setSmartBillPay] = useState({
+      showToggle: false,
+      advanceCycle: true,
+      deductDebt: true,
+      category: null as any
+  });
+  
   // Forms
   const [accountForm, setAccountForm] = useState({
     name: '', type: 'Checking', balance: '', credit_limit: ''
@@ -155,8 +164,52 @@ export default function Dashboard() {
         type: 'Expense', date: format(new Date(), 'yyyy-MM-dd'), amount: '', 
         payee: '', category_id: '', account_id: accId.toString(), to_account_id: '', notes: ''
       });
+      setSmartBillPay({ showToggle: false, advanceCycle: true, deductDebt: true, category: null });
       setIsQuickEntryOpen(true);
   }
+
+  // Feature 1: Payee Memory
+  const handlePayeeChange = async (val: string) => {
+      setQuickForm(prev => ({ ...prev, payee: val }));
+      
+      if (val) {
+          const { data } = await supabase
+              .from('transactions')
+              .select('category_id')
+              .eq('payee', val)
+              .order('date', { ascending: false })
+              .limit(1);
+          
+          if (data && data[0]?.category_id) {
+              const catId = data[0].category_id.toString();
+              setQuickForm(prev => ({ ...prev, category_id: catId }));
+              checkSmartBillPay(catId);
+          }
+      }
+  };
+
+  const checkSmartBillPay = (catId: string) => {
+      if (!catId) {
+          setSmartBillPay({ showToggle: false, advanceCycle: true, deductDebt: true, category: null });
+          return;
+      }
+      const cat = categories.find(c => c.id.toString() === catId);
+      if (cat) {
+          // Fetch full category details to get target_amount and balance if needed
+          supabase.from('categories').select('*').eq('id', catId).single().then(({ data }) => {
+              if (data && (data.is_repeating || data.is_debt)) {
+                  setSmartBillPay({
+                      showToggle: true,
+                      advanceCycle: data.is_repeating,
+                      deductDebt: data.is_debt,
+                      category: data
+                  });
+              } else {
+                  setSmartBillPay({ showToggle: false, advanceCycle: true, deductDebt: true, category: null });
+              }
+          });
+      }
+  };
 
   const handleBalanceAdjustment = async (txn: any) => {
       const amount = Number(txn.amount);
@@ -204,6 +257,33 @@ export default function Dashboard() {
       const { data: inserted } = await supabase.from('transactions').insert([payload]).select().single();
       if (inserted) {
           await handleBalanceAdjustment(payload);
+          
+          // Feature 6: Smart Bill Pay Logic
+          if (smartBillPay.showToggle && smartBillPay.category) {
+              const cat = smartBillPay.category;
+              let catPayload: any = {};
+
+              if (smartBillPay.advanceCycle && cat.is_repeating && cat.due_date) {
+                  let current = parseISO(cat.due_date);
+                  let nextDate = current;
+                  if (cat.target_period === 'Weekly') nextDate = addWeeks(current, 1);
+                  else if (cat.target_period === 'Bi-Weekly') nextDate = addWeeks(current, 2);
+                  else if (cat.target_period === 'Monthly') nextDate = addMonths(current, 1);
+                  else if (cat.target_period === 'Yearly') nextDate = addYears(current, 1);
+                  catPayload.due_date = format(nextDate, 'yyyy-MM-dd');
+              }
+
+              if (smartBillPay.deductDebt && cat.is_debt) {
+                  // Use target_amount (base bill) NOT raw transaction amount
+                  const deduction = Number(cat.target_amount || 0);
+                  catPayload.balance = Math.max(0, Number(cat.balance || 0) - deduction);
+              }
+
+              if (Object.keys(catPayload).length > 0) {
+                  await supabase.from('categories').update(catPayload).eq('id', cat.id);
+              }
+          }
+
           setIsQuickEntryOpen(false);
           await fetchDashboardData(); 
       }
@@ -229,7 +309,19 @@ export default function Dashboard() {
 
   const netWorth = accounts.reduce((sum, acc) => acc.type === 'Credit Card' ? sum - Math.abs(acc.balance) : sum + acc.balance, 0);
   const liquidCash = accounts.filter(a => ['Checking', 'Savings', 'Cash'].includes(a.type)).reduce((sum, acc) => sum + acc.balance, 0);
-  const readyToAssign = Math.round((liquidCash - totalAssigned) * 100) / 100;
+  
+  let calculatedRTA = liquidCash - totalAssigned;
+  if (Math.abs(calculatedRTA) < 0.01) calculatedRTA = 0;
+  const readyToAssign = calculatedRTA;
+
+  // Feature 8: Group and Sort Accounts
+  const liquidAccounts = accounts
+    .filter(a => ['Checking', 'Savings', 'Cash'].includes(a.type))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  
+  const creditCards = accounts
+    .filter(a => a.type === 'Credit Card')
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const getAccountIcon = (type: string) => {
     switch(type) {
@@ -303,30 +395,69 @@ export default function Dashboard() {
             <button onClick={() => openAccountModal()} className="p-2 bg-slate-200 hover:bg-emerald-100 hover:text-emerald-600 text-slate-500 rounded-full transition-colors"><Plus size={16} /></button>
           </div>
 
-          <div className="space-y-3">
-            {accounts.map(acc => (
-              <div key={acc.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col hover:border-emerald-200 transition-all group overflow-hidden">
-                <div className="p-4 flex items-center gap-4 cursor-pointer" onClick={() => router.push(`/ledger?account=${acc.id}`)}>
-                    <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center shrink-0 border border-slate-100">{getAccountIcon(acc.type)}</div>
-                    <div className="flex-grow min-w-0">
-                    <h4 className="font-bold text-slate-800 truncate">{acc.name}</h4>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">{acc.type}</p>
-                    {acc.type === 'Credit Card' && acc.credit_limit > 0 && <div className="text-xs font-bold text-emerald-600">Avail: ${(acc.credit_limit - Math.abs(acc.balance)).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>}
+          <div className="space-y-6">
+            {/* Liquid Accounts Section */}
+            {liquidAccounts.length > 0 && (
+              <div className="space-y-3">
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 px-1">
+                  <Banknote size={12}/> Liquid Accounts
+                </h4>
+                {liquidAccounts.map(acc => (
+                  <div key={acc.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col hover:border-emerald-200 transition-all group overflow-hidden">
+                    <div className="p-4 flex items-center gap-4 cursor-pointer" onClick={() => router.push(`/ledger?account=${acc.id}`)}>
+                        <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center shrink-0 border border-slate-100">{getAccountIcon(acc.type)}</div>
+                        <div className="flex-grow min-w-0">
+                        <h4 className="font-bold text-slate-800 truncate">{acc.name}</h4>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">{acc.type}</p>
+                        </div>
+                        <div className="font-black text-lg text-slate-900">
+                        {acc.balance < 0 ? '-' : ''}${Math.abs(acc.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </div>
                     </div>
-                    <div className={`font-black text-lg ${acc.type === 'Credit Card' ? 'text-red-500' : 'text-slate-900'}`}>
-                    {acc.balance < 0 ? '-' : ''}${Math.abs(acc.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    <div className="flex border-t border-slate-50 bg-slate-50/50">
+                        <button onClick={() => openQuickEntry(acc.id)} className="flex-1 py-2.5 text-xs font-bold text-slate-500 hover:bg-emerald-50 hover:text-emerald-600 border-r border-slate-100 transition-colors flex items-center justify-center gap-1">
+                            <Zap size={12}/> Quick Entry
+                        </button>
+                        <button onClick={() => openAccountModal(acc)} className="flex-1 py-2.5 text-xs font-bold text-slate-500 hover:bg-blue-50 hover:text-blue-600 transition-colors flex items-center justify-center gap-1">
+                            <Edit2 size={12}/> Edit
+                        </button>
                     </div>
-                </div>
-                <div className="flex border-t border-slate-50 bg-slate-50/50">
-                    <button onClick={() => openQuickEntry(acc.id)} className="flex-1 py-2.5 text-xs font-bold text-slate-500 hover:bg-emerald-50 hover:text-emerald-600 border-r border-slate-100 transition-colors flex items-center justify-center gap-1">
-                        <Zap size={12}/> Quick Entry
-                    </button>
-                    <button onClick={() => openAccountModal(acc)} className="flex-1 py-2.5 text-xs font-bold text-slate-500 hover:bg-blue-50 hover:text-blue-600 transition-colors flex items-center justify-center gap-1">
-                        <Edit2 size={12}/> Edit
-                    </button>
-                </div>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
+
+            {/* Credit Cards Section */}
+            {creditCards.length > 0 && (
+              <div className="space-y-3">
+                <h4 className="text-[10px] font-black text-red-400 uppercase tracking-widest flex items-center gap-2 px-1">
+                  <CreditCard size={12}/> Credit Cards
+                </h4>
+                {creditCards.map(acc => (
+                  <div key={acc.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col hover:border-red-200 transition-all group overflow-hidden">
+                    <div className="p-4 flex items-center gap-4 cursor-pointer" onClick={() => router.push(`/ledger?account=${acc.id}`)}>
+                        <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center shrink-0 border border-slate-100">{getAccountIcon(acc.type)}</div>
+                        <div className="flex-grow min-w-0">
+                        <h4 className="font-bold text-slate-800 truncate">{acc.name}</h4>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">{acc.type}</p>
+                        {acc.credit_limit > 0 && <div className="text-xs font-bold text-emerald-600">Avail: ${(acc.credit_limit - Math.abs(acc.balance)).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>}
+                        </div>
+                        <div className="font-black text-lg text-red-500">
+                        {acc.balance < 0 ? '-' : ''}${Math.abs(acc.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </div>
+                    </div>
+                    <div className="flex border-t border-slate-50 bg-slate-50/50">
+                        <button onClick={() => openQuickEntry(acc.id)} className="flex-1 py-2.5 text-xs font-bold text-slate-500 hover:bg-emerald-50 hover:text-emerald-600 border-r border-slate-100 transition-colors flex items-center justify-center gap-1">
+                            <Zap size={12}/> Quick Entry
+                        </button>
+                        <button onClick={() => openAccountModal(acc)} className="flex-1 py-2.5 text-xs font-bold text-slate-500 hover:bg-blue-50 hover:text-blue-600 transition-colors flex items-center justify-center gap-1">
+                            <Edit2 size={12}/> Edit
+                        </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -362,7 +493,7 @@ export default function Dashboard() {
                             
                             <div className="flex items-center justify-between md:justify-end w-full md:w-auto gap-4">
                                 {txn.notes && <span title={txn.notes}><FileText size={16} className="text-slate-300"/></span>}
-                                <div className={`font-black text-xl tracking-tight ${txn.type === 'Income' ? 'text-emerald-500' : txn.type === 'Expense' ? 'text-slate-900' : 'text-blue-500'}`}>
+                                <div className={`font-black text-xl tracking-tight ${txn.type === 'Income' ? 'text-emerald-500' : txn.type === 'Expense' ? 'text-red-500' : 'text-blue-500'}`}>
                                     {txn.type === 'Expense' ? '-' : txn.type === 'Income' ? '+' : ''}${Number(txn.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                 </div>
                             </div>
@@ -423,7 +554,7 @@ export default function Dashboard() {
                           placeholder="e.g. Walmart, Chase, Salary" 
                           className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-900 placeholder-slate-400 border border-slate-100 outline-none focus:border-blue-300 focus:bg-white transition-all" 
                           value={quickForm.payee} 
-                          onChange={e => setQuickForm({...quickForm, payee: e.target.value})} 
+                          onChange={e => handlePayeeChange(e.target.value)} 
                       />
                       <datalist id="payee-list">
                           {payeeSuggestions.map((p, i) => <option key={i} value={p} />)}
@@ -452,11 +583,50 @@ export default function Dashboard() {
 
               {quickForm.type !== 'Transfer' && (
                   <div>
-                      <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2"><Tag size={14}/> Budget Envelope</label>
-                      <select className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-900 border border-slate-100 outline-none focus:border-blue-300 cursor-pointer" value={quickForm.category_id} onChange={e => setQuickForm({...quickForm, category_id: e.target.value})}>
-                          <option value="">{quickForm.type === 'Income' ? 'Ready to Assign (Uncategorized)' : 'Uncategorized Expense'}</option>
-                          {categories.map(c => <option key={c.id} value={c.id}>{c.emoji || ''} {c.name}</option>)}
-                      </select>
+                      <SearchableDropdown 
+                        label="Budget Envelope"
+                        icon={<Tag size={14}/>}
+                        options={[
+                            { id: '', name: quickForm.type === 'Income' ? 'Ready to Assign (Uncategorized)' : 'Uncategorized Expense' },
+                            ...categories.map(c => ({ id: c.id, name: c.name, emoji: c.emoji, group: 'Envelopes' }))
+                        ]}
+                        value={quickForm.category_id}
+                        onChange={(val) => {
+                            setQuickForm({...quickForm, category_id: val});
+                            checkSmartBillPay(val);
+                        }}
+                      />
+                  </div>
+              )}
+
+              {/* Feature 6: Smart Bill Pay UI */}
+              {smartBillPay.showToggle && (
+                  <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-2xl space-y-3 animate-in slide-in-from-top-2">
+                      <div className="flex items-center gap-2 text-emerald-700 font-bold text-xs uppercase tracking-widest">
+                          <Zap size={14}/> Smart Bill Pay
+                      </div>
+                      <div className="space-y-2">
+                          {smartBillPay.category?.is_repeating && (
+                              <label className="flex items-center gap-3 cursor-pointer group">
+                                  <div className="relative">
+                                      <input type="checkbox" className="sr-only peer" checked={smartBillPay.advanceCycle} onChange={e => setSmartBillPay({...smartBillPay, advanceCycle: e.target.checked})} />
+                                      <div className="w-10 h-6 bg-slate-200 rounded-full peer peer-checked:bg-emerald-500 transition-colors"></div>
+                                      <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
+                                  </div>
+                                  <span className="text-xs font-bold text-slate-700 group-hover:text-emerald-600 transition-colors">Advance Due Date to next cycle</span>
+                              </label>
+                          )}
+                          {smartBillPay.category?.is_debt && (
+                              <label className="flex items-center gap-3 cursor-pointer group">
+                                  <div className="relative">
+                                      <input type="checkbox" className="sr-only peer" checked={smartBillPay.deductDebt} onChange={e => setSmartBillPay({...smartBillPay, deductDebt: e.target.checked})} />
+                                      <div className="w-10 h-6 bg-slate-200 rounded-full peer peer-checked:bg-emerald-500 transition-colors"></div>
+                                      <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
+                                  </div>
+                                  <span className="text-xs font-bold text-slate-700 group-hover:text-emerald-600 transition-colors">Deduct target amount from debt balance</span>
+                              </label>
+                          )}
+                      </div>
                   </div>
               )}
 

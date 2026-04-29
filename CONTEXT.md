@@ -7,7 +7,15 @@ Finance OS is a custom, manual-entry financial platform designed to replace YNAB
 
 ## 2. DATABASE SCHEMA (Supabase)
 * **`accounts`**: `id`, `created_at`, `name`, `type` ('Checking', 'Savings', 'Credit Card', 'Cash'), `balance`, `credit_limit`. 
-    * *Logic:* Credit cards are tracked as positive balance inputs in the UI, but the system dynamically subtracts them from the Total Net Worth calculation. Available credit is auto-calculated.
+    * **Floating Point Failsafe:** Rounds input to 2 decimal places to prevent microscopic floating-point remainders from breaking UI and math.
+    * **Actionable Filter:** Added "View: Actionable" filter to show only categories with non-zero balances.
+    * **Advanced Transfers:** Transfer modal pre-fills amount and defaults direction based on balance (Transfer Out for positive, Transfer In for negative). Includes a quick reference list of other funded/overspent envelopes for easier movement.
+    * **Smart Bill Pay:** (Integrated with Ledger/Quick Entry) Automatically advances `due_date` and deducts `target_amount` from debt `balance` for repeating/debt categories.
+    * **Searchable Dropdowns:** Replaced standard category selects with searchable dropdown components.
+    * **Payee Memory:** Remembers the last category used for a specific payee and autofills it.
+    * **Ledger Enhancements:** Displays current account balance when filtered. Expenses are color-coded Red. Transfers are contextual (Red for leaving account, Emerald for entering).
+    * **Calendar Gamification:** Fully funded categories now use a glowing gold gradient.
+    * **Dashboard Organization:** Accounts are grouped into "Liquid Accounts" and "Credit Cards", sorted alphabetically.
 * **`category_groups`**: `id`, `name`, `sort_order`. (The macro folders, e.g., 'Living Expenses', 'Debt').
 * **`categories`**: `id`, `group_id` (FK), `name`, `emoji`, `target_type` ('Set Aside', 'Fill Up To', 'Have Balance'), `target_amount`, `target_period` ('Weekly', 'Monthly', 'Yearly', 'None'), `due_date`, `is_repeating`, `end_date`, `notes`, `is_debt` (boolean), `balance` (outstanding debt owed), `is_asap` (boolean urgency flag), `assigned_amount` (current liquid cash inside the envelope), `sort_order`, `is_hidden` (for archived goals).
 * **`transactions`**: `id`, `created_at`, `date`, `amount`, `payee`, `category_id` (FK), `account_id` (FK), `to_account_id` (FK - for transfers), `type` ('Income', 'Expense', 'Transfer'), `notes`.
@@ -25,7 +33,7 @@ Finance OS is a custom, manual-entry financial platform designed to replace YNAB
 * **Inline Math Evaluation:** The "Assigned" input accepts basic math operators (e.g., `+50`, `100-20`) to dynamically update assigned values.
 * **Math Reversal Sync:** Deleting or editing a transaction automatically reverses the old math impact on accounts and envelopes before applying new changes, ensuring the ledger and balances are always perfectly synced.
 * **Manual Adjustments vs Silent Updates:** When editing an account balance directly, the user can choose to let the system auto-calculate the difference and log a transaction ("Manual Adjustment") or bypass the ledger entirely ("Silent Update").
-* **Credit Card Math Inversion:** Outflow (Expenses) on Credit Card accounts INCREASES the balance (debt), while Inflow (Income/Payments) DECREASES the balance.
+* **Account Display Math & Credit Cards:** Outflow (Expenses) on Credit Card accounts INCREASES the balance (debt), while Inflow (Income/Payments) DECREASES the balance. To ensure proper UI formatting without swallowing negatives, overdrawn standard accounts (Checking/Savings) manually conditionally render their minus signs alongside absolute values (e.g., `-$50.00`).
 * **Persistent Preferences:** Category sorting preferences, view filters, and expanded/collapsed group states are stored in `localStorage` to persist across sessions seamlessly.
 * **Visual Urgency & Gamification:** Categories past their `due_date` auto-flag as "Late". `is_asap` overrides render red emergency backgrounds. **Overspent categories** (negative available balance) turn red and trigger a global warning banner at the top of the budget. **Fully funded categories** (Available >= Target) render with a glowing gold gradient to gamify goal completion.
 * **Savings Breakdown:** Categories with targets and due dates dynamically calculate daily, weekly, and monthly funding requirements to meet goals on time.
