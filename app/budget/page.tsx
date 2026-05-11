@@ -7,7 +7,7 @@ import {
   ChevronDown, ChevronRight, Target, LayoutGrid, 
   Wallet, Calendar, FileText, Repeat, AlignLeft, PieChart,
   ArrowUpDown, AlertCircle, AlertTriangle, ArrowRightLeft,
-  FastForward, ListOrdered, Filter, Download, Activity
+  FastForward, ListOrdered, Filter, Download, Activity, Archive, RotateCcw
 } from 'lucide-react';
 import { format, parseISO, addWeeks, addMonths, addYears, isAfter } from 'date-fns';
 
@@ -31,11 +31,12 @@ export default function BudgetPage() {
   const [groupFormName, setGroupFormName] = useState('');
 
   const [editingCatId, setEditingCatId] = useState<number | null>(null);
+  const [showArchivedSection, setShowArchivedSection] = useState(false);
   const [catForm, setCatForm] = useState({
     group_id: '', name: '', emoji: '', 
     target_type: 'Set Aside', target_amount: '', 
     due_date: '', is_repeating: false, target_period: 'Monthly', end_date: '', notes: '',
-    is_debt: false, balance: '', is_asap: false
+    is_debt: false, balance: '', is_asap: false, is_hidden: false
   });
 
   // Funding Mode States
@@ -314,7 +315,7 @@ export default function BudgetPage() {
               due_date: cat.due_date || '', is_repeating: cat.is_repeating || false, target_period: cat.target_period || 'Monthly', 
               end_date: cat.end_date || '', notes: cat.notes || '',
               is_debt: cat.is_debt || false, balance: cat.balance ? cat.balance.toString() : '',
-              is_asap: cat.is_asap || false
+              is_asap: cat.is_asap || false, is_hidden: !!cat.is_hidden
           });
       } else {
           setEditingCatId(null);
@@ -322,7 +323,7 @@ export default function BudgetPage() {
               group_id: defaultGroupId ? defaultGroupId.toString() : (groups[0]?.id.toString() || ''), 
               name: '', emoji: '', target_type: 'Set Aside', target_amount: '', due_date: '', 
               is_repeating: false, target_period: 'Monthly', end_date: '', notes: '',
-              is_debt: false, balance: '', is_asap: false
+              is_debt: false, balance: '', is_asap: false, is_hidden: false
           });
       }
       setIsCategoryModalOpen(true);
@@ -336,7 +337,8 @@ export default function BudgetPage() {
           due_date: catForm.due_date || null, is_repeating: catForm.is_repeating, target_period: catForm.target_period, 
           end_date: catForm.end_date || null, notes: catForm.notes || null,
           is_debt: catForm.is_debt, balance: parseFloat(catForm.balance) || 0,
-          is_asap: catForm.is_asap
+          is_asap: catForm.is_asap,
+          is_hidden: catForm.is_hidden
       };
       
       if (editingCatId) {
@@ -357,8 +359,14 @@ export default function BudgetPage() {
       setIsCategoryModalOpen(false);
   }
 
+  async function restoreCategory(id: number) {
+      const { error } = await supabase.from('categories').update({ is_hidden: false }).eq('id', id);
+      if (!error) setCategories(categories.map(c => c.id === id ? { ...c, is_hidden: false } : c));
+  }
+
   // Math (Only count visible categories for totals)
   const visibleCategories = categories.filter(c => !c.is_hidden);
+  const archivedCategories = categories.filter(c => c.is_hidden);
   const totalAssigned = visibleCategories.reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0);
   
   let calculatedRTA = liquidCash - totalAssigned;
@@ -657,6 +665,55 @@ export default function BudgetPage() {
             );
         })}
 
+        {archivedCategories.length > 0 && (
+            <div className="bg-slate-100/80 rounded-3xl border border-slate-200 overflow-hidden">
+                <button
+                    type="button"
+                    onClick={() => setShowArchivedSection(!showArchivedSection)}
+                    className="w-full flex items-center justify-between p-4 text-left hover:bg-slate-100 transition-colors"
+                >
+                    <span className="font-bold text-slate-700 flex items-center gap-2">
+                        <Archive size={18} className="text-amber-600"/>
+                        Archived categories
+                        <span className="text-xs font-black text-slate-400 bg-white px-2 py-0.5 rounded-lg border border-slate-200">{archivedCategories.length}</span>
+                    </span>
+                    <ChevronDown size={20} className={`text-slate-400 transition-transform ${showArchivedSection ? 'rotate-180' : ''}`}/>
+                </button>
+                {showArchivedSection && (
+                    <ul className="divide-y divide-slate-200 border-t border-slate-200 bg-white">
+                        {archivedCategories.map(c => (
+                            <li key={c.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => openCategoryModal(c)}
+                                    className="text-left min-w-0 flex items-center gap-3 group"
+                                >
+                                    <span className="text-lg shrink-0 w-10 h-10 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center">
+                                        {c.emoji ? c.emoji : <Target size={16} className="text-slate-300"/>}
+                                    </span>
+                                    <span>
+                                        <span className="font-bold text-slate-800 group-hover:text-blue-600 transition-colors block truncate">{c.name}</span>
+                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                            {groups.find(g => g.id === c.group_id)?.name || 'Group'}
+                                            {' · '}
+                                            assigned ${Number(c.assigned_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                        </span>
+                                    </span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => restoreCategory(c.id)}
+                                    className="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-emerald-500 text-white text-xs font-bold hover:bg-emerald-600 transition-colors"
+                                >
+                                    <RotateCcw size={14}/> Restore
+                                </button>
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </div>
+        )}
+
         {groups.length === 0 && (
             <div className="text-center py-20 bg-white rounded-3xl border-2 border-dashed border-slate-200">
                 <div className="w-16 h-16 bg-slate-50 text-slate-300 rounded-full flex items-center justify-center mx-auto mb-4"><FolderPlus size={32}/></div>
@@ -816,6 +873,30 @@ export default function BudgetPage() {
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2"><AlignLeft size={14}/> Category Notes</label>
                   <textarea placeholder="Account numbers, vendor phone numbers, login details..." className="w-full p-3 bg-slate-50 rounded-xl font-bold text-sm text-slate-900 placeholder-slate-400 border border-slate-100 outline-none focus:border-blue-300 focus:bg-white transition-all resize-none" rows={3} value={catForm.notes} onChange={e => setCatForm({...catForm, notes: e.target.value})} />
               </div>
+
+              {editingCatId && (
+                  <div className="bg-amber-50 p-4 rounded-2xl border border-amber-100 space-y-3">
+                      <div className="flex items-center gap-2 text-amber-800 font-bold text-xs uppercase tracking-widest">
+                          <Archive size={14}/> Archive
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                          <p className="text-xs font-bold text-slate-600 leading-snug">
+                              Archived categories stay out of the budget grid and bill calendar. Ledger history and payee links stay intact.
+                          </p>
+                          <button
+                              type="button"
+                              onClick={() => setCatForm({ ...catForm, is_hidden: !catForm.is_hidden })}
+                              className={`shrink-0 w-10 h-6 rounded-full flex items-center transition-colors px-1 ${catForm.is_hidden ? 'bg-amber-500' : 'bg-slate-300'}`}
+                              title={catForm.is_hidden ? 'Restore to active budget' : 'Archive this category'}
+                          >
+                              <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${catForm.is_hidden ? 'translate-x-4' : 'translate-x-0'}`}></div>
+                          </button>
+                      </div>
+                      {catForm.is_hidden && (
+                          <p className="text-[10px] font-bold text-amber-700">This category is archived. Save to apply, or turn off to keep it active.</p>
+                      )}
+                  </div>
+              )}
             </div>
 
             <button type="submit" className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold mt-8 shadow-lg hover:bg-slate-800 transition-colors">

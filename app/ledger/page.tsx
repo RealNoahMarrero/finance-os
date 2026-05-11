@@ -91,11 +91,24 @@ function LedgerEngine() {
   }
 
   // --- THE MASTER BRAIN: BALANCE ADJUSTMENT ---
+  // Always read current balances from the DB so reverse → apply chains (edits) never
+  // use stale React state after the first write.
   const handleBalanceAdjustment = async (txn: any, mode: 'apply' | 'reverse') => {
     const amount = Number(txn.amount);
-    const sourceAcc = accounts.find(a => a.id === txn.account_id);
-    const destAcc = txn.to_account_id ? accounts.find(a => a.id === txn.to_account_id) : null;
-    const cat = txn.category_id ? categories.find(c => c.id === txn.category_id) : null;
+    const accountIds = [txn.account_id, txn.to_account_id].filter(Boolean);
+    const { data: accRows } = accountIds.length
+        ? await supabase.from('accounts').select('*').in('id', accountIds as number[])
+        : { data: [] as any[] };
+    const accById = Object.fromEntries((accRows || []).map((a: any) => [a.id, a]));
+
+    const sourceAcc = txn.account_id ? accById[txn.account_id] : null;
+    const destAcc = txn.to_account_id ? accById[txn.to_account_id] : null;
+
+    let cat: any = null;
+    if (txn.category_id) {
+        const { data } = await supabase.from('categories').select('*').eq('id', txn.category_id).single();
+        cat = data;
+    }
 
     const getAdj = (isStepInflow: boolean) => {
         if (mode === 'reverse') return isStepInflow ? -amount : amount;
@@ -140,7 +153,9 @@ function LedgerEngine() {
       if (editingTxn) {
           await handleBalanceAdjustment(editingTxn, 'reverse');
           const { data: updated, error } = await supabase.from('transactions').update(payload).eq('id', editingTxn.id).select('*, categories(name, emoji), accounts!account_id(name, type)').single();
-          if (updated) {
+          if (error || !updated) {
+              await handleBalanceAdjustment(editingTxn, 'apply');
+          } else {
               await handleBalanceAdjustment(updated, 'apply');
               setTransactions(transactions.map(t => t.id === updated.id ? updated : t));
           }
