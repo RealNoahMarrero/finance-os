@@ -420,7 +420,7 @@ export function DashboardView() {
           </div>
         </div>
 
-        <div className="col-span-1 md:col-span-3 app-card rounded-3xl p-5 md:p-6 border border-[var(--border)] shadow-sm">
+        <div className="mt-6 md:mt-8 app-card rounded-3xl p-5 md:p-6 border border-[var(--border)] shadow-sm">
           <div className="flex justify-between items-center mb-4">
             <h3 className="font-bold text-lg text-[var(--text-primary)] flex items-center gap-2">
               <TrendingUp size={20} className="text-emerald-500" />
