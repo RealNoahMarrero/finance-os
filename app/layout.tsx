@@ -1,13 +1,28 @@
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
-import "./globals.css";
-import Navigation from "./ui/Nav"; // <--- CHANGED THIS LINE
+import type { Metadata, Viewport } from 'next';
+import { Plus_Jakarta_Sans } from 'next/font/google';
+import './globals.css';
+import { ThemeProvider } from './providers/theme-provider';
+import { AppShell } from '@/components/layout/app-shell';
 
-const inter = Inter({ subsets: ["latin"] });
+const jakarta = Plus_Jakarta_Sans({
+  subsets: ['latin'],
+  variable: '--font-jakarta',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
-  title: "Finance OS",
-  description: "Zero-Based Manual Budgeting",
+  title: 'Finance OS',
+  description: 'Zero-Based Manual Budgeting',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#f7f7f5' },
+    { media: '(prefers-color-scheme: dark)', color: '#0d0d0f' },
+  ],
 };
 
 export default function RootLayout({
@@ -16,12 +31,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${inter.className} bg-slate-50 text-slate-900 min-h-screen`}>
-        <div className="max-w-7xl mx-auto p-4 md:p-8">
-            <Navigation />
-            {children}
-        </div>
+    <html lang="en" suppressHydrationWarning>
+      <body className={`${jakarta.variable} font-sans antialiased`}>
+        <ThemeProvider>
+          <AppShell>{children}</AppShell>
+        </ThemeProvider>
       </body>
     </html>
   );

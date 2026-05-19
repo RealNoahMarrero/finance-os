@@ -1,1 +1,220 @@
 @import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-glass: var(--surface-glass);
+  --color-border: var(--border);
+  --color-text-primary: var(--text-primary);
+  --color-text-muted: var(--text-muted);
+  --color-accent-positive: var(--accent-positive);
+  --color-accent-negative: var(--accent-negative);
+  --color-accent-blue: var(--accent-blue);
+
+  --radius-card: 1.25rem;
+  --shadow-elevated: 0 8px 32px rgb(0 0 0 / 0.08);
+
+  --chart-income: var(--chart-income);
+  --chart-expense: var(--chart-expense);
+  --chart-grid: var(--chart-grid);
+}
+
+:root {
+  --canvas: #f7f7f5;
+  --surface: #ffffff;
+  --surface-elevated: #ffffff;
+  --surface-subtle: #f1f5f9;
+  --surface-hover: rgb(15 23 42 / 0.04);
+  --surface-glass: rgb(255 255 255 / 0.72);
+  --border: rgb(15 23 42 / 0.08);
+  --text-primary: #0f172a;
+  --text-muted: #64748b;
+  --accent-positive: #059669;
+  --accent-negative: #dc2626;
+  --accent-blue: #2563eb;
+  --chart-income: #10b981;
+  --chart-expense: #f43f5e;
+  --chart-grid: rgb(15 23 42 / 0.06);
+  --nav-height: 4.5rem;
+  --fab-offset: 5.5rem;
+}
+
+.dark {
+  --canvas: #0d0d0f;
+  --surface: rgb(255 255 255 / 0.06);
+  --surface-elevated: #1a1a1f;
+  --surface-subtle: rgb(255 255 255 / 0.08);
+  --surface-hover: rgb(255 255 255 / 0.06);
+  --surface-glass: rgb(255 255 255 / 0.05);
+  --border: rgb(255 255 255 / 0.1);
+  --text-primary: #f8fafc;
+  --text-muted: #94a3b8;
+  --accent-positive: #34d399;
+  --accent-negative: #fb7185;
+  --accent-blue: #60a5fa;
+  --chart-income: #34d399;
+  --chart-expense: #fb7185;
+  --chart-grid: rgb(255 255 255 / 0.08);
+  --shadow-elevated: 0 8px 32px rgb(0 0 0 / 0.4);
+}
+
+:root {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--text-primary);
+  min-height: 100dvh;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@layer utilities {
+  .glass-card {
+    background: var(--surface-glass);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    color: var(--text-primary);
+  }
+
+  .app-card {
+    background: var(--surface-elevated);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+  }
+
+  .app-card-subtle {
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+  }
+
+  .app-input {
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+  }
+
+  .app-input::placeholder {
+    color: var(--text-muted);
+  }
+
+  .app-modal {
+    background: var(--surface-elevated);
+    color: var(--text-primary);
+  }
+
+  .app-segment-track {
+    background: var(--surface-subtle);
+  }
+
+  .app-segment-active {
+    background: var(--surface-elevated);
+    color: var(--text-primary);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
+  }
+
+  .dark .app-segment-active {
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
+  }
+
+  .app-select {
+    appearance: none;
+    background-color: var(--surface-subtle);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    padding: 0.625rem 0.75rem;
+    font-size: 0.875rem;
+    font-weight: 700;
+    cursor: pointer;
+    outline: none;
+  }
+
+  .app-select:focus {
+    border-color: var(--accent-blue);
+    background-color: var(--surface-elevated);
+  }
+
+  .app-select option {
+    background-color: var(--surface-elevated);
+    color: var(--text-primary);
+  }
+
+  .gradient-positive {
+    background: linear-gradient(135deg, #059669 0%, #10b981 50%, #34d399 100%);
+  }
+
+  .dark .gradient-positive {
+    background: linear-gradient(135deg, #047857 0%, #10b981 40%, #6ee7b7 100%);
+  }
+
+  .gradient-negative {
+    background: linear-gradient(135deg, #dc2626 0%, #f43f5e 100%);
+  }
+
+  .gradient-hero {
+    background: linear-gradient(145deg, #0f172a 0%, #1e293b 40%, #0f172a 100%);
+  }
+
+  .dark .gradient-hero {
+    background: linear-gradient(145deg, #000000 0%, #1a1a1f 50%, #0d0d0f 100%);
+  }
+
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .safe-bottom {
+    padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);
+  }
+
+  .touch-manipulation {
+    touch-action: manipulation;
+  }
+
+  .pb-nav {
+    padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px) + 1rem);
+  }
+
+  @media (min-width: 1024px) {
+    .pb-nav {
+      padding-bottom: 2rem;
+    }
+  }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--border) 0%,
+    var(--surface) 50%,
+    var(--border) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
