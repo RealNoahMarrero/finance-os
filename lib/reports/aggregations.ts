@@ -58,7 +58,13 @@ export interface CategorySpend {
 }
 
 export function aggregateSpendingByCategory(
-  transactions: { date: string; amount: number; type: string; category_id: number | null }[],
+  transactions: {
+    date: string;
+    amount: number;
+    type: string;
+    category_id: number | null;
+    transaction_splits?: { category_id: number; amount: number }[];
+  }[],
   categories: Category[],
   period: ReportPeriod
 ) {
@@ -69,6 +75,16 @@ export function aggregateSpendingByCategory(
   transactions
     .filter((t) => t.type === 'Expense' && t.date >= start)
     .forEach((t) => {
+      const splits = t.transaction_splits?.filter((s) => s.category_id) ?? [];
+      if (splits.length > 0) {
+        splits.forEach((s) => {
+          totals.set(
+            s.category_id,
+            (totals.get(s.category_id) || 0) + Number(s.amount)
+          );
+        });
+        return;
+      }
       if (!t.category_id) return;
       totals.set(t.category_id, (totals.get(t.category_id) || 0) + Number(t.amount));
     });

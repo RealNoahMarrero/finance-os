@@ -1,5 +1,22 @@
 import { supabase } from '@/lib/supabase';
 import type { Transaction, TransactionPayload } from '@/lib/types';
+import {
+  fetchSplitsForTransactions,
+  groupSplitsByTransaction,
+} from '@/lib/queries/transaction-splits';
+
+export async function attachSplitsToTransactions<T extends { id: number }>(
+  transactions: T[]
+): Promise<(T & { transaction_splits?: import('@/lib/types').TransactionSplit[] })[]> {
+  if (transactions.length === 0) return transactions;
+  const ids = transactions.map((t) => t.id);
+  const { data: splits } = await fetchSplitsForTransactions(ids);
+  const byTxn = groupSplitsByTransaction(splits || []);
+  return transactions.map((t) => ({
+    ...t,
+    transaction_splits: byTxn.get(t.id) || [],
+  }));
+}
 
 export async function fetchTransactions(limit?: number) {
   let query = supabase
@@ -11,7 +28,9 @@ export async function fetchTransactions(limit?: number) {
   if (limit) query = query.limit(limit);
 
   const { data, error } = await query;
-  return { data: (data || []) as Transaction[], error };
+  const txns = (data || []) as Transaction[];
+  const withSplits = await attachSplitsToTransactions(txns);
+  return { data: withSplits as Transaction[], error };
 }
 
 export async function fetchMonthTransactions(startDate: string) {

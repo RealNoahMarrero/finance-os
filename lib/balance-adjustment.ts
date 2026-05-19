@@ -11,6 +11,15 @@ export interface BalanceAdjustmentTxn {
   account_id: number;
   to_account_id?: number | null;
   category_id?: number | null;
+  /** When true, only adjust account(s) — used for split parent rows */
+  accountsOnly?: boolean;
+  /** When true, only adjust category — used for split line items */
+  categoryOnly?: boolean;
+}
+
+export interface SplitLine {
+  category_id: number;
+  amount: number;
 }
 
 export async function applyBalanceAdjustment(
@@ -43,7 +52,7 @@ export async function applyBalanceAdjustment(
     return isStepInflow ? amount : -amount;
   };
 
-  if (sourceAcc) {
+  if (sourceAcc && !txn.categoryOnly) {
     const isCC = sourceAcc.type === 'Credit Card';
     const isInflow = txn.type === 'Income';
     const adjustment = isCC
@@ -59,7 +68,7 @@ export async function applyBalanceAdjustment(
       .eq('id', sourceAcc.id);
   }
 
-  if (destAcc) {
+  if (destAcc && !txn.categoryOnly) {
     const isCC = destAcc.type === 'Credit Card';
     const adjustment = isCC ? -getAdj(true) : getAdj(true);
     await supabase
@@ -68,7 +77,7 @@ export async function applyBalanceAdjustment(
       .eq('id', destAcc.id);
   }
 
-  if (cat) {
+  if (cat && !txn.accountsOnly) {
     const adjustment = txn.type === 'Income' ? getAdj(true) : getAdj(false);
     await supabase
       .from('categories')
@@ -108,5 +117,27 @@ export async function applySmartBillPay(category: {
 
   if (Object.keys(catPayload).length > 0) {
     await supabase.from('categories').update(catPayload).eq('id', category.id);
+  }
+}
+
+/** One account movement + per-category envelope allocations */
+export async function applySplitBalanceAdjustment(
+  parent: BalanceAdjustmentTxn,
+  splits: SplitLine[],
+  mode: BalanceAdjustmentMode
+) {
+  await applyBalanceAdjustment({ ...parent, category_id: null, accountsOnly: true }, mode);
+  for (const split of splits) {
+    await applyBalanceAdjustment(
+      {
+        amount: split.amount,
+        type: parent.type,
+        account_id: parent.account_id,
+        to_account_id: parent.to_account_id,
+        category_id: split.category_id,
+        categoryOnly: true,
+      },
+      mode
+    );
   }
 }

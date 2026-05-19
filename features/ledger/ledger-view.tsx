@@ -6,14 +6,29 @@ import { useSearchParams } from 'next/navigation';
 import { 
   ArrowUpRight, ArrowDownRight, ArrowRightLeft, Activity, X, 
   Search, Plus, PieChart, LayoutGrid, ListOrdered, Calendar, Tag, 
-  FileText, Trash2, AlignLeft, Save, Loader2, Wallet, Edit2, CheckCircle2, AlertTriangle, Zap
+  FileText, Trash2, AlignLeft, Save, Loader2, Wallet, Edit2, CheckCircle2, AlertTriangle, Zap, Split
 } from 'lucide-react';
 import { format, parseISO, addWeeks, addMonths, addYears } from 'date-fns';
 import SearchableDropdown from '@/app/components/SearchableDropdown';
 import { formatMoney, roundMoney, snapMoney } from '@/lib/money';
-import { applyBalanceAdjustment, applySmartBillPay } from '@/lib/balance-adjustment';
+import { applySmartBillPay } from '@/lib/balance-adjustment';
+import { applyTransactionBalances, reverseTransactionBalances } from '@/lib/transaction-balance';
+import { attachSplitsToTransactions } from '@/lib/queries/transactions';
+import {
+  deleteSplitsForTransaction,
+  replaceTransactionSplits,
+} from '@/lib/queries/transaction-splits';
+import {
+  emptySplitLine,
+  isSplitTransaction,
+  parseSplitLines,
+  splitsMatchTotal,
+  type SplitFormLine,
+} from '@/lib/transaction-splits';
+import { SplitTransactionFields } from '@/features/ledger/split-transaction-fields';
 import { PageSkeleton } from '@/components/ui/skeleton';
 import { Select } from '@/components/ui/select';
+import type { Transaction } from '@/lib/types';
 
 export function LedgerView() {
   const searchParams = useSearchParams();
@@ -54,6 +69,12 @@ export function LedgerView() {
     notes: ''
   });
 
+  const [isSplitMode, setIsSplitMode] = useState(false);
+  const [splitLines, setSplitLines] = useState<SplitFormLine[]>([
+    emptySplitLine(),
+    emptySplitLine(),
+  ]);
+
   useEffect(() => {
     // Capture URL params safely via Next.js hook on mount
     const urlAccountId = searchParams.get('account');
@@ -87,29 +108,52 @@ export function LedgerView() {
       .order('created_at', { ascending: false });
       
     if (txns) {
-        setTransactions(txns);
+        const withSplits = await attachSplitsToTransactions(txns);
+        setTransactions(withSplits);
         const unique = Array.from(new Set(txns.map(t => t.payee).filter(Boolean)));
         setPayeeSuggestions(unique as string[]);
     }
     setLoading(false);
   }
 
-  // --- THE MASTER BRAIN: BALANCE ADJUSTMENT ---
-  // Always read current balances from the DB so reverse → apply chains (edits) never
-  // use stale React state after the first write.
-  const handleBalanceAdjustment = (txn: any, mode: 'apply' | 'reverse') =>
-    applyBalanceAdjustment(txn, mode);
+  async function txnWithSplits(txn: Transaction): Promise<Transaction> {
+    const [enriched] = await attachSplitsToTransactions([txn]);
+    return enriched;
+  }
 
   async function saveTransaction(e: React.FormEvent) {
       e.preventDefault();
       setIsSubmitting(true);
 
       const amount = roundMoney(parseFloat(txnForm.amount) || 0);
+      const useSplit = isSplitMode && txnForm.type !== 'Transfer';
+      const parsedSplits = useSplit ? parseSplitLines(splitLines) : [];
+
+      if (useSplit) {
+        if (parsedSplits.length < 2) {
+          alert('Add at least two categories with amounts for a split transaction.');
+          setIsSubmitting(false);
+          return;
+        }
+        if (!splitsMatchTotal(amount, splitLines)) {
+          alert('Split amounts must equal the transaction total.');
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
       const payload = {
           date: txnForm.date,
           amount: amount,
           payee: txnForm.type === 'Transfer' ? 'Transfer' : txnForm.payee,
-          category_id: txnForm.type === 'Transfer' ? null : (txnForm.category_id ? parseInt(txnForm.category_id) : null),
+          category_id:
+            txnForm.type === 'Transfer'
+              ? null
+              : useSplit
+                ? null
+                : txnForm.category_id
+                  ? parseInt(txnForm.category_id)
+                  : null,
           account_id: parseInt(txnForm.account_id),
           to_account_id: txnForm.type === 'Transfer' ? parseInt(txnForm.to_account_id) : null,
           type: txnForm.type,
@@ -117,22 +161,29 @@ export function LedgerView() {
       };
 
       if (editingTxn) {
-          await handleBalanceAdjustment(editingTxn, 'reverse');
+          await reverseTransactionBalances(editingTxn);
           const { data: updated, error } = await supabase.from('transactions').update(payload).eq('id', editingTxn.id).select('*, categories(name, emoji), accounts!account_id(name, type)').single();
           if (error || !updated) {
-              await handleBalanceAdjustment(editingTxn, 'apply');
+              await applyTransactionBalances(editingTxn);
           } else {
-              await handleBalanceAdjustment(updated, 'apply');
-              setTransactions(transactions.map(t => t.id === updated.id ? updated : t));
+              if (useSplit) {
+                await replaceTransactionSplits(updated.id, parsedSplits);
+              } else {
+                await deleteSplitsForTransaction(updated.id);
+              }
+              const fullTxn = await txnWithSplits(updated);
+              await applyTransactionBalances(fullTxn);
           }
       } else {
           const { data: inserted, error } = await supabase.from('transactions').insert([payload]).select('*, categories(name, emoji), accounts!account_id(name, type)').single();
           if (inserted) {
-              await handleBalanceAdjustment(inserted, 'apply');
-              setTransactions([inserted, ...transactions]);
+              if (useSplit) {
+                await replaceTransactionSplits(inserted.id, parsedSplits);
+              }
+              const fullTxn = await txnWithSplits(inserted);
+              await applyTransactionBalances(fullTxn);
 
-              // Feature 6: Smart Bill Pay Logic
-              if (smartBillPay.showToggle && smartBillPay.category) {
+              if (!useSplit && smartBillPay.showToggle && smartBillPay.category) {
                   await applySmartBillPay(smartBillPay.category, {
                       advanceCycle: smartBillPay.advanceCycle,
                       deductDebt: smartBillPay.deductDebt,
@@ -146,9 +197,9 @@ export function LedgerView() {
       setIsSubmitting(false);
   }
 
-  async function deleteTransaction(txn: any) {
+  async function deleteTransaction(txn: Transaction) {
       if (!confirm("Permanently delete and reverse all math for this transaction?")) return;
-      await handleBalanceAdjustment(txn, 'reverse');
+      await reverseTransactionBalances(txn);
       await supabase.from('transactions').delete().eq('id', txn.id);
       setTransactions(transactions.filter(t => t.id !== txn.id));
       await fetchData();
@@ -156,13 +207,14 @@ export function LedgerView() {
 
   const openNewTransactionModal = () => {
       setEditingTxn(null);
+      setIsSplitMode(false);
+      setSplitLines([emptySplitLine(), emptySplitLine()]);
       setTxnForm({
           type: 'Expense',
           date: format(new Date(), 'yyyy-MM-dd'),
           amount: '',
           payee: '',
           category_id: '',
-          // Auto-select the filtered account if one is chosen, otherwise default to the first account
           account_id: filterAccount !== 'All' ? filterAccount : (accounts.length > 0 ? accounts[0].id.toString() : ''),
           to_account_id: '',
           notes: ''
@@ -170,8 +222,21 @@ export function LedgerView() {
       setIsModalOpen(true);
   };
 
-  const openEdit = (txn: any) => {
+  const openEdit = (txn: Transaction) => {
       setEditingTxn(txn);
+      const splits = txn.transaction_splits || [];
+      if (splits.length > 0) {
+        setIsSplitMode(true);
+        setSplitLines(
+          splits.map((s) => ({
+            category_id: String(s.category_id),
+            amount: String(s.amount),
+          }))
+        );
+      } else {
+        setIsSplitMode(false);
+        setSplitLines([emptySplitLine(), emptySplitLine()]);
+      }
       setTxnForm({
           type: txn.type,
           date: txn.date,
@@ -188,11 +253,10 @@ export function LedgerView() {
   const closeModal = () => {
       setIsModalOpen(false);
       setEditingTxn(null);
+      setIsSplitMode(false);
+      setSplitLines([emptySplitLine(), emptySplitLine()]);
       setSmartBillPay({ showToggle: false, advanceCycle: true, deductDebt: true, category: null });
-      
-      // Clean up URL if it was a "Quick Entry" to prevent loop
       window.history.replaceState({}, document.title, window.location.pathname);
-      
       setTxnForm({ ...txnForm, amount: '', payee: '', notes: '' });
   };
 
@@ -254,7 +318,16 @@ export function LedgerView() {
       if (filterAccount !== 'All' && t.account_id?.toString() !== filterAccount && t.to_account_id?.toString() !== filterAccount) return false;
       if (searchQuery) {
           const q = searchQuery.toLowerCase();
-          return (t.payee?.toLowerCase().includes(q) || t.notes?.toLowerCase().includes(q) || t.categories?.name?.toLowerCase().includes(q));
+          const splitNames = (t.transaction_splits || [])
+            .map((s: { categories?: { name?: string } | null }) => s.categories?.name?.toLowerCase())
+            .filter(Boolean)
+            .join(' ');
+          return (
+            t.payee?.toLowerCase().includes(q) ||
+            t.notes?.toLowerCase().includes(q) ||
+            t.categories?.name?.toLowerCase().includes(q) ||
+            splitNames.includes(q)
+          );
       }
       return true;
   });
@@ -337,6 +410,10 @@ export function LedgerView() {
                                   {txn.type === 'Transfer' ? (
                                       <span className="text-xs font-bold bg-blue-50 text-blue-600 px-2 py-1 rounded-lg border border-blue-100 flex items-center gap-1">
                                           To: {accounts.find(a => a.id === txn.to_account_id)?.name}
+                                      </span>
+                                  ) : isSplitTransaction(txn) ? (
+                                      <span className="text-xs font-bold bg-violet-500/10 text-violet-700 px-2 py-1 rounded-lg border border-violet-500/30 flex items-center gap-1">
+                                          <Split size={12}/> Split · {txn.transaction_splits!.length} categories
                                       </span>
                                   ) : txn.categories ? (
                                       <span className="text-xs font-bold bg-purple-50 text-purple-600 px-2 py-1 rounded-lg border border-purple-100 flex items-center gap-1">
@@ -456,25 +533,74 @@ export function LedgerView() {
               </div>
 
               {txnForm.type !== 'Transfer' && (
-                  <div>
-                      <SearchableDropdown 
-                        label="Budget Envelope"
-                        icon={<Tag size={14}/>}
-                        options={[
-                            { id: '', name: txnForm.type === 'Income' ? 'Ready to Assign (Uncategorized)' : 'Uncategorized Expense' },
-                            ...categories.map(c => ({ id: c.id, name: c.name, emoji: c.emoji, group: 'Envelopes' }))
-                        ]}
-                        value={txnForm.category_id}
-                        onChange={(val) => {
-                            setTxnForm({...txnForm, category_id: val});
-                            checkSmartBillPay(val);
+                  <>
+                    <label className="flex items-center gap-3 cursor-pointer app-card-subtle p-3 rounded-xl border border-[var(--border)]">
+                      <input
+                        type="checkbox"
+                        checked={isSplitMode}
+                        onChange={(e) => {
+                          const on = e.target.checked;
+                          setIsSplitMode(on);
+                          if (on) {
+                            const lines =
+                              txnForm.category_id && txnForm.amount
+                                ? [
+                                    { category_id: txnForm.category_id, amount: txnForm.amount },
+                                    emptySplitLine(),
+                                  ]
+                                : [emptySplitLine(), emptySplitLine()];
+                            setSplitLines(lines);
+                          }
                         }}
+                        className="w-4 h-4 rounded"
                       />
-                  </div>
+                      <span className="text-sm font-bold text-[var(--text-primary)] flex items-center gap-2">
+                        <Split size={16} className="text-violet-500" />
+                        Split across categories
+                      </span>
+                    </label>
+
+                    {isSplitMode ? (
+                      <SplitTransactionFields
+                        totalAmount={txnForm.amount}
+                        lines={splitLines}
+                        onChange={setSplitLines}
+                        categories={categories}
+                        txnType={txnForm.type as 'Expense' | 'Income'}
+                      />
+                    ) : (
+                      <div>
+                        <SearchableDropdown
+                          label="Budget Envelope"
+                          icon={<Tag size={14} />}
+                          options={[
+                            {
+                              id: '',
+                              name:
+                                txnForm.type === 'Income'
+                                  ? 'Ready to Assign (Uncategorized)'
+                                  : 'Uncategorized Expense',
+                            },
+                            ...categories.map((c) => ({
+                              id: c.id,
+                              name: c.name,
+                              emoji: c.emoji,
+                              group: 'Envelopes',
+                            })),
+                          ]}
+                          value={txnForm.category_id}
+                          onChange={(val) => {
+                            setTxnForm({ ...txnForm, category_id: val });
+                            checkSmartBillPay(val);
+                          }}
+                        />
+                      </div>
+                    )}
+                  </>
               )}
 
               {/* Feature 6: Smart Bill Pay UI */}
-              {!editingTxn && smartBillPay.showToggle && (
+              {!editingTxn && !isSplitMode && smartBillPay.showToggle && (
                   <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-2xl space-y-3 animate-in slide-in-from-top-2">
                       <div className="flex items-center gap-2 text-emerald-700 font-bold text-xs uppercase tracking-widest">
                           <Zap size={14}/> Smart Bill Pay

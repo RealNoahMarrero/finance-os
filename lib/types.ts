@@ -36,6 +36,15 @@ export interface Category {
   is_hidden: boolean;
 }
 
+export interface TransactionSplit {
+  id?: number;
+  transaction_id?: number;
+  category_id: number;
+  amount: number;
+  sort_order?: number;
+  categories?: { name: string; emoji: string | null } | null;
+}
+
 export interface Transaction {
   id: number;
   created_at?: string;
@@ -49,6 +58,7 @@ export interface Transaction {
   notes: string | null;
   categories?: { name: string; emoji: string | null } | null;
   accounts?: { name: string; type: AccountType } | null;
+  transaction_splits?: TransactionSplit[];
 }
 
 export interface TransactionPayload {
@@ -59,5 +69,45 @@ export interface TransactionPayload {
   account_id: number;
   to_account_id: number | null;
   type: TransactionType;
+  notes: string | null;
+}
+
+export type ProjectedIncomeStatus = 'pending' | 'received' | 'cancelled';
+export type ProjectedIncomeSourceType =
+  | 'paycheck'
+  | 'gig'
+  | 'invoice'
+  | 'transfer_in'
+  | 'other';
+export type ProjectedIncomeRepeatPeriod = 'None' | 'Weekly' | 'Biweekly' | 'Monthly';
+
+export interface ProjectedIncome {
+  id: number;
+  created_at?: string;
+  label: string;
+  amount: number;
+  expected_date: string;
+  account_id: number;
+  category_id: number | null;
+  status: ProjectedIncomeStatus;
+  source_type: ProjectedIncomeSourceType;
+  is_repeating: boolean;
+  repeat_period: ProjectedIncomeRepeatPeriod;
+  notes: string | null;
+  transaction_id: number | null;
+  received_at: string | null;
+  accounts?: { id: number; name: string; type: string } | null;
+  categories?: { name: string; emoji: string | null } | null;
+}
+
+export interface ProjectedIncomePayload {
+  label: string;
+  amount: number;
+  expected_date: string;
+  account_id: number;
+  category_id: number | null;
+  source_type: ProjectedIncomeSourceType;
+  is_repeating: boolean;
+  repeat_period: ProjectedIncomeRepeatPeriod;
   notes: string | null;
 }

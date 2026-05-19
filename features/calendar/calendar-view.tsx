@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { 
   ChevronLeft, ChevronRight, Calendar as CalendarIcon, 
-  AlertTriangle, CheckCircle2, CircleDashed 
+  CheckCircle2, TrendingUp
 } from 'lucide-react';
 import { 
   format, addMonths, subMonths, startOfMonth, endOfMonth, 
@@ -13,21 +13,41 @@ import {
 import { formatMoney, snapMoney } from '@/lib/money';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PageSkeleton } from '@/components/ui/skeleton';
-import { PageHeader } from '@/components/layout/page-header';
+import { ResponsiveModal } from '@/components/ui/responsive-modal';
+import {
+  fetchProjectedIncomeForMonth,
+} from '@/lib/queries/projected-income';
+import {
+  ProjectedIncomeFormModal,
+  ProjectedIncomeReceiveModal,
+} from '@/features/projected-income/projected-income-modals';
+import type { Account, Category, ProjectedIncome } from '@/lib/types';
 
 export function CalendarView() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [monthDirection, setMonthDirection] = useState(1);
   const [categories, setCategories] = useState<any[]>([]);
+  const [projectedIncome, setProjectedIncome] = useState<ProjectedIncome[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [categoryOptions, setCategoryOptions] = useState<Pick<Category, 'id' | 'name' | 'emoji'>[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [detailItem, setDetailItem] = useState<ProjectedIncome | null>(null);
+  const [editingProjected, setEditingProjected] = useState<ProjectedIncome | null>(null);
+  const [receiveProjected, setReceiveProjected] = useState<ProjectedIncome | null>(null);
+  const [isProjectedFormOpen, setIsProjectedFormOpen] = useState(false);
 
   useEffect(() => {
     fetchData();
+    fetchAccountsAndCategories();
   }, []);
+
+  useEffect(() => {
+    fetchProjectedForMonth();
+  }, [currentMonth]);
 
   async function fetchData() {
     setLoading(true);
-    // Fetch all active categories that have a due date
     const { data } = await supabase
       .from('categories')
       .select('*')
@@ -36,6 +56,28 @@ export function CalendarView() {
       
     if (data) setCategories(data);
     setLoading(false);
+  }
+
+  async function fetchAccountsAndCategories() {
+    const { data: accs } = await supabase.from('accounts').select('*');
+    if (accs) setAccounts(accs as Account[]);
+    const { data: cats } = await supabase
+      .from('categories')
+      .select('id, name, emoji')
+      .eq('is_hidden', false)
+      .order('name');
+    if (cats) setCategoryOptions(cats);
+  }
+
+  async function fetchProjectedForMonth() {
+    const monthStart = format(startOfMonth(currentMonth), 'yyyy-MM-dd');
+    const monthEnd = format(endOfMonth(currentMonth), 'yyyy-MM-dd');
+    const { data } = await fetchProjectedIncomeForMonth(monthStart, monthEnd);
+    if (data) setProjectedIncome(data);
+  }
+
+  async function refreshProjected() {
+    await fetchProjectedForMonth();
   }
 
   const nextMonth = () => {
@@ -67,6 +109,9 @@ export function CalendarView() {
   const currentMonthBills = categories.filter(c => c.due_date && isSameMonth(parseISO(c.due_date), currentMonth));
   const totalDueThisMonth = snapMoney(currentMonthBills.reduce((sum, c) => sum + Number(c.target_amount), 0));
   const totalFundedThisMonth = snapMoney(currentMonthBills.reduce((sum, c) => sum + Number(c.assigned_amount), 0));
+  const totalExpectedIncome = snapMoney(
+    projectedIncome.reduce((sum, p) => sum + Number(p.amount), 0)
+  );
 
   if (loading) return <PageSkeleton />;
 
@@ -88,7 +133,7 @@ export function CalendarView() {
       </div>
 
       {/* QUICK STATS */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div className="app-card p-4 rounded-2xl shadow-sm border border-[var(--border)] flex items-center gap-4">
               <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center"><CalendarIcon size={24}/></div>
               <div>
@@ -101,6 +146,13 @@ export function CalendarView() {
               <div>
                   <p className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Funded</p>
                   <p className="text-2xl font-black text-[var(--text-primary)]">${formatMoney(totalFundedThisMonth)}</p>
+              </div>
+          </div>
+          <div className="app-card p-4 rounded-2xl shadow-sm border border-[var(--border)] flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-emerald-500/15 text-emerald-600 flex items-center justify-center"><TrendingUp size={24}/></div>
+              <div>
+                  <p className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Expected income</p>
+                  <p className="text-2xl font-black text-[var(--text-primary)]">${formatMoney(totalExpectedIncome)}</p>
               </div>
           </div>
       </div>
@@ -133,6 +185,9 @@ export function CalendarView() {
             
             // Find bills due on this exact day
             const dayBills = categories.filter(c => c.due_date === format(day, 'yyyy-MM-dd'));
+            const dayIncome = projectedIncome.filter(
+              (p) => p.expected_date === format(day, 'yyyy-MM-dd')
+            );
 
             return (
               <div key={i} className={`min-h-[100px] md:min-h-[140px] app-card p-1 md:p-2 transition-colors ${!isCurrentMonth ? 'opacity-40 bg-[var(--surface-subtle)]' : 'hover:bg-[var(--surface-hover)]'}`}>
@@ -142,6 +197,17 @@ export function CalendarView() {
                 </div>
                 
                 <div className="mt-1 md:mt-2 flex flex-col gap-1">
+                  {dayIncome.map((inc) => (
+                    <button
+                      key={`inc-${inc.id}`}
+                      type="button"
+                      onClick={() => setDetailItem(inc)}
+                      className="px-1.5 py-1 md:p-1.5 rounded border text-[9px] md:text-xs font-bold flex flex-col xl:flex-row xl:items-center justify-between gap-0.5 xl:gap-2 truncate touch-manipulation hover:brightness-95 active:scale-[0.98] transition-all bg-emerald-500/15 border-emerald-500/40 text-emerald-800"
+                    >
+                      <span className="truncate max-w-[4rem] sm:max-w-none">{inc.label}</span>
+                      <span className="font-black xl:ml-auto">+${formatMoney(inc.amount)}</span>
+                    </button>
+                  ))}
                   {dayBills.map(bill => {
                       const isPastDue = isBefore(parseISO(bill.due_date), today);
                       const isFullyFunded = Number(bill.assigned_amount) >= Number(bill.target_amount);
@@ -172,6 +238,63 @@ export function CalendarView() {
         </div>
       </motion.div>
       </AnimatePresence>
+
+      <ResponsiveModal
+        open={!!detailItem}
+        onOpenChange={(open) => !open && setDetailItem(null)}
+        title={detailItem?.label ?? 'Expected income'}
+      >
+        {detailItem && (
+          <div className="space-y-4 pb-2">
+            <p className="text-2xl font-black text-emerald-600">+${formatMoney(detailItem.amount)}</p>
+            <p className="text-sm text-[var(--text-muted)]">
+              Expected {format(parseISO(detailItem.expected_date), 'MMM d, yyyy')}
+              {detailItem.accounts?.name ? ` · ${detailItem.accounts.name}` : ''}
+            </p>
+            {detailItem.notes && (
+              <p className="text-sm text-[var(--text-primary)]">{detailItem.notes}</p>
+            )}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setReceiveProjected(detailItem);
+                  setDetailItem(null);
+                }}
+                className="flex-1 py-3 bg-emerald-500 text-white rounded-xl font-bold text-sm"
+              >
+                Mark received
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingProjected(detailItem);
+                  setIsProjectedFormOpen(true);
+                  setDetailItem(null);
+                }}
+                className="px-4 py-3 app-card-subtle border border-[var(--border)] rounded-xl font-bold text-sm"
+              >
+                Edit
+              </button>
+            </div>
+          </div>
+        )}
+      </ResponsiveModal>
+
+      <ProjectedIncomeFormModal
+        open={isProjectedFormOpen}
+        onOpenChange={setIsProjectedFormOpen}
+        editing={editingProjected}
+        accounts={accounts}
+        categories={categoryOptions}
+        onSaved={refreshProjected}
+      />
+      <ProjectedIncomeReceiveModal
+        open={!!receiveProjected}
+        onOpenChange={(open) => !open && setReceiveProjected(null)}
+        projection={receiveProjected}
+        onReceived={refreshProjected}
+      />
 
     </>
   );

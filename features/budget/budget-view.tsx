@@ -15,13 +15,18 @@ import { formatMoney, roundMoney, snapMoney, MONEY_EPSILON } from '@/lib/money';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PageSkeleton } from '@/components/ui/skeleton';
 import { Select } from '@/components/ui/select';
+import { useReadyToAssign } from '@/hooks/use-ready-to-assign';
+import { fetchPendingProjectedIncome } from '@/lib/queries/projected-income';
+import type { Account, ProjectedIncome } from '@/lib/types';
 
 export function BudgetView() {
   const searchParams = useSearchParams();
   const openedFromUrl = useRef(false);
   const [groups, setGroups] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [liquidCash, setLiquidCash] = useState(0);
+  const [pendingProjected, setPendingProjected] = useState<ProjectedIncome[]>([]);
   const [loading, setLoading] = useState(true);
 
   // UI States (Persistent)
@@ -116,11 +121,15 @@ export function BudgetView() {
   async function fetchData() {
     setLoading(true);
     
-    const { data: accs } = await supabase.from('accounts').select('balance, type');
+    const { data: accs } = await supabase.from('accounts').select('*');
     if (accs) {
+        setAccounts(accs as Account[]);
         const liquid = snapMoney(accs.filter(a => ['Checking', 'Savings', 'Cash'].includes(a.type)).reduce((sum, a) => sum + Number(a.balance), 0));
         setLiquidCash(liquid);
     }
+
+    const { data: pending } = await fetchPendingProjectedIncome();
+    if (pending) setPendingProjected(pending);
 
     const { data: g } = await supabase.from('category_groups').select('*').order('sort_order', { ascending: true }).order('id');
     const { data: c } = await supabase.from('categories').select('*').order('sort_order', { ascending: true }).order('id');
@@ -404,9 +413,11 @@ export function BudgetView() {
   const archivedCategories = categories.filter(c => c.is_hidden);
   const totalAssigned = visibleCategories.reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0);
   
-  let calculatedRTA = liquidCash - totalAssigned;
-  calculatedRTA = snapMoney(calculatedRTA); 
-  const readyToAssign = calculatedRTA;
+  const { readyToAssign, projectedReadyToAssign, pendingInflow } = useReadyToAssign(
+    accounts,
+    categories,
+    pendingProjected
+  );
 
   // MATH FIX: Add the "snap to zero" logic to the global Overspent Check
   const hasNegativeCategories = visibleCategories.some(c => {
@@ -431,6 +442,12 @@ export function BudgetView() {
               ${formatMoney(readyToAssign)}
            </h1>
            {readyToAssign < 0 && <p className="font-bold text-white mt-2 bg-red-600 inline-block px-3 py-1 rounded-lg text-sm">You assigned more money than you have in liquid cash.</p>}
+           {pendingInflow > 0 && (
+             <p className="text-sm text-white/80 mt-3 font-medium">
+               If pending income arrives:{' '}
+               <span className="font-black text-white">${formatMoney(projectedReadyToAssign)}</span>
+             </p>
+           )}
         </div>
         <div className="relative z-10 flex flex-col items-center md:items-end gap-3">
             <div className="bg-white/20 backdrop-blur-md border border-white/20 rounded-xl p-4 w-full md:w-auto text-center">

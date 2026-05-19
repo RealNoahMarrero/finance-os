@@ -7,7 +7,8 @@ import {
   Wallet, Landmark, CreditCard, Banknote, Plus, 
   ArrowUpRight, ArrowDownRight, ArrowRightLeft, Activity, X, 
   AlertCircle, Trash2, LayoutGrid, PieChart, ListOrdered, 
-  Calendar, FileText, Download, Zap, Edit2, Tag, AlignLeft, Save, Loader2
+  Calendar, FileText, Download, Zap, Edit2, Tag, AlignLeft, Save, Loader2,
+  TrendingUp
 } from 'lucide-react';
 import { format, parseISO, addWeeks, addMonths, addYears } from 'date-fns';
 import SearchableDropdown from '@/app/components/SearchableDropdown';
@@ -15,6 +16,19 @@ import { formatMoney, roundMoney, snapMoney } from '@/lib/money';
 import { applyBalanceAdjustment, applySmartBillPay } from '@/lib/balance-adjustment';
 import { PageSkeleton } from '@/components/ui/skeleton';
 import { Fab } from '@/components/layout/fab';
+import { useReadyToAssign } from '@/hooks/use-ready-to-assign';
+import { sortPendingByDate } from '@/lib/projected-income';
+import {
+  cancelProjectedIncome,
+  fetchAllProjectedIncome,
+  fetchPendingProjectedIncome,
+} from '@/lib/queries/projected-income';
+import {
+  ProjectedIncomeFormModal,
+  ProjectedIncomeListModal,
+  ProjectedIncomeReceiveModal,
+} from '@/features/projected-income/projected-income-modals';
+import type { ProjectedIncome } from '@/lib/types';
 
 export function DashboardView() {
   const router = useRouter();
@@ -24,7 +38,14 @@ export function DashboardView() {
   const [payeeSuggestions, setPayeeSuggestions] = useState<string[]>([]);
   const [monthlyStats, setMonthlyStats] = useState({ income: 0, expense: 0 });
   const [totalAssigned, setTotalAssigned] = useState(0);
+  const [pendingProjected, setPendingProjected] = useState<ProjectedIncome[]>([]);
+  const [allProjected, setAllProjected] = useState<ProjectedIncome[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [isProjectedFormOpen, setIsProjectedFormOpen] = useState(false);
+  const [editingProjected, setEditingProjected] = useState<ProjectedIncome | null>(null);
+  const [receiveProjected, setReceiveProjected] = useState<ProjectedIncome | null>(null);
+  const [isProjectedListOpen, setIsProjectedListOpen] = useState(false);
 
   // Modals
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
@@ -94,7 +115,52 @@ export function DashboardView() {
     }
     setMonthlyStats({ income: inc, expense: exp });
 
+    const { data: pending } = await fetchPendingProjectedIncome();
+    if (pending) setPendingProjected(pending);
+
+    const { data: allProj } = await fetchAllProjectedIncome();
+    if (allProj) setAllProjected(allProj);
+
     setLoading(false);
+  }
+
+  async function refreshProjectedIncome() {
+    const { data: pending } = await fetchPendingProjectedIncome();
+    if (pending) setPendingProjected(pending);
+    const { data: allProj } = await fetchAllProjectedIncome();
+    if (allProj) setAllProjected(allProj);
+
+    const { data: accs } = await supabase.from('accounts').select('*').order('type').order('name');
+    if (accs) setAccounts(accs);
+
+    const { data: cats } = await supabase
+      .from('categories')
+      .select('id, name, emoji, assigned_amount, is_hidden')
+      .order('name');
+    if (cats) {
+      setCategories(cats);
+      setTotalAssigned(
+        snapMoney(
+          cats.filter((c) => !c.is_hidden).reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0)
+        )
+      );
+    }
+  }
+
+  async function handleCancelProjected(id: number) {
+    await cancelProjectedIncome(id);
+    await refreshProjectedIncome();
+  }
+
+  function openAddProjected() {
+    setEditingProjected(null);
+    setIsProjectedFormOpen(true);
+  }
+
+  function openEditProjected(item: ProjectedIncome) {
+    setEditingProjected(item);
+    setIsProjectedFormOpen(true);
+    setIsProjectedListOpen(false);
   }
 
   // --- ACCOUNT CRUD LOGIC ---
@@ -269,10 +335,13 @@ export function DashboardView() {
   }
 
   const netWorth = snapMoney(accounts.reduce((sum, acc) => acc.type === 'Credit Card' ? sum - Math.abs(acc.balance) : sum + Number(acc.balance), 0));
-  const liquidCash = snapMoney(accounts.filter(a => ['Checking', 'Savings', 'Cash'].includes(a.type)).reduce((sum, acc) => sum + Number(acc.balance), 0));
-  
-  const calculatedRTA = snapMoney(liquidCash - totalAssigned);
-  const readyToAssign = calculatedRTA;
+  const { liquidCash, readyToAssign, projectedReadyToAssign, pendingInflow } = useReadyToAssign(
+    accounts,
+    categories.map((c) => ({ ...c, is_hidden: c.is_hidden ?? false, assigned_amount: c.assigned_amount })),
+    pendingProjected
+  );
+
+  const upcomingProjected = sortPendingByDate(pendingProjected).slice(0, 5);
 
   // Feature 8: Group and Sort Accounts
   const liquidAccounts = accounts
@@ -342,7 +411,69 @@ export function DashboardView() {
                ${formatMoney(readyToAssign)}
             </div>
             {readyToAssign < 0 && <p className="text-xs bg-red-700/50 text-white px-2 py-1 rounded mt-3 font-bold z-10 flex items-center gap-1 border border-red-400"><AlertCircle size={12}/> Overbudgeted</p>}
+            {pendingInflow > 0 && (
+              <p className="text-xs text-white/80 mt-3 z-10 font-medium leading-snug">
+                If pending income arrives:{' '}
+                <span className="font-black text-white">${formatMoney(projectedReadyToAssign)}</span>
+              </p>
+            )}
           </div>
+        </div>
+
+        <div className="col-span-1 md:col-span-3 app-card rounded-3xl p-5 md:p-6 border border-[var(--border)] shadow-sm">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-bold text-lg text-[var(--text-primary)] flex items-center gap-2">
+              <TrendingUp size={20} className="text-emerald-500" />
+              Expected income
+            </h3>
+            <button
+              type="button"
+              onClick={openAddProjected}
+              className="p-2 bg-emerald-500/10 text-emerald-600 rounded-full hover:bg-emerald-500/20 transition-colors"
+            >
+              <Plus size={16} />
+            </button>
+          </div>
+          {upcomingProjected.length > 0 ? (
+            <div className="space-y-2">
+              {upcomingProjected.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between gap-3 p-3 rounded-xl bg-[var(--surface-subtle)] border border-[var(--border)]"
+                >
+                  <div className="min-w-0">
+                    <p className="font-bold text-[var(--text-primary)] truncate">{item.label}</p>
+                    <p className="text-xs text-[var(--text-muted)]">
+                      {format(new Date(item.expected_date + 'T00:00:00'), 'MMM d')}
+                      {item.accounts?.name ? ` · ${item.accounts.name}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="font-black text-emerald-600">+${formatMoney(item.amount)}</span>
+                    <button
+                      type="button"
+                      onClick={() => setReceiveProjected(item)}
+                      className="text-[10px] font-bold px-2 py-1 bg-emerald-500 text-white rounded-lg"
+                    >
+                      Received
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+          ) : (
+            <p className="text-sm text-[var(--text-muted)] text-center py-6">
+              Track paychecks, gig payouts, and invoices before they land.
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => setIsProjectedListOpen(true)}
+            className="w-full mt-4 py-2.5 text-sm font-bold text-emerald-600 hover:bg-emerald-500/10 rounded-xl transition-colors"
+          >
+            View all expected income
+          </button>
         </div>
       </div>
 
@@ -675,6 +806,32 @@ export function DashboardView() {
           </form>
         </div>
       )}
+
+      <ProjectedIncomeFormModal
+        open={isProjectedFormOpen}
+        onOpenChange={setIsProjectedFormOpen}
+        editing={editingProjected}
+        accounts={accounts}
+        categories={categories}
+        onSaved={refreshProjectedIncome}
+      />
+      <ProjectedIncomeReceiveModal
+        open={!!receiveProjected}
+        onOpenChange={(open) => !open && setReceiveProjected(null)}
+        projection={receiveProjected}
+        onReceived={refreshProjectedIncome}
+      />
+      <ProjectedIncomeListModal
+        open={isProjectedListOpen}
+        onOpenChange={setIsProjectedListOpen}
+        items={allProjected}
+        onEdit={openEditProjected}
+        onReceive={(item) => {
+          setReceiveProjected(item);
+          setIsProjectedListOpen(false);
+        }}
+        onCancel={handleCancelProjected}
+      />
 
       <Fab
         onClick={() => {
