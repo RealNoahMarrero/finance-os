@@ -10,6 +10,7 @@ import { formatMoney, roundMoney } from '@/lib/money';
 import { PROJECTED_INCOME_SOURCE_LABELS } from '@/lib/projected-income';
 import {
   insertProjectedIncome,
+  projectedIncomeErrorMessage,
   receiveProjectedIncome,
   updateProjectedIncome,
 } from '@/lib/queries/projected-income';
@@ -117,9 +118,7 @@ export function ProjectedIncomeFormModal({
       onSaved();
       onOpenChange(false);
     } else {
-      alert(
-        'Could not save expected income. Ensure projected_income table exists (see supabase/migrations/001_projected_income.sql).'
-      );
+      alert(projectedIncomeErrorMessage(error));
     }
   }
 

@@ -6,62 +6,106 @@ import { advanceProjectedExpectedDate } from '@/lib/projected-income';
 import type { ProjectedIncome, ProjectedIncomePayload } from '@/lib/types';
 import { insertTransaction } from '@/lib/queries/transactions';
 
-const SELECT =
-  '*, accounts!account_id(id, name, type), categories(name, emoji)';
+const SELECT_WITH_RELATIONS =
+  '*, accounts!account_id(id, name, type), categories!category_id(name, emoji)';
+
+function projectedIncomeErrorMessage(error: { message?: string; code?: string } | null) {
+  if (!error) return 'Unknown error';
+  if (error.code === '42501' || error.message?.toLowerCase().includes('row-level security')) {
+    return 'Permission denied. Run supabase/migrations/003_projected_income_rls.sql in the Supabase SQL editor.';
+  }
+  if (error.code === '42P01' || error.message?.includes('projected_income')) {
+    return 'Table missing. Run supabase/migrations/001_projected_income.sql in the Supabase SQL editor.';
+  }
+  return error.message || 'Could not save expected income';
+}
+
+async function fetchProjectedRow(id: number) {
+  const withRelations = await supabase
+    .from('projected_income')
+    .select(SELECT_WITH_RELATIONS)
+    .eq('id', id)
+    .single();
+
+  if (!withRelations.error) return withRelations;
+
+  return supabase.from('projected_income').select('*').eq('id', id).single();
+}
+
+async function fetchProjectedRows(
+  applyFilters: (
+    q: ReturnType<ReturnType<typeof supabase.from>['select']>
+  ) => ReturnType<ReturnType<typeof supabase.from>['select']>
+) {
+  const base = supabase.from('projected_income');
+  const withRelations = await applyFilters(base.select(SELECT_WITH_RELATIONS));
+  if (!withRelations.error) return withRelations;
+  return applyFilters(base.select('*'));
+}
 
 export async function fetchPendingProjectedIncome() {
-  const { data, error } = await supabase
-    .from('projected_income')
-    .select(SELECT)
-    .eq('status', 'pending')
-    .order('expected_date', { ascending: true });
+  const { data, error } = await fetchProjectedRows((q) =>
+    q.eq('status', 'pending').order('expected_date', { ascending: true })
+  );
   return { data: (data || []) as ProjectedIncome[], error };
 }
 
 export async function fetchProjectedIncomeForMonth(monthStart: string, monthEnd: string) {
-  const { data, error } = await supabase
-    .from('projected_income')
-    .select(SELECT)
-    .eq('status', 'pending')
-    .gte('expected_date', monthStart)
-    .lte('expected_date', monthEnd)
-    .order('expected_date', { ascending: true });
+  const { data, error } = await fetchProjectedRows((q) =>
+    q
+      .eq('status', 'pending')
+      .gte('expected_date', monthStart)
+      .lte('expected_date', monthEnd)
+      .order('expected_date', { ascending: true })
+  );
   return { data: (data || []) as ProjectedIncome[], error };
 }
 
 export async function fetchAllProjectedIncome(limit = 100) {
-  const { data, error } = await supabase
-    .from('projected_income')
-    .select(SELECT)
-    .order('expected_date', { ascending: false })
-    .limit(limit);
+  const { data, error } = await fetchProjectedRows((q) =>
+    q.order('expected_date', { ascending: false }).limit(limit)
+  );
   return { data: (data || []) as ProjectedIncome[], error };
 }
 
 export async function insertProjectedIncome(payload: ProjectedIncomePayload) {
-  return supabase.from('projected_income').insert([payload]).select(SELECT).single();
+  const { data: row, error: insertError } = await supabase
+    .from('projected_income')
+    .insert([payload])
+    .select('id')
+    .single();
+
+  if (insertError) return { data: null, error: insertError };
+
+  return fetchProjectedRow(row.id);
 }
 
 export async function updateProjectedIncome(
   id: number,
   payload: Partial<ProjectedIncomePayload>
 ) {
-  return supabase
+  const { error: updateError } = await supabase
     .from('projected_income')
     .update(payload)
-    .eq('id', id)
-    .select(SELECT)
-    .single();
+    .eq('id', id);
+
+  if (updateError) return { data: null, error: updateError };
+
+  return fetchProjectedRow(id);
 }
 
 export async function cancelProjectedIncome(id: number) {
-  return supabase
+  const { error: updateError } = await supabase
     .from('projected_income')
     .update({ status: 'cancelled' })
-    .eq('id', id)
-    .select(SELECT)
-    .single();
+    .eq('id', id);
+
+  if (updateError) return { data: null, error: updateError };
+
+  return fetchProjectedRow(id);
 }
+
+export { projectedIncomeErrorMessage };
 
 export interface ReceiveProjectedIncomeOptions {
   amount?: number;
@@ -109,11 +153,16 @@ export async function receiveProjectedIncome(
       received_at: new Date().toISOString(),
     })
     .eq('id', projection.id)
-    .select(SELECT)
+    .select('id')
     .single();
 
-  if (updateError) {
+  if (updateError || !updated) {
     return { data: null, error: updateError };
+  }
+
+  const { data: fullProjection, error: fetchError } = await fetchProjectedRow(projection.id);
+  if (fetchError) {
+    return { data: null, error: fetchError };
   }
 
   if (
@@ -138,5 +187,8 @@ export async function receiveProjectedIncome(
     await insertProjectedIncome(nextPayload);
   }
 
-  return { data: { projection: updated as ProjectedIncome, transaction: txn }, error: null };
+  return {
+    data: { projection: fullProjection as ProjectedIncome, transaction: txn },
+    error: null,
+  };
 }

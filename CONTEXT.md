@@ -34,6 +34,8 @@ Core tables: `accounts`, `category_groups`, `categories`, `transactions`, **`pro
 
 | [`supabase/migrations/002_transaction_splits.sql`](supabase/migrations/002_transaction_splits.sql) | Multi-category lines for one expense/income |
 
+| [`supabase/migrations/003_projected_income_rls.sql`](supabase/migrations/003_projected_income_rls.sql) | RLS policies for `projected_income` and `transaction_splits` (required if saves fail with permission errors) |
+
 
 
 ### `projected_income`
