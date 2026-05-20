@@ -23,12 +23,17 @@ import {
   fetchAllProjectedIncome,
   fetchPendingProjectedIncome,
 } from '@/lib/queries/projected-income';
+import { fetchTransactions } from '@/lib/queries/transactions';
+import {
+  buildFinanceOsExportText,
+  downloadTextFile,
+} from '@/lib/export/build-finance-export';
 import {
   ProjectedIncomeFormModal,
   ProjectedIncomeListModal,
   ProjectedIncomeReceiveModal,
 } from '@/features/projected-income/projected-income-modals';
-import type { ProjectedIncome } from '@/lib/types';
+import type { Account, Category, ProjectedIncome } from '@/lib/types';
 
 export function DashboardView() {
   const router = useRouter();
@@ -317,29 +322,34 @@ export function DashboardView() {
       setIsSubmittingTxn(false);
   }
 
-  function exportAccounts() {
-      let text = `FINANCE OS - NET WORTH REPORT\nDate: ${format(new Date(), 'MMM d, yyyy')}\n\n`;
-      text += `Total Net Worth: $${formatMoney(netWorth)}\n`;
-      text += `Liquid Cash: $${formatMoney(liquidCash)}\n\n`;
-      text += `--- ACCOUNTS ---\n`;
-      accounts.forEach(a => {
-          text += `${a.name} (${a.type}): ${snapMoney(a.balance) < 0 ? '-' : ''}$${formatMoney(Math.abs(a.balance))}\n`;
-      });
-
-      const blob = new Blob([text], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `FinanceOS_Export_${format(new Date(), 'yyyy-MM-dd')}.txt`;
-      a.click();
-  }
-
   const netWorth = snapMoney(accounts.reduce((sum, acc) => acc.type === 'Credit Card' ? sum - Math.abs(acc.balance) : sum + Number(acc.balance), 0));
   const { liquidCash, readyToAssign, projectedReadyToAssign, pendingInflow } = useReadyToAssign(
     accounts,
     categories.map((c) => ({ ...c, is_hidden: c.is_hidden ?? false, assigned_amount: c.assigned_amount })),
     pendingProjected
   );
+
+  async function exportFullReport() {
+    const [{ data: allTxns }, { data: allProj }, { data: fullCats }] = await Promise.all([
+      fetchTransactions(),
+      fetchAllProjectedIncome(),
+      supabase.from('categories').select('*').order('name'),
+    ]);
+
+    const text = buildFinanceOsExportText({
+      accounts: accounts as Account[],
+      categories: (fullCats || []) as Category[],
+      transactions: allTxns || [],
+      projectedIncome: allProj || [],
+      netWorth,
+      liquidCash,
+      readyToAssign,
+      projectedReadyToAssign,
+      pendingInflow,
+    });
+
+    downloadTextFile(text, `FinanceOS_Full_Export_${format(new Date(), 'yyyy-MM-dd')}.txt`);
+  }
 
   const upcomingProjected = sortPendingByDate(pendingProjected).slice(0, 5);
 
@@ -380,8 +390,8 @@ export function DashboardView() {
       <div className="mb-8">
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
             <h1 className="text-4xl font-extrabold text-[var(--text-primary)] tracking-tight">Finance<span className="text-emerald-500">OS</span></h1>
-            <button onClick={exportAccounts} className="w-full md:w-auto app-card px-4 py-2 rounded-xl text-[var(--text-muted)] font-bold border border-[var(--border)] shadow-sm flex items-center justify-center gap-2 hover:bg-[var(--surface-hover)] transition-colors">
-                <Download size={16}/> Export Report
+            <button onClick={exportFullReport} className="w-full md:w-auto app-card px-4 py-2 rounded-xl text-[var(--text-muted)] font-bold border border-[var(--border)] shadow-sm flex items-center justify-center gap-2 hover:bg-[var(--surface-hover)] transition-colors">
+                <Download size={16}/> Export Full Report
             </button>
         </div>
         

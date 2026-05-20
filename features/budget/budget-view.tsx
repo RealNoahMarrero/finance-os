@@ -156,7 +156,11 @@ export function BudgetView() {
       
       let text = `FINANCE OS - BUDGET MASTER EXPORT\nDate: ${format(new Date(), 'MMM d, yyyy')}\n\n`;
       text += `Liquid Cash: $${formatMoney(liquidCash)}\n`;
-      text += `Ready to Assign: $${formatMoney(liquidCash - totalAssigned)}\n`;
+      text += `Ready to Assign: $${formatMoney(readyToAssign)}\n`;
+      if (pendingInflow > 0) {
+        text += `Pending Expected Income: $${formatMoney(pendingInflow)}\n`;
+        text += `Projected RTA: $${formatMoney(projectedReadyToAssign)}\n`;
+      }
       text += `Total Goals Target: $${formatMoney(totalGoals)}\n\n`;
 
       groups.forEach(g => {

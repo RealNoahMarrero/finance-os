@@ -124,9 +124,13 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 * `lib/queries/` — `transactions`, `transaction-splits`, `projected-income`, accounts, categories
 
+* `lib/export/build-finance-export.ts` — full `.txt` report builder + `downloadTextFile`
+
 * `lib/reports/` — aggregations (spending respects split lines) + debt simulator
 
 * `hooks/use-ready-to-assign.ts`, `hooks/use-balance-adjustment.ts`
+
+* `scripts/google-sheets-sync.gs` — Apps Script for Google Sheets ↔ Supabase REST sync (placeholders for URL/key; do not commit secrets)
 
 
 
@@ -188,7 +192,57 @@ Tabs: Overview (cashflow chart, account list), Spending (category donut, top pay
 
 
 
-## 8. DESIGN & LOGIC RULES
+## 8. EXPORTS & GOOGLE SHEETS
+
+
+
+### In-app (`.txt` downloads)
+
+
+
+| Location | Action | Contents |
+
+|----------|--------|----------|
+
+| **Dashboard** | Export Full Report | Summary (net worth, liquid, RTA, projected RTA), accounts, expected income, all transactions (split-aware), split detail lines, categories |
+
+| **Budget** | Export | RTA, projected RTA if pending income exists, goals total, envelopes by group |
+
+
+
+Dashboard export fetches live data via `fetchTransactions()` (with splits), `fetchAllProjectedIncome()`, and full categories.
+
+
+
+### Google Sheets (`scripts/google-sheets-sync.gs`)
+
+
+
+Paste into **Extensions → Apps Script**, set `SUPABASE_URL` and `SUPABASE_KEY`, reload spreadsheet. Menu: **Finance OS → Sync Latest Data**.
+
+
+
+| Sheet | Supabase source |
+
+|-------|-----------------|
+
+| Accounts | `accounts` |
+
+| Categories | `categories` (non-hidden) |
+
+| Transactions | `transactions` + nested `transaction_splits` (`Is Split`, `Split Detail` columns) |
+
+| ExpectedIncome | `projected_income` |
+
+| TransactionSplits | `transaction_splits` (one row per split line) |
+
+
+
+Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use publishable/anon key only in Sheets — never commit real keys to git.
+
+
+
+## 9. DESIGN & LOGIC RULES
 
 
 
@@ -204,7 +258,7 @@ Tabs: Overview (cashflow chart, account list), Spending (category donut, top pay
 
 
 
-## 9. RECENT CHANGE LOG (high level)
+## 10. RECENT CHANGE LOG (high level)
 
 
 
@@ -215,4 +269,6 @@ Tabs: Overview (cashflow chart, account list), Spending (category donut, top pay
 3. **Projected income** — `projected_income` table, planning RTA, Dashboard/Budget/Calendar UX, mark-received → Income txn.
 
 4. **Split transactions** — `transaction_splits` table, ledger split UI, reports category aggregation from splits.
+
+5. **Exports** — Dashboard “Export Full Report” (`lib/export/build-finance-export.ts`): summary, accounts, expected income, transactions (split-aware), split detail, categories. Google Sheets sync: `scripts/google-sheets-sync.gs` (Accounts, Categories, Transactions, ExpectedIncome, TransactionSplits).
 
