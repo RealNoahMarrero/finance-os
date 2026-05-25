@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
@@ -8,7 +8,8 @@ import {
   ChevronDown, ChevronRight, Target, LayoutGrid, 
   Wallet, Calendar, FileText, Repeat, AlignLeft, PieChart,
   ArrowUpDown, AlertCircle, AlertTriangle, ArrowRightLeft,
-  FastForward, ListOrdered, Filter, Download, Activity, Archive, RotateCcw
+  FastForward, ListOrdered, Filter, Download, Activity, Archive, RotateCcw,
+  ChevronUp
 } from 'lucide-react';
 import { format, parseISO, addWeeks, addMonths, addYears, isAfter } from 'date-fns';
 import { formatMoney, roundMoney, snapMoney, MONEY_EPSILON } from '@/lib/money';
@@ -17,13 +18,16 @@ import { PageSkeleton } from '@/components/ui/skeleton';
 import { Select } from '@/components/ui/select';
 import { useReadyToAssign } from '@/hooks/use-ready-to-assign';
 import { fetchPendingProjectedIncome } from '@/lib/queries/projected-income';
-import type { Account, ProjectedIncome } from '@/lib/types';
+import { backfillAccountPaymentDueDates } from '@/lib/queries/credit-card-payments';
+import { CreditCardPaymentsPanel } from '@/features/credit-cards/credit-card-payments-panel';
+import type { Account, Category, CategoryGroup, ProjectedIncome } from '@/lib/types';
 
 export function BudgetView() {
   const searchParams = useSearchParams();
   const openedFromUrl = useRef(false);
-  const [groups, setGroups] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
+  const [groups, setGroups] = useState<CategoryGroup[]>([]);
+  const [reorderingGroups, setReorderingGroups] = useState(false);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [liquidCash, setLiquidCash] = useState(0);
   const [pendingProjected, setPendingProjected] = useState<ProjectedIncome[]>([]);
@@ -123,8 +127,13 @@ export function BudgetView() {
     
     const { data: accs } = await supabase.from('accounts').select('*');
     if (accs) {
-        setAccounts(accs as Account[]);
-        const liquid = snapMoney(accs.filter(a => ['Checking', 'Savings', 'Cash'].includes(a.type)).reduce((sum, a) => sum + Number(a.balance), 0));
+        const filled = await backfillAccountPaymentDueDates(accs as Account[]);
+        setAccounts(filled);
+        const liquid = snapMoney(
+          filled
+            .filter((a) => ['Checking', 'Savings', 'Cash'].includes(a.type))
+            .reduce((sum, a) => sum + Number(a.balance), 0)
+        );
         setLiquidCash(liquid);
     }
 
@@ -135,7 +144,7 @@ export function BudgetView() {
     const { data: c } = await supabase.from('categories').select('*').order('sort_order', { ascending: true }).order('id');
     
     if (g) {
-        setGroups(g);
+        setGroups(g as CategoryGroup[]);
         // Load persistent expanded groups, or default to all open
         const savedExpanded = localStorage.getItem('finance_os_expanded');
         if (savedExpanded) {
@@ -144,7 +153,7 @@ export function BudgetView() {
             setExpandedGroups(new Set(g.map(group => group.id)));
         }
     }
-    if (c) setCategories(c);
+    if (c) setCategories(c as Category[]);
     
     setLoading(false);
   }
@@ -338,8 +347,21 @@ export function BudgetView() {
           const { error } = await supabase.from('category_groups').update({ name: groupFormName }).eq('id', editingGroupId);
           if (!error) setGroups(groups.map(g => g.id === editingGroupId ? { ...g, name: groupFormName } : g));
       } else {
-          const { data } = await supabase.from('category_groups').insert([{ name: groupFormName }]).select().single();
-          if (data) { setGroups([...groups, data]); setExpandedGroups(new Set(expandedGroups).add(data.id)); }
+          const nextOrder =
+            groups.reduce((max, g) => Math.max(max, g.sort_order), -1) + 1;
+          const { data } = await supabase
+            .from('category_groups')
+            .insert([{ name: groupFormName, sort_order: nextOrder }])
+            .select()
+            .single();
+          if (data) {
+            setGroups(
+              [...groups, data as CategoryGroup].sort(
+                (a, b) => a.sort_order - b.sort_order || a.id - b.id
+              )
+            );
+            setExpandedGroups(new Set(expandedGroups).add(data.id));
+          }
       }
       setIsGroupModalOpen(false);
   }
@@ -351,6 +373,34 @@ export function BudgetView() {
       setGroups(groups.filter(g => g.id !== editingGroupId));
       setCategories(categories.filter(c => c.group_id !== editingGroupId));
       setIsGroupModalOpen(false);
+  }
+
+  async function moveGroup(groupId: number, direction: 'up' | 'down') {
+      const sorted = [...groups].sort(
+        (a, b) => a.sort_order - b.sort_order || a.id - b.id
+      );
+      const index = sorted.findIndex((g) => g.id === groupId);
+      const swapIndex = direction === 'up' ? index - 1 : index + 1;
+      if (index < 0 || swapIndex < 0 || swapIndex >= sorted.length) return;
+
+      const reordered = [...sorted];
+      [reordered[index], reordered[swapIndex]] = [
+        reordered[swapIndex],
+        reordered[index],
+      ];
+
+      setReorderingGroups(true);
+      const withOrder = reordered.map((g, i) => ({ ...g, sort_order: i }));
+      await Promise.all(
+        withOrder.map((g) =>
+          supabase
+            .from('category_groups')
+            .update({ sort_order: g.sort_order })
+            .eq('id', g.id)
+        )
+      );
+      setGroups(withOrder);
+      setReorderingGroups(false);
   }
 
   // --- CATEGORY ACTIONS ---
@@ -430,6 +480,11 @@ export function BudgetView() {
       return assigned < 0;
   });
 
+  const orderedGroups = useMemo(
+    () => [...groups].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id),
+    [groups]
+  );
+
   if (loading) return <PageSkeleton />;
 
   return (
@@ -462,6 +517,12 @@ export function BudgetView() {
             </div>
         </div>
       </div>
+
+      <CreditCardPaymentsPanel
+        accounts={accounts}
+        categories={categories.filter((c) => !c.is_hidden)}
+        onUpdated={fetchData}
+      />
 
       {/* OVERSPENDING WARNING BANNER */}
       {hasNegativeCategories && (
@@ -517,9 +578,16 @@ export function BudgetView() {
         </div>
       </div>
 
+      {categorySort !== 'default' && orderedGroups.length > 1 && (
+        <p className="text-xs font-bold text-[var(--text-muted)] mb-4 -mt-2">
+          Set sort to <span className="text-[var(--text-primary)]">Custom</span> to
+          reorder groups with the arrow buttons.
+        </p>
+      )}
+
       {/* BUDGET GROUPS GRID */}
       <div className="space-y-6">
-        {groups.map(group => {
+        {orderedGroups.map((group, groupIndex) => {
             // Apply View Filter first
             let groupCats = visibleCategories.filter(c => {
                 if (c.group_id !== group.id) return false;
@@ -572,6 +640,34 @@ export function BudgetView() {
                     <div onClick={() => toggleGroup(group.id)} className="bg-[var(--surface-subtle)] p-4 border-b border-[var(--border)] flex items-center justify-between cursor-pointer hover:bg-[var(--surface-hover)] transition-colors">
                         <div className="flex items-center gap-3">
                             <div className="text-[var(--text-muted)]">{isExpanded ? <ChevronDown size={20}/> : <ChevronRight size={20}/>}</div>
+                            {categorySort === 'default' && orderedGroups.length > 1 && (
+                              <div
+                                className="flex flex-col -my-1"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <button
+                                  type="button"
+                                  disabled={reorderingGroups || groupIndex === 0}
+                                  onClick={() => moveGroup(group.id, 'up')}
+                                  className="p-0.5 text-[var(--text-muted)] hover:text-blue-500 disabled:opacity-30 rounded transition-colors"
+                                  title="Move group up"
+                                >
+                                  <ChevronUp size={14} />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={
+                                    reorderingGroups ||
+                                    groupIndex === orderedGroups.length - 1
+                                  }
+                                  onClick={() => moveGroup(group.id, 'down')}
+                                  className="p-0.5 text-[var(--text-muted)] hover:text-blue-500 disabled:opacity-30 rounded transition-colors"
+                                  title="Move group down"
+                                >
+                                  <ChevronDown size={14} />
+                                </button>
+                              </div>
+                            )}
                             <h3 className="font-bold text-lg text-[var(--text-primary)]">{group.name}</h3>
                             <button onClick={(e) => { e.stopPropagation(); openGroupModal(group); }} className="text-[var(--text-muted)] hover:text-blue-500 p-1 rounded-md transition-colors"><Edit2 size={14}/></button>
                         </div>

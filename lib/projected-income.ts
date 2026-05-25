@@ -1,4 +1,4 @@
-import { addMonths, addWeeks, format, parseISO } from 'date-fns';
+import { addMonths, addWeeks, format, max, parseISO, startOfDay } from 'date-fns';
 import { snapMoney } from '@/lib/money';
 import { isLiquidAccount } from '@/lib/constants/account-types';
 import type {
@@ -18,6 +18,22 @@ export const PROJECTED_INCOME_SOURCE_LABELS: Record<
   other: 'Other',
 };
 
+export function todayDateString(): string {
+  return format(startOfDay(new Date()), 'yyyy-MM-dd');
+}
+
+/** Pending expected income must not stay dated before today. */
+export function clampProjectedExpectedDateToToday(expectedDate: string): string {
+  const today = todayDateString();
+  const parsed = parseISO(expectedDate);
+  if (Number.isNaN(parsed.getTime())) return today;
+  return format(max([parsed, startOfDay(new Date())]), 'yyyy-MM-dd');
+}
+
+export function isProjectedExpectedDateStale(expectedDate: string): boolean {
+  return expectedDate < todayDateString();
+}
+
 export function advanceProjectedExpectedDate(
   expectedDate: string,
   repeatPeriod: ProjectedIncomeRepeatPeriod
@@ -27,7 +43,7 @@ export function advanceProjectedExpectedDate(
   if (repeatPeriod === 'Weekly') next = addWeeks(current, 1);
   else if (repeatPeriod === 'Biweekly') next = addWeeks(current, 2);
   else if (repeatPeriod === 'Monthly') next = addMonths(current, 1);
-  return format(next, 'yyyy-MM-dd');
+  return clampProjectedExpectedDateToToday(format(next, 'yyyy-MM-dd'));
 }
 
 /** Sum pending projected amounts landing in liquid accounts. */

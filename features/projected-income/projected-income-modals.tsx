@@ -7,7 +7,11 @@ import SearchableDropdown from '@/app/components/SearchableDropdown';
 import { ResponsiveModal } from '@/components/ui/responsive-modal';
 import { Select } from '@/components/ui/select';
 import { formatMoney, roundMoney } from '@/lib/money';
-import { PROJECTED_INCOME_SOURCE_LABELS } from '@/lib/projected-income';
+import {
+  PROJECTED_INCOME_SOURCE_LABELS,
+  clampProjectedExpectedDateToToday,
+  todayDateString,
+} from '@/lib/projected-income';
 import {
   insertProjectedIncome,
   projectedIncomeErrorMessage,
@@ -100,7 +104,7 @@ export function ProjectedIncomeFormModal({
     const payload: ProjectedIncomePayload = {
       label: form.label.trim(),
       amount: roundMoney(parseFloat(form.amount) || 0),
-      expected_date: form.expected_date,
+      expected_date: clampProjectedExpectedDateToToday(form.expected_date),
       account_id: Number(form.account_id),
       category_id: form.category_id ? Number(form.category_id) : null,
       source_type: form.source_type,
@@ -168,9 +172,15 @@ export function ProjectedIncomeFormModal({
             <input
               required
               type="date"
+              min={todayDateString()}
               className="w-full p-3 app-input rounded-xl font-bold border border-[var(--border)]"
               value={form.expected_date}
-              onChange={(e) => setForm({ ...form, expected_date: e.target.value })}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  expected_date: clampProjectedExpectedDateToToday(e.target.value),
+                })
+              }
             />
           </div>
           <div>

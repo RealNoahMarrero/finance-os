@@ -2,7 +2,12 @@ import { format } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { applyBalanceAdjustment } from '@/lib/balance-adjustment';
 import { roundMoney } from '@/lib/money';
-import { advanceProjectedExpectedDate } from '@/lib/projected-income';
+import {
+  advanceProjectedExpectedDate,
+  clampProjectedExpectedDateToToday,
+  isProjectedExpectedDateStale,
+  todayDateString,
+} from '@/lib/projected-income';
 import type { ProjectedIncome, ProjectedIncomePayload } from '@/lib/types';
 import { insertTransaction } from '@/lib/queries/transactions';
 
@@ -43,14 +48,45 @@ async function fetchProjectedRows(
   return applyFilters(base.select('*'));
 }
 
+async function bumpStalePendingProjectedDates() {
+  const today = todayDateString();
+  await supabase
+    .from('projected_income')
+    .update({ expected_date: today })
+    .eq('status', 'pending')
+    .lt('expected_date', today);
+}
+
+function applyStaleDateBump(rows: ProjectedIncome[]): ProjectedIncome[] {
+  const today = todayDateString();
+  return rows.map((p) =>
+    p.status === 'pending' && isProjectedExpectedDateStale(p.expected_date)
+      ? { ...p, expected_date: today }
+      : p
+  );
+}
+
+function normalizeProjectedPayload(
+  payload: Partial<ProjectedIncomePayload>
+): Partial<ProjectedIncomePayload> {
+  if (payload.expected_date == null) return payload;
+  return {
+    ...payload,
+    expected_date: clampProjectedExpectedDateToToday(payload.expected_date),
+  };
+}
+
 export async function fetchPendingProjectedIncome() {
+  await bumpStalePendingProjectedDates();
   const { data, error } = await fetchProjectedRows((q) =>
     q.eq('status', 'pending').order('expected_date', { ascending: true })
   );
-  return { data: (data || []) as ProjectedIncome[], error };
+  const rows = (data || []) as ProjectedIncome[];
+  return { data: error ? rows : applyStaleDateBump(rows), error };
 }
 
 export async function fetchProjectedIncomeForMonth(monthStart: string, monthEnd: string) {
+  await bumpStalePendingProjectedDates();
   const { data, error } = await fetchProjectedRows((q) =>
     q
       .eq('status', 'pending')
@@ -58,7 +94,8 @@ export async function fetchProjectedIncomeForMonth(monthStart: string, monthEnd:
       .lte('expected_date', monthEnd)
       .order('expected_date', { ascending: true })
   );
-  return { data: (data || []) as ProjectedIncome[], error };
+  const rows = (data || []) as ProjectedIncome[];
+  return { data: error ? rows : applyStaleDateBump(rows), error };
 }
 
 export async function fetchAllProjectedIncome(limit = 100) {
@@ -69,9 +106,10 @@ export async function fetchAllProjectedIncome(limit = 100) {
 }
 
 export async function insertProjectedIncome(payload: ProjectedIncomePayload) {
+  const normalized = normalizeProjectedPayload(payload) as ProjectedIncomePayload;
   const { data: row, error: insertError } = await supabase
     .from('projected_income')
-    .insert([payload])
+    .insert([normalized])
     .select('id')
     .single();
 
@@ -84,9 +122,10 @@ export async function updateProjectedIncome(
   id: number,
   payload: Partial<ProjectedIncomePayload>
 ) {
+  const normalized = normalizeProjectedPayload(payload);
   const { error: updateError } = await supabase
     .from('projected_income')
-    .update(payload)
+    .update(normalized)
     .eq('id', id);
 
   if (updateError) return { data: null, error: updateError };
@@ -173,9 +212,11 @@ export async function receiveProjectedIncome(
     const nextPayload: ProjectedIncomePayload = {
       label: projection.label,
       amount: projection.amount,
-      expected_date: advanceProjectedExpectedDate(
-        projection.expected_date,
-        projection.repeat_period
+      expected_date: clampProjectedExpectedDateToToday(
+        advanceProjectedExpectedDate(
+          projection.expected_date,
+          projection.repeat_period
+        )
       ),
       account_id: projection.account_id,
       category_id: projection.category_id,

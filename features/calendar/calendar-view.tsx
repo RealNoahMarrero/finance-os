@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { 
   ChevronLeft, ChevronRight, Calendar as CalendarIcon, 
-  CheckCircle2, TrendingUp
+  CheckCircle2, TrendingUp, CreditCard
 } from 'lucide-react';
 import { 
   format, addMonths, subMonths, startOfMonth, endOfMonth, 
@@ -21,6 +21,16 @@ import {
   ProjectedIncomeFormModal,
   ProjectedIncomeReceiveModal,
 } from '@/features/projected-income/projected-income-modals';
+import {
+  creditCardCalendarChipClass,
+  creditCardsDueOnDay,
+  totalCreditMinimumsDueInMonth,
+} from '@/lib/credit-cards';
+import {
+  advanceCreditCardPaymentCycle,
+  backfillAccountPaymentDueDates,
+} from '@/lib/queries/credit-card-payments';
+import { CreditCardPaymentDetail } from '@/features/credit-cards/credit-card-payment-detail';
 import type { Account, Category, ProjectedIncome } from '@/lib/types';
 
 export function CalendarView() {
@@ -29,10 +39,14 @@ export function CalendarView() {
   const [categories, setCategories] = useState<any[]>([]);
   const [projectedIncome, setProjectedIncome] = useState<ProjectedIncome[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [categoryOptions, setCategoryOptions] = useState<Pick<Category, 'id' | 'name' | 'emoji'>[]>([]);
+  const [categoryOptions, setCategoryOptions] = useState<
+    Pick<Category, 'id' | 'name' | 'emoji' | 'assigned_amount'>[]
+  >([]);
   const [loading, setLoading] = useState(true);
 
   const [detailItem, setDetailItem] = useState<ProjectedIncome | null>(null);
+  const [detailCard, setDetailCard] = useState<Account | null>(null);
+  const [markingCardPaid, setMarkingCardPaid] = useState(false);
   const [editingProjected, setEditingProjected] = useState<ProjectedIncome | null>(null);
   const [receiveProjected, setReceiveProjected] = useState<ProjectedIncome | null>(null);
   const [isProjectedFormOpen, setIsProjectedFormOpen] = useState(false);
@@ -60,13 +74,33 @@ export function CalendarView() {
 
   async function fetchAccountsAndCategories() {
     const { data: accs } = await supabase.from('accounts').select('*');
-    if (accs) setAccounts(accs as Account[]);
+    if (accs) {
+      const filled = await backfillAccountPaymentDueDates(accs as Account[]);
+      setAccounts(filled);
+    }
     const { data: cats } = await supabase
       .from('categories')
-      .select('id, name, emoji')
+      .select('id, name, emoji, assigned_amount')
       .eq('is_hidden', false)
       .order('name');
     if (cats) setCategoryOptions(cats);
+  }
+
+  async function refreshAccounts() {
+    const { data: accs } = await supabase.from('accounts').select('*');
+    if (accs) {
+      const filled = await backfillAccountPaymentDueDates(accs as Account[]);
+      setAccounts(filled);
+    }
+  }
+
+  async function handleMarkCardPaid() {
+    if (!detailCard) return;
+    setMarkingCardPaid(true);
+    await advanceCreditCardPaymentCycle(detailCard);
+    setMarkingCardPaid(false);
+    setDetailCard(null);
+    await refreshAccounts();
   }
 
   async function fetchProjectedForMonth() {
@@ -107,7 +141,11 @@ export function CalendarView() {
 
   // Math for the header stats
   const currentMonthBills = categories.filter(c => c.due_date && isSameMonth(parseISO(c.due_date), currentMonth));
-  const totalDueThisMonth = snapMoney(currentMonthBills.reduce((sum, c) => sum + Number(c.target_amount), 0));
+  const ccMinimumsThisMonth = totalCreditMinimumsDueInMonth(accounts, currentMonth);
+  const totalDueThisMonth = snapMoney(
+    currentMonthBills.reduce((sum, c) => sum + Number(c.target_amount), 0) +
+      ccMinimumsThisMonth
+  );
   const totalFundedThisMonth = snapMoney(currentMonthBills.reduce((sum, c) => sum + Number(c.assigned_amount), 0));
   const totalExpectedIncome = snapMoney(
     projectedIncome.reduce((sum, p) => sum + Number(p.amount), 0)
@@ -188,6 +226,10 @@ export function CalendarView() {
             const dayIncome = projectedIncome.filter(
               (p) => p.expected_date === format(day, 'yyyy-MM-dd')
             );
+            const dayCcPayments = creditCardsDueOnDay(
+              accounts,
+              format(day, 'yyyy-MM-dd')
+            );
 
             return (
               <div key={i} className={`min-h-[100px] md:min-h-[140px] app-card p-1 md:p-2 transition-colors ${!isCurrentMonth ? 'opacity-40 bg-[var(--surface-subtle)]' : 'hover:bg-[var(--surface-hover)]'}`}>
@@ -206,6 +248,22 @@ export function CalendarView() {
                     >
                       <span className="truncate max-w-[4rem] sm:max-w-none">{inc.label}</span>
                       <span className="font-black xl:ml-auto">+${formatMoney(inc.amount)}</span>
+                    </button>
+                  ))}
+                  {dayCcPayments.map((card) => (
+                    <button
+                      key={`cc-${card.id}`}
+                      type="button"
+                      onClick={() => setDetailCard(card)}
+                      className={`px-1.5 py-1 md:p-1.5 rounded border text-[9px] md:text-xs font-bold flex flex-col xl:flex-row xl:items-center justify-between gap-0.5 xl:gap-2 truncate touch-manipulation hover:brightness-95 active:scale-[0.98] transition-all ${creditCardCalendarChipClass(card, today, categoryOptions)}`}
+                    >
+                      <div className="flex items-center gap-1 truncate">
+                        <CreditCard size={10} className="shrink-0" />
+                        <span className="truncate max-w-[4rem] sm:max-w-none">{card.name}</span>
+                      </div>
+                      <span className="font-black xl:ml-auto">
+                        ${formatMoney(Number(card.minimum_payment) || 0)}
+                      </span>
                     </button>
                   ))}
                   {dayBills.map(bill => {
@@ -238,6 +296,21 @@ export function CalendarView() {
         </div>
       </motion.div>
       </AnimatePresence>
+
+      <ResponsiveModal
+        open={!!detailCard}
+        onOpenChange={(open) => !open && setDetailCard(null)}
+        title={detailCard?.name ?? 'Credit card payment'}
+      >
+        {detailCard && (
+          <CreditCardPaymentDetail
+            card={detailCard}
+            categories={categoryOptions}
+            onMarkPaid={handleMarkCardPaid}
+            markingPaid={markingCardPaid}
+          />
+        )}
+      </ResponsiveModal>
 
       <ResponsiveModal
         open={!!detailItem}

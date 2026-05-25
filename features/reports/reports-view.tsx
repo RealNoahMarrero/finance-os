@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
 import { format, addMonths } from 'date-fns';
-import { Snowflake, Flame, Trophy, TrendingDown } from 'lucide-react';
+import { Snowflake, Flame, Trophy, TrendingDown, CreditCard } from 'lucide-react';
 import Link from 'next/link';
 import { formatMoney, snapMoney } from '@/lib/money';
 import { fetchAccounts } from '@/lib/queries/accounts';
@@ -31,6 +31,12 @@ import { CashflowChart } from '@/components/charts/cashflow-chart';
 import { CategoryDonut } from '@/components/charts/category-donut';
 import { DebtTimelineChart } from '@/components/charts/debt-timeline-chart';
 import { cn } from '@/lib/cn';
+import {
+  computeAggregateCreditUtilization,
+  creditUtilizationBarWidth,
+  summarizeCreditCards,
+} from '@/lib/credit-cards';
+import type { Account } from '@/lib/types';
 
 const PERIODS: { id: ReportPeriod; label: string }[] = [
   { id: '30d', label: '30D' },
@@ -85,6 +91,14 @@ export function ReportsView() {
     () => aggregateTopPayees(transactions, period),
     [transactions, period]
   );
+  const creditSummary = useMemo(
+    () => summarizeCreditCards(accounts as Account[]),
+    [accounts]
+  );
+  const aggregateCredit = useMemo(
+    () => computeAggregateCreditUtilization(accounts as Account[]),
+    [accounts]
+  );
 
   const totalMinimums = debts.reduce((s, d) => s + (Number(d.target_amount) || 0), 0);
   const totalMonthlyPower = totalMinimums + (parseFloat(extraPayment) || 0);
@@ -132,7 +146,12 @@ export function ReportsView() {
         ))}
       </div>
 
-      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div
+        className={cn(
+          'mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2',
+          creditSummary.length > 0 ? 'lg:grid-cols-4' : 'lg:grid-cols-3'
+        )}
+      >
         <StatHero label="Net Worth" value={`$${formatMoney(netWorth)}`} variant="hero" />
         <StatHero label="Liquid Cash" value={`$${formatMoney(liquidCash)}`} />
         <StatHero
@@ -140,6 +159,34 @@ export function ReportsView() {
           value={`$${formatMoney(readyToAssign)}`}
           variant={readyToAssign < 0 ? 'negative' : 'positive'}
         />
+        {creditSummary.length > 0 && (
+          <StatHero
+            label="Credit Usage"
+            value={
+              aggregateCredit ? `${aggregateCredit.utilizationPct}%` : '—'
+            }
+            sublabel={
+              aggregateCredit ? (
+                <>
+                  ${formatMoney(aggregateCredit.totalOwed)} of $
+                  {formatMoney(aggregateCredit.totalLimit)} total limit
+                  {aggregateCredit.utilizationPct > 100 && (
+                    <span className="block font-bold text-white/90 mt-0.5">
+                      Over combined limit
+                    </span>
+                  )}
+                </>
+              ) : (
+                'Add credit limits on your cards to track usage'
+              )
+            }
+            variant={
+              aggregateCredit && aggregateCredit.utilizationPct > 100
+                ? 'negative'
+                : 'default'
+            }
+          />
+        )}
       </div>
 
       <Tabs.Root defaultValue="overview" className="space-y-6">
@@ -182,6 +229,86 @@ export function ReportsView() {
               ))}
             </div>
           </GlassCard>
+
+          {creditSummary.length > 0 && (
+            <GlassCard>
+              <h3 className="mb-4 flex items-center gap-2 text-lg font-bold">
+                <CreditCard size={20} className="text-red-500" />
+                Credit cards
+              </h3>
+              <div className="space-y-4">
+                {creditSummary.map((card) => (
+                  <div
+                    key={card.id}
+                    className="rounded-xl border border-[var(--border)] p-4"
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-4">
+                      <span className="font-bold text-[var(--text-primary)]">{card.name}</span>
+                      <span className="font-black text-red-500">${formatMoney(card.owed)}</span>
+                    </div>
+                    {card.utilizationPct != null && (
+                      <>
+                        <div className="mb-1 flex justify-between text-xs font-bold text-[var(--text-muted)]">
+                          <span>Usage</span>
+                          <span
+                            className={
+                              card.utilizationPct > 100
+                                ? 'text-red-700'
+                                : 'text-red-600'
+                            }
+                          >
+                            {card.utilizationPct}%
+                            {card.utilizationPct > 100 && (
+                              <span className="ml-1 text-[10px] uppercase tracking-wide">
+                                over limit
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-[var(--surface-subtle)]">
+                          <div
+                            className={`h-full rounded-full ${
+                              card.utilizationPct > 100 ? 'bg-red-700' : 'bg-red-500'
+                            }`}
+                            style={{
+                              width: `${creditUtilizationBarWidth(card.utilizationPct)}%`,
+                            }}
+                          />
+                        </div>
+                        <p className="mt-1 text-[10px] font-bold text-[var(--text-muted)]">
+                          {card.utilizationPct > 100 ? (
+                            <>
+                              ${formatMoney(card.owed)} owed · limit $
+                              {formatMoney(card.credit_limit)}
+                            </>
+                          ) : (
+                            <>
+                              ${formatMoney(card.available)} available of $
+                              {formatMoney(card.credit_limit)}
+                            </>
+                          )}
+                        </p>
+                      </>
+                    )}
+                    {(card.minimum_payment > 0 ||
+                      card.next_payment_due_date ||
+                      card.payment_due_day != null) && (
+                      <p className="mt-2 text-xs font-bold text-orange-600">
+                        {card.minimum_payment > 0 &&
+                          `Min payment $${formatMoney(card.minimum_payment)}`}
+                        {card.next_payment_due_date && (
+                          <>
+                            {card.minimum_payment > 0 && ' · '}
+                            Next due {card.next_payment_due_date}
+                          </>
+                        )}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </GlassCard>
+          )}
         </Tabs.Content>
 
         <Tabs.Content value="spending" className="space-y-6">

@@ -33,6 +33,7 @@ import {
   ProjectedIncomeListModal,
   ProjectedIncomeReceiveModal,
 } from '@/features/projected-income/projected-income-modals';
+import { computeInitialNextPaymentDueDate } from '@/lib/credit-cards';
 import type { Account, Category, ProjectedIncome } from '@/lib/types';
 
 export function DashboardView() {
@@ -69,7 +70,13 @@ export function DashboardView() {
   
   // Forms
   const [accountForm, setAccountForm] = useState({
-    name: '', type: 'Checking', balance: '', credit_limit: ''
+    name: '',
+    type: 'Checking',
+    balance: '',
+    credit_limit: '',
+    minimum_payment: '',
+    payment_due_day: '',
+    payment_category_id: '',
   });
   const [adjustmentType, setAdjustmentType] = useState('transaction');
 
@@ -173,12 +180,30 @@ export function DashboardView() {
     if (acc) {
       setEditingAccountId(acc.id);
       setAccountForm({
-        name: acc.name, type: acc.type, balance: roundMoney(acc.balance).toFixed(2),
-        credit_limit: acc.credit_limit ? roundMoney(acc.credit_limit).toFixed(2) : ''
+        name: acc.name,
+        type: acc.type,
+        balance: roundMoney(acc.balance).toFixed(2),
+        credit_limit: acc.credit_limit ? roundMoney(acc.credit_limit).toFixed(2) : '',
+        minimum_payment: acc.minimum_payment
+          ? roundMoney(acc.minimum_payment).toFixed(2)
+          : '',
+        payment_due_day:
+          acc.payment_due_day != null ? String(acc.payment_due_day) : '',
+        payment_category_id: acc.payment_category_id
+          ? String(acc.payment_category_id)
+          : '',
       });
     } else {
       setEditingAccountId(null);
-      setAccountForm({ name: '', type: 'Checking', balance: '', credit_limit: '' });
+      setAccountForm({
+        name: '',
+        type: 'Checking',
+        balance: '',
+        credit_limit: '',
+        minimum_payment: '',
+        payment_due_day: '',
+        payment_category_id: '',
+      });
     }
     setAdjustmentType('transaction');
     setIsAccountModalOpen(true);
@@ -190,11 +215,35 @@ export function DashboardView() {
     const oldAcc = accounts.find(a => a.id === editingAccountId);
     const oldBalance = oldAcc ? roundMoney(oldAcc.balance) : 0;
     
-    const payload = {
-      name: accountForm.name, type: accountForm.type,
+    const isCC = accountForm.type === 'Credit Card';
+    const dueDayRaw = parseInt(accountForm.payment_due_day, 10);
+    const dueDayValid =
+      isCC && accountForm.payment_due_day && dueDayRaw >= 1 && dueDayRaw <= 31;
+    const dueDayChanged =
+      oldAcc && dueDayValid && oldAcc.payment_due_day !== dueDayRaw;
+
+    const payload: Record<string, unknown> = {
+      name: accountForm.name,
+      type: accountForm.type,
       balance: newBalance,
-      credit_limit: roundMoney(parseFloat(accountForm.credit_limit) || 0)
+      credit_limit: roundMoney(parseFloat(accountForm.credit_limit) || 0),
+      minimum_payment: isCC ? roundMoney(parseFloat(accountForm.minimum_payment) || 0) : 0,
+      payment_due_day: dueDayValid ? dueDayRaw : null,
+      payment_category_id:
+        isCC && accountForm.payment_category_id
+          ? Number(accountForm.payment_category_id)
+          : null,
     };
+
+    if (isCC && dueDayValid) {
+      if (!editingAccountId || dueDayChanged || !oldAcc?.next_payment_due_date) {
+        payload.next_payment_due_date =
+          computeInitialNextPaymentDueDate(dueDayRaw);
+      }
+    } else if (!isCC) {
+      payload.next_payment_due_date = null;
+      payload.payment_category_id = null;
+    }
 
     if (editingAccountId && adjustmentType === 'transaction' && oldBalance !== newBalance) {
         const diff = roundMoney(newBalance - oldBalance);
@@ -541,7 +590,17 @@ export function DashboardView() {
                         <div className="flex-grow min-w-0">
                         <h4 className="font-bold text-[var(--text-primary)] truncate">{acc.name}</h4>
                         <p className="text-[10px] text-[var(--text-muted)] font-bold uppercase tracking-wider mb-1">{acc.type}</p>
-                        {acc.credit_limit > 0 && <div className="text-xs font-bold text-emerald-600">Avail: ${formatMoney(acc.credit_limit - Math.abs(snapMoney(acc.balance)))}</div>}
+                        {acc.credit_limit > 0 && (
+                          <div className="text-xs font-bold text-emerald-600">
+                            Avail: ${formatMoney(Math.max(0, acc.credit_limit - Math.abs(snapMoney(acc.balance))))}
+                          </div>
+                        )}
+                        {acc.minimum_payment > 0 && (
+                          <p className="text-[10px] font-bold text-orange-600 mt-0.5">
+                            Min pay ${formatMoney(acc.minimum_payment)}
+                            {acc.payment_due_day != null ? ` · due day ${acc.payment_due_day}` : ''}
+                          </p>
+                        )}
                         </div>
                         <div className="font-black text-lg text-red-500">
                         {snapMoney(acc.balance) < 0 ? '-' : ''}${formatMoney(Math.abs(acc.balance))}
@@ -771,11 +830,56 @@ export function DashboardView() {
                 </select>
               </div>
               {accountForm.type === 'Credit Card' && (
-                  <div className="animate-in fade-in slide-in-from-top-2">
+                  <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
+                    <div>
                     <label className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-2 block">Total Credit Limit</label>
                     <div className="relative">
                       <span className="absolute left-4 top-3.5 font-bold text-[var(--text-muted)]">$</span>
                       <input type="number" step="0.01" placeholder="0.00" className="w-full pl-8 p-3 app-input rounded-xl font-black text-lg border text-[var(--text-primary)] border-[var(--border)] outline-none focus:border-emerald-300" value={accountForm.credit_limit} onChange={e => setAccountForm({...accountForm, credit_limit: e.target.value})} />
+                    </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-2 block">Minimum payment</label>
+                      <div className="relative">
+                        <span className="absolute left-4 top-3.5 font-bold text-[var(--text-muted)]">$</span>
+                        <input type="number" step="0.01" min="0" placeholder="0.00" className="w-full pl-8 p-3 app-input rounded-xl font-black text-lg border text-[var(--text-primary)] border-[var(--border)] outline-none focus:border-emerald-300" value={accountForm.minimum_payment} onChange={e => setAccountForm({...accountForm, minimum_payment: e.target.value})} />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-2 block">Payment due day (1–31)</label>
+                      <input type="number" min={1} max={31} placeholder="e.g. 15" className="w-full p-3 app-input rounded-xl font-bold border border-[var(--border)] text-[var(--text-primary)] outline-none focus:border-emerald-300" value={accountForm.payment_due_day} onChange={e => setAccountForm({...accountForm, payment_due_day: e.target.value})} />
+                      <p className="text-[10px] text-[var(--text-muted)] font-medium mt-1">
+                        Calendar shows the next due date; mark paid to advance the cycle.
+                      </p>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-2 block">
+                        Budget envelope (optional)
+                      </label>
+                      <select
+                        className="w-full p-3 app-input rounded-xl font-bold border border-[var(--border)] text-[var(--text-primary)] outline-none focus:border-emerald-300 cursor-pointer"
+                        value={accountForm.payment_category_id}
+                        onChange={(e) =>
+                          setAccountForm({
+                            ...accountForm,
+                            payment_category_id: e.target.value,
+                          })
+                        }
+                      >
+                        <option value="">None — calendar only</option>
+                        {categories
+                          .filter((c) => !c.is_hidden)
+                          .map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.emoji ? `${c.emoji} ` : ''}
+                              {c.name}
+                            </option>
+                          ))}
+                      </select>
+                      <p className="text-[10px] text-[var(--text-muted)] font-medium mt-1">
+                        Fund this category in Budget; calendar turns gold when assigned ≥
+                        minimum.
+                      </p>
                     </div>
                   </div>
               )}

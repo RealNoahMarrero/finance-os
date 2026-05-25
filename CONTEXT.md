@@ -35,6 +35,8 @@ Core tables: `accounts`, `category_groups`, `categories`, `transactions`, **`pro
 | [`supabase/migrations/002_transaction_splits.sql`](supabase/migrations/002_transaction_splits.sql) | Multi-category lines for one expense/income |
 
 | [`supabase/migrations/003_projected_income_rls.sql`](supabase/migrations/003_projected_income_rls.sql) | RLS policies for `projected_income` and `transaction_splits` (required if saves fail with permission errors) |
+| [`supabase/migrations/004_credit_card_payments.sql`](supabase/migrations/004_credit_card_payments.sql) | `accounts.minimum_payment`, `accounts.payment_due_day` for CC calendar + insights |
+| [`supabase/migrations/005_credit_card_payment_cycle.sql`](supabase/migrations/005_credit_card_payment_cycle.sql) | `next_payment_due_date`, `payment_category_id` — mark paid advances cycle; budget funding colors |
 
 
 
@@ -61,6 +63,8 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 * **Actual RTA** = liquid cash − assigned (unchanged by projected income).
 
 * **Planning RTA** = liquid + pending projected inflows to liquid accounts − assigned (`hooks/use-ready-to-assign.ts`, `lib/projected-income.ts`).
+* **Credit cards** — `minimum_payment`, `payment_due_day`, active `next_payment_due_date`, optional `payment_category_id` for envelope funding; **Mark paid** advances due date +1 month; calendar gold when funded (`lib/credit-cards.ts`, `features/credit-cards/`).
+* **Expected income dates** — pending rows cannot stay before today; auto-bumped on fetch and clamped on save (`lib/queries/projected-income.ts`).
 
 
 
@@ -156,7 +160,7 @@ Tabs: Overview (cashflow chart, account list), Spending (category donut, top pay
 
 
 
-* Month grid of bill due dates (funding colors) **and** emerald chips for expected income (`projected_income`).
+* Month grid of bill due dates (funding colors), **credit card chips on `next_payment_due_date`** (gold when linked category is funded; tap → mark paid), and emerald chips for expected income (`projected_income`).
 
 * Header stats: bills due, funded, expected income this month.
 
@@ -232,7 +236,7 @@ Paste into **Extensions → Apps Script**, set `SUPABASE_URL` and `SUPABASE_KEY`
 
 | Transactions | `transactions` + nested `transaction_splits` (`Is Split`, `Split Detail` columns) |
 
-| ExpectedIncome | `projected_income` |
+| ExpectedIncome | `projected_income` (pending only; received/cancelled omitted) |
 
 | TransactionSplits | `transaction_splits` (one row per split line) |
 
@@ -271,4 +275,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 4. **Split transactions** — `transaction_splits` table, ledger split UI, reports category aggregation from splits.
 
 5. **Exports** — Dashboard “Export Full Report” (`lib/export/build-finance-export.ts`): summary, accounts, expected income, transactions (split-aware), split detail, categories. Google Sheets sync: `scripts/google-sheets-sync.gs` (Accounts, Categories, Transactions, ExpectedIncome, TransactionSplits).
+6. **Credit cards & stale income** — payment cycle with mark-paid advance; budget envelope link; utilization on Insights (true %, including over limit); pending expected income auto-advances to today when overdue.
 

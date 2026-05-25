@@ -47,14 +47,23 @@ function getOrCreateSheet_(name, headers) {
 }
 
 function syncAccounts() {
-  const data = supabaseGet_('accounts?select=name,type,balance,credit_limit&order=type');
+  const data = supabaseGet_(
+    'accounts?select=name,type,balance,credit_limit,minimum_payment,payment_due_day&order=type'
+  );
 
   const sheet = getOrCreateSheet_( 'Accounts', [
-    'Account Name', 'Type', 'Balance', 'Credit Limit',
+    'Account Name', 'Type', 'Balance', 'Credit Limit', 'Minimum Payment', 'Payment Due Day',
   ]);
 
   const rows = data.map(function (acc) {
-    return [acc.name, acc.type, acc.balance, acc.credit_limit || 0];
+    return [
+      acc.name,
+      acc.type,
+      acc.balance,
+      acc.credit_limit || 0,
+      acc.minimum_payment || 0,
+      acc.payment_due_day || '',
+    ];
   });
 
   if (rows.length > 0) {
@@ -193,17 +202,17 @@ function syncTransactionSplits() {
 }
 
 function syncProjectedIncome() {
+  // Pending only — received rows appear as Income in Transactions
   const data = supabaseGet_(
-    'projected_income?select=label,amount,expected_date,status,source_type,is_repeating,repeat_period,notes,' +
+    'projected_income?select=label,amount,expected_date,source_type,is_repeating,repeat_period,notes,' +
       'accounts!account_id(name),categories!category_id(name)' +
-      '&order=expected_date.asc'
+      '&status=eq.pending&order=expected_date.asc'
   );
 
   const sheet = getOrCreateSheet_( 'ExpectedIncome', [
     'Label',
     'Amount',
     'Expected Date',
-    'Status',
     'Source',
     'Repeating',
     'Period',
@@ -217,7 +226,6 @@ function syncProjectedIncome() {
       p.label,
       p.amount,
       p.expected_date,
-      p.status,
       p.source_type || 'other',
       p.is_repeating ? 'Yes' : 'No',
       p.repeat_period || 'None',
