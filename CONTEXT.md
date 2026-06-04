@@ -16,6 +16,10 @@
 
 Finance OS is a custom, manual-entry financial platform designed to replace YNAB. Zero-Based Budgeting ("Ready to Assign") with future forecasting and dynamic subscription/debt tracking.
 
+**Scope today:** Personal finances only — all accounts, categories, transactions, and reports represent personal money.
+
+**Next major initiative:** **Business toggle** — a global switch (personal ↔ business) that re-scopes the entire app (accounts, budget, ledger, calendar, insights, exports) to business finances. Not implemented yet; schema and UI will need entity separation or tagging when built.
+
 
 
 ## 2. DATABASE SCHEMA (Supabase)
@@ -37,6 +41,7 @@ Core tables: `accounts`, `category_groups`, `categories`, `transactions`, **`pro
 | [`supabase/migrations/003_projected_income_rls.sql`](supabase/migrations/003_projected_income_rls.sql) | RLS policies for `projected_income` and `transaction_splits` (required if saves fail with permission errors) |
 | [`supabase/migrations/004_credit_card_payments.sql`](supabase/migrations/004_credit_card_payments.sql) | `accounts.minimum_payment`, `accounts.payment_due_day` for CC calendar + insights |
 | [`supabase/migrations/005_credit_card_payment_cycle.sql`](supabase/migrations/005_credit_card_payment_cycle.sql) | `next_payment_due_date`, `payment_category_id` — mark paid advances cycle; budget funding colors |
+| [`supabase/migrations/006_projected_income_certainty.sql`](supabase/migrations/006_projected_income_certainty.sql) | `certainty` (`guaranteed` \| `anticipated`) on expected income for conservative vs full projected RTA |
 
 
 
@@ -44,7 +49,7 @@ Core tables: `accounts`, `category_groups`, `categories`, `transactions`, **`pro
 
 
 
-Label, amount, `expected_date`, `account_id` (deposit target), optional `category_id`, `status` (`pending` \| `received` \| `cancelled`), `source_type`, optional recurrence. Does not change balances until **Mark received** creates an `Income` transaction via `lib/queries/projected-income.ts` → `applyBalanceAdjustment`.
+Label, amount, `expected_date`, `account_id` (deposit target), optional `category_id`, `status` (`pending` \| `received` \| `cancelled`), `source_type`, `certainty` (`guaranteed` \| `anticipated`), optional recurrence. Does not change balances until **Mark received** creates an `Income` transaction via `lib/queries/projected-income.ts` → `applyBalanceAdjustment`. **Planning RTA** uses guaranteed-only for conservative subtitle; all pending for optimistic total (`lib/projected-income.ts`, `hooks/use-ready-to-assign.ts`).
 
 
 
@@ -152,7 +157,7 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 
 
-Tabs: Overview (cashflow chart, account list), Spending (category donut, top payees), Debt (payoff simulator + timeline chart). Period selector: 30D / 90D / YTD / 12M. Category spending aggregates from **split lines** when present.
+Tabs: Overview (cashflow chart + monthly table, account list), Spending (category donut, by group, top payees), Income (by category, top sources), Debt (payoff simulator + timeline chart). Period selector: 30D / 90D / YTD / 12M / **Month** (picker). Period income/expense/net summary. **Export** (Insights report preset, TXT/CSV) uses the **current on-screen period** (not just saved prefs). UI prefs persist in `localStorage` (`hooks/use-insights-preferences.ts`): period, month, tab, spending view, expanded groups, debt simulator inputs. Category spending aggregates from **split lines** when present.
 
 
 
@@ -184,7 +189,7 @@ Tabs: Overview (cashflow chart, account list), Spending (category donut, top pay
 
 
 
-* Toggle **Split across categories** on Expense/Income (not Transfer).
+* Toggle **Split across categories** on Expense/Income (not Transfer). Same split UI on **Dashboard quick entry** and Ledger.
 
 * Multiple envelope lines must sum to transaction total (`splitsMatchTotal`).
 
@@ -200,17 +205,25 @@ Tabs: Overview (cashflow chart, account list), Spending (category donut, top pay
 
 
 
-### In-app (`.txt` downloads)
+### In-app export modal (`features/export/export-modal.tsx`, `lib/export/run-export.ts`)
 
 
 
-| Location | Action | Contents |
+Shared **Export** modal on **Dashboard**, **Budget**, and **Insights**. Formats: **TXT** or **CSV**. Presets: Full backup, Insights report, Budget snapshot, Transactions. Toggles (non-insights presets): summary, accounts, categories, transactions, split lines, expected income; date range; guaranteed/anticipated filter; hidden categories.
 
-|----------|--------|----------|
+**Insights report:** From **Insights**, export matches the period/filters on that page (live data). From **Dashboard**, the same preset uses saved Insights prefs (`localStorage`) via `lib/reports/insights-export-context.ts`.
 
-| **Dashboard** | Export Full Report | Summary (net worth, liquid, RTA, projected RTA), accounts, expected income, all transactions (split-aware), split detail lines, categories |
 
-| **Budget** | Export | RTA, projected RTA if pending income exists, goals total, envelopes by group |
+
+| Location | Default preset |
+
+|----------|----------------|
+
+| **Dashboard** | Full backup |
+
+| **Budget** | Budget snapshot |
+
+| **Insights** | Insights report (on-screen period & filters) |
 
 
 
@@ -254,7 +267,7 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 
 * **Balance sync:** All transaction writes use `lib/balance-adjustment.ts` (ledger-grade, fresh DB reads)
 
-* **Smart Bill Pay:** Shared `applySmartBillPay` on dashboard quick entry and ledger (non-split only)
+* **Smart Bill Pay:** Shared `applySmartBillPay` on dashboard quick entry and ledger (non-split only). UI only for **debt** or **scheduled bills** (`due_date` + repeating cycle) — not everyday envelopes like gas/groceries (`lib/smart-bill-pay.ts`).
 
 * **Mobile:** Bottom nav, FAB quick entry on home, bottom sheets on mobile / dialog on desktop
 
@@ -276,4 +289,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 
 5. **Exports** — Dashboard “Export Full Report” (`lib/export/build-finance-export.ts`): summary, accounts, expected income, transactions (split-aware), split detail, categories. Google Sheets sync: `scripts/google-sheets-sync.gs` (Accounts, Categories, Transactions, ExpectedIncome, TransactionSplits).
 6. **Credit cards & stale income** — payment cycle with mark-paid advance; budget envelope link; utilization on Insights (true %, including over limit); pending expected income auto-advances to today when overdue.
+7. **Unified export modal** — presets (full, insights, budget, transactions), TXT/CSV, expected-income certainty in exports; Insights page export restored with live period binding.
 

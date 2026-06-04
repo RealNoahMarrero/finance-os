@@ -5,7 +5,7 @@ import {
   computeReadyToAssign,
 } from '@/lib/reports/aggregations';
 import {
-  computePendingProjectedInflow,
+  computePendingInflowBreakdown,
   computeProjectedPlanning,
 } from '@/lib/projected-income';
 import type { Account, Category, ProjectedIncome } from '@/lib/types';
@@ -19,13 +19,19 @@ export function useReadyToAssign(
     const liquidCash = computeLiquidCash(accounts);
     const netWorth = computeNetWorth(accounts);
     const readyToAssign = computeReadyToAssign(liquidCash, categories);
-    const pendingInflow = computePendingProjectedInflow(pendingProjected, accounts);
+    const inflow = computePendingInflowBreakdown(pendingProjected, accounts);
+    const assigned = categories
+      .filter((c) => !c.is_hidden)
+      .reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0);
     const { projectedLiquid, projectedReadyToAssign } = computeProjectedPlanning(
       liquidCash,
-      categories
-        .filter((c) => !c.is_hidden)
-        .reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0),
-      pendingInflow
+      assigned,
+      inflow.total
+    );
+    const { projectedReadyToAssign: conservativeProjectedRta } = computeProjectedPlanning(
+      liquidCash,
+      assigned,
+      inflow.guaranteed
     );
     return {
       liquidCash,
@@ -33,7 +39,10 @@ export function useReadyToAssign(
       readyToAssign,
       projectedLiquid,
       projectedReadyToAssign,
-      pendingInflow,
+      conservativeProjectedRta,
+      pendingInflow: inflow.total,
+      guaranteedInflow: inflow.guaranteed,
+      anticipatedInflow: inflow.anticipated,
     };
   }, [accounts, categories, pendingProjected]);
 }

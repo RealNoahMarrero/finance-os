@@ -31,6 +31,7 @@ import {
   backfillAccountPaymentDueDates,
 } from '@/lib/queries/credit-card-payments';
 import { CreditCardPaymentDetail } from '@/features/credit-cards/credit-card-payment-detail';
+import { projectedIncomeChipClass } from '@/lib/projected-income';
 import type { Account, Category, ProjectedIncome } from '@/lib/types';
 
 export function CalendarView() {
@@ -150,6 +151,16 @@ export function CalendarView() {
   const totalExpectedIncome = snapMoney(
     projectedIncome.reduce((sum, p) => sum + Number(p.amount), 0)
   );
+  const guaranteedExpectedIncome = snapMoney(
+    projectedIncome
+      .filter((p) => (p.certainty ?? 'guaranteed') !== 'anticipated')
+      .reduce((sum, p) => sum + Number(p.amount), 0)
+  );
+  const anticipatedExpectedIncome = snapMoney(
+    projectedIncome
+      .filter((p) => p.certainty === 'anticipated')
+      .reduce((sum, p) => sum + Number(p.amount), 0)
+  );
 
   if (loading) return <PageSkeleton />;
 
@@ -191,6 +202,11 @@ export function CalendarView() {
               <div>
                   <p className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Expected income</p>
                   <p className="text-2xl font-black text-[var(--text-primary)]">${formatMoney(totalExpectedIncome)}</p>
+                  {anticipatedExpectedIncome > 0 && (
+                    <p className="text-[10px] font-bold text-[var(--text-muted)] mt-0.5">
+                      ${formatMoney(guaranteedExpectedIncome)} guaranteed · ${formatMoney(anticipatedExpectedIncome)} anticipated
+                    </p>
+                  )}
               </div>
           </div>
       </div>
@@ -244,7 +260,7 @@ export function CalendarView() {
                       key={`inc-${inc.id}`}
                       type="button"
                       onClick={() => setDetailItem(inc)}
-                      className="px-1.5 py-1 md:p-1.5 rounded border text-[9px] md:text-xs font-bold flex flex-col xl:flex-row xl:items-center justify-between gap-0.5 xl:gap-2 truncate touch-manipulation hover:brightness-95 active:scale-[0.98] transition-all bg-emerald-500/15 border-emerald-500/40 text-emerald-800"
+                      className={`px-1.5 py-1 md:p-1.5 rounded border text-[9px] md:text-xs font-bold flex flex-col xl:flex-row xl:items-center justify-between gap-0.5 xl:gap-2 truncate touch-manipulation hover:brightness-95 active:scale-[0.98] transition-all ${projectedIncomeChipClass(inc.certainty)}`}
                     >
                       <span className="truncate max-w-[4rem] sm:max-w-none">{inc.label}</span>
                       <span className="font-black xl:ml-auto">+${formatMoney(inc.amount)}</span>

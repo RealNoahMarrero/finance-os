@@ -83,6 +83,7 @@ export type ProjectedIncomeSourceType =
   | 'invoice'
   | 'transfer_in'
   | 'other';
+export type ProjectedIncomeCertainty = 'guaranteed' | 'anticipated';
 export type ProjectedIncomeRepeatPeriod = 'None' | 'Weekly' | 'Biweekly' | 'Monthly';
 
 export interface ProjectedIncome {
@@ -95,6 +96,7 @@ export interface ProjectedIncome {
   category_id: number | null;
   status: ProjectedIncomeStatus;
   source_type: ProjectedIncomeSourceType;
+  certainty: ProjectedIncomeCertainty;
   is_repeating: boolean;
   repeat_period: ProjectedIncomeRepeatPeriod;
   notes: string | null;
@@ -111,6 +113,7 @@ export interface ProjectedIncomePayload {
   account_id: number;
   category_id: number | null;
   source_type: ProjectedIncomeSourceType;
+  certainty: ProjectedIncomeCertainty;
   is_repeating: boolean;
   repeat_period: ProjectedIncomeRepeatPeriod;
   notes: string | null;

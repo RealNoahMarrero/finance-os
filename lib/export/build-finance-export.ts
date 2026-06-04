@@ -13,6 +13,9 @@ export interface FinanceExportInput {
   readyToAssign: number;
   projectedReadyToAssign: number;
   pendingInflow: number;
+  guaranteedInflow?: number;
+  anticipatedInflow?: number;
+  conservativeProjectedRta?: number;
 }
 
 function formatCategoryLabel(txn: Transaction): string {
@@ -40,8 +43,17 @@ export function buildFinanceOsExportText(input: FinanceExportInput): string {
   text += `Liquid Cash: $${formatMoney(input.liquidCash)}\n`;
   text += `Ready to Assign: $${formatMoney(input.readyToAssign)}\n`;
   if (input.pendingInflow > 0) {
-    text += `Pending Expected Income: $${formatMoney(input.pendingInflow)}\n`;
-    text += `Projected RTA (if pending arrives): $${formatMoney(input.projectedReadyToAssign)}\n`;
+    if (input.guaranteedInflow != null && input.anticipatedInflow != null) {
+      text += `Pending Expected Income (Guaranteed): $${formatMoney(input.guaranteedInflow)}\n`;
+      text += `Pending Expected Income (Anticipated): $${formatMoney(input.anticipatedInflow)}\n`;
+      text += `Pending Expected Income (Total): $${formatMoney(input.pendingInflow)}\n`;
+      if (input.conservativeProjectedRta != null) {
+        text += `Projected RTA (guaranteed only): $${formatMoney(input.conservativeProjectedRta)}\n`;
+      }
+    } else {
+      text += `Pending Expected Income: $${formatMoney(input.pendingInflow)}\n`;
+    }
+    text += `Projected RTA (if all pending arrives): $${formatMoney(input.projectedReadyToAssign)}\n`;
   }
   text += '\n';
 
@@ -69,6 +81,7 @@ export function buildFinanceOsExportText(input: FinanceExportInput): string {
   } else {
     pending.forEach((p) => {
       text += `${p.label} | $${formatMoney(p.amount)} | ${p.expected_date}`;
+      text += ` | ${p.certainty ?? 'guaranteed'}`;
       text += ` | ${p.source_type}`;
       if (p.accounts?.name) text += ` | → ${p.accounts.name}`;
       if (p.categories?.name) text += ` | ${p.categories.name}`;
@@ -128,8 +141,12 @@ export function buildFinanceOsExportText(input: FinanceExportInput): string {
   return text;
 }
 
-export function downloadTextFile(contents: string, filename: string) {
-  const blob = new Blob([contents], { type: 'text/plain' });
+export function downloadTextFile(
+  contents: string,
+  filename: string,
+  mime = 'text/plain;charset=utf-8'
+) {
+  const blob = new Blob([contents], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

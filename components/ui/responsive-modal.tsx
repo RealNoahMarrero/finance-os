@@ -4,6 +4,13 @@ import * as React from 'react';
 import { Sheet } from '@/components/ui/sheet';
 import { Dialog } from '@/components/ui/dialog';
 
+type LayoutMode = 'sheet' | 'dialog';
+
+function resolveLayoutMode(): LayoutMode {
+  if (typeof window === 'undefined') return 'dialog';
+  return window.matchMedia('(min-width: 1024px)').matches ? 'dialog' : 'sheet';
+}
+
 export function ResponsiveModal({
   open,
   onOpenChange,
@@ -15,17 +22,19 @@ export function ResponsiveModal({
   title?: string;
   children: React.ReactNode;
 }) {
-  const [isDesktop, setIsDesktop] = React.useState(false);
+  const layoutRef = React.useRef<LayoutMode | null>(null);
+  const [layout, setLayout] = React.useState<LayoutMode>(() => resolveLayoutMode());
 
   React.useEffect(() => {
-    const mq = window.matchMedia('(min-width: 1024px)');
-    setIsDesktop(mq.matches);
-    const handler = () => setIsDesktop(mq.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
+    if (layoutRef.current == null) {
+      layoutRef.current = resolveLayoutMode();
+      setLayout(layoutRef.current);
+    }
   }, []);
 
-  if (isDesktop) {
+  if (!open) return null;
+
+  if (layout === 'dialog') {
     return (
       <Dialog open={open} onOpenChange={onOpenChange} title={title}>
         {children}

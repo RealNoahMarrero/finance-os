@@ -12,6 +12,10 @@ import { format, parseISO, addWeeks, addMonths, addYears } from 'date-fns';
 import SearchableDropdown from '@/app/components/SearchableDropdown';
 import { formatMoney, roundMoney, snapMoney } from '@/lib/money';
 import { applySmartBillPay } from '@/lib/balance-adjustment';
+import {
+  categorySupportsAdvanceDueDate,
+  categorySupportsSmartBillPay,
+} from '@/lib/smart-bill-pay';
 import { applyTransactionBalances, reverseTransactionBalances } from '@/lib/transaction-balance';
 import { attachSplitsToTransactions } from '@/lib/queries/transactions';
 import {
@@ -285,23 +289,18 @@ export function LedgerView() {
           setSmartBillPay({ showToggle: false, advanceCycle: true, deductDebt: true, category: null });
           return;
       }
-      const cat = categories.find(c => c.id.toString() === catId);
-      if (cat && (cat.is_repeating || cat.is_debt)) {
-          // Fetch full category details to get target_amount and balance if needed
-          // (categories state already has most of this, but let's be sure)
-          supabase.from('categories').select('*').eq('id', catId).single().then(({ data }) => {
-              if (data) {
-                  setSmartBillPay({
-                      showToggle: true,
-                      advanceCycle: data.is_repeating,
-                      deductDebt: data.is_debt,
-                      category: data
-                  });
-              }
-          });
-      } else {
-          setSmartBillPay({ showToggle: false, advanceCycle: true, deductDebt: true, category: null });
-      }
+      supabase.from('categories').select('*').eq('id', catId).single().then(({ data }) => {
+          if (data && categorySupportsSmartBillPay(data)) {
+              setSmartBillPay({
+                  showToggle: true,
+                  advanceCycle: categorySupportsAdvanceDueDate(data),
+                  deductDebt: Boolean(data.is_debt),
+                  category: data,
+              });
+          } else {
+              setSmartBillPay({ showToggle: false, advanceCycle: true, deductDebt: true, category: null });
+          }
+      });
   };
 
   const getTxnIcon = (type: string) => {
@@ -606,7 +605,7 @@ export function LedgerView() {
                           <Zap size={14}/> Smart Bill Pay
                       </div>
                       <div className="space-y-2">
-                          {smartBillPay.category?.is_repeating && (
+                          {categorySupportsAdvanceDueDate(smartBillPay.category) && (
                               <label className="flex items-center gap-3 cursor-pointer group">
                                   <div className="relative">
                                       <input type="checkbox" className="sr-only peer" checked={smartBillPay.advanceCycle} onChange={e => setSmartBillPay({...smartBillPay, advanceCycle: e.target.checked})} />

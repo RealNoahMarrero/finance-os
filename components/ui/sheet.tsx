@@ -21,10 +21,10 @@ export function Sheet({
   return (
     <Drawer.Root open={open} onOpenChange={onOpenChange} shouldScaleBackground>
       <Drawer.Portal>
-        <Drawer.Overlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" />
+        <Drawer.Overlay className="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm" />
         <Drawer.Content
           className={cn(
-            'fixed inset-x-0 bottom-0 z-50 mt-24 flex max-h-[92dvh] flex-col rounded-t-[1.75rem] bg-[var(--canvas)] outline-none',
+            'fixed inset-x-0 bottom-0 z-[100] mt-24 flex max-h-[92dvh] flex-col rounded-t-[1.75rem] bg-[var(--canvas)] outline-none',
             'lg:inset-auto lg:left-1/2 lg:top-1/2 lg:bottom-auto lg:w-full lg:max-w-lg lg:-translate-x-1/2 lg:-translate-y-1/2 lg:rounded-[var(--radius-card)] lg:max-h-[90vh]',
             className
           )}

@@ -20,6 +20,7 @@ import { useReadyToAssign } from '@/hooks/use-ready-to-assign';
 import { fetchPendingProjectedIncome } from '@/lib/queries/projected-income';
 import { backfillAccountPaymentDueDates } from '@/lib/queries/credit-card-payments';
 import { CreditCardPaymentsPanel } from '@/features/credit-cards/credit-card-payments-panel';
+import { ExportModal } from '@/features/export/export-modal';
 import type { Account, Category, CategoryGroup, ProjectedIncome } from '@/lib/types';
 
 export function BudgetView() {
@@ -32,6 +33,7 @@ export function BudgetView() {
   const [liquidCash, setLiquidCash] = useState(0);
   const [pendingProjected, setPendingProjected] = useState<ProjectedIncome[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isExportOpen, setIsExportOpen] = useState(false);
 
   // UI States (Persistent)
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
@@ -156,52 +158,6 @@ export function BudgetView() {
     if (c) setCategories(c as Category[]);
     
     setLoading(false);
-  }
-
-  function exportBudget() {
-      const visibleCats = categories.filter(c => !c.is_hidden);
-      const totalAssigned = visibleCats.reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0);
-      const totalGoals = visibleCats.reduce((sum, c) => sum + Number(c.target_amount || 0), 0);
-      
-      let text = `FINANCE OS - BUDGET MASTER EXPORT\nDate: ${format(new Date(), 'MMM d, yyyy')}\n\n`;
-      text += `Liquid Cash: $${formatMoney(liquidCash)}\n`;
-      text += `Ready to Assign: $${formatMoney(readyToAssign)}\n`;
-      if (pendingInflow > 0) {
-        text += `Pending Expected Income: $${formatMoney(pendingInflow)}\n`;
-        text += `Projected RTA: $${formatMoney(projectedReadyToAssign)}\n`;
-      }
-      text += `Total Goals Target: $${formatMoney(totalGoals)}\n\n`;
-
-      groups.forEach(g => {
-          const groupCats = visibleCats.filter(c => c.group_id === g.id);
-          if (groupCats.length === 0) return;
-          
-          text += `--- ${g.name.toUpperCase()} ---\n`;
-          groupCats.forEach(c => {
-              let assigned = Number(c.assigned_amount || 0);
-              assigned = snapMoney(assigned);
-
-              const target = Number(c.target_amount || 0);
-              
-              text += `${c.emoji ? c.emoji + ' ' : ''}${c.name}\n`;
-              text += `  Assigned: $${formatMoney(assigned)}`;
-              
-              if (target > 0) text += ` | Goal: $${formatMoney(target)} (${c.target_type}, ${c.is_repeating ? c.target_period : 'One-Time'})`;
-              if (c.due_date) text += ` | Due: ${c.due_date}`;
-              if (c.is_debt && c.balance > 0) text += ` | Debt Bal: $${formatMoney(c.balance)}`;
-              if (c.is_asap) text += ` | [ASAP]`;
-              if (c.notes) text += ` | Notes: ${c.notes}`;
-              
-              text += `\n\n`;
-          });
-      });
-
-      const blob = new Blob([text], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `FinanceOS_Budget_${format(new Date(), 'yyyy-MM-dd')}.txt`;
-      a.click();
   }
 
   // --- FUNDING & INLINE MATH LOGIC ---
@@ -467,7 +423,14 @@ export function BudgetView() {
   const archivedCategories = categories.filter(c => c.is_hidden);
   const totalAssigned = visibleCategories.reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0);
   
-  const { readyToAssign, projectedReadyToAssign, pendingInflow } = useReadyToAssign(
+  const {
+    readyToAssign,
+    projectedReadyToAssign,
+    conservativeProjectedRta,
+    pendingInflow,
+    guaranteedInflow,
+    anticipatedInflow,
+  } = useReadyToAssign(
     accounts,
     categories,
     pendingProjected
@@ -502,10 +465,18 @@ export function BudgetView() {
            </h1>
            {readyToAssign < 0 && <p className="font-bold text-white mt-2 bg-red-600 inline-block px-3 py-1 rounded-lg text-sm">You assigned more money than you have in liquid cash.</p>}
            {pendingInflow > 0 && (
-             <p className="text-sm text-white/80 mt-3 font-medium">
-               If pending income arrives:{' '}
-               <span className="font-black text-white">${formatMoney(projectedReadyToAssign)}</span>
-             </p>
+             <div className="text-sm text-white/80 mt-3 font-medium space-y-1">
+               <p>
+                 If guaranteed arrives:{' '}
+                 <span className="font-black text-white">${formatMoney(conservativeProjectedRta)}</span>
+               </p>
+               {anticipatedInflow > 0 && (
+                 <p>
+                   If all pending:{' '}
+                   <span className="font-black text-white">${formatMoney(projectedReadyToAssign)}</span>
+                 </p>
+               )}
+             </div>
            )}
         </div>
         <div className="relative z-10 flex flex-col items-center md:items-end gap-3">
@@ -541,7 +512,7 @@ export function BudgetView() {
             <h2 className="text-2xl font-extrabold text-[var(--text-primary)] tracking-tight flex items-center gap-2">
                 <LayoutGrid size={24} className="text-blue-500"/> Budget Planner
             </h2>
-            <button onClick={exportBudget} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors" title="Export Budget to .txt">
+            <button type="button" onClick={() => setIsExportOpen(true)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors" title="Export budget">
                 <Download size={18}/>
             </button>
         </div>
@@ -1144,6 +1115,11 @@ export function BudgetView() {
         </div>
       )}
 
+      <ExportModal
+        open={isExportOpen}
+        onOpenChange={setIsExportOpen}
+        initialPreset="budget"
+      />
     </>
   );
 }

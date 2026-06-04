@@ -21,12 +21,12 @@ export function Dialog({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out" />
+        <DialogPrimitive.Overlay className="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out" />
         <DialogPrimitive.Content
           className={cn(
-            'fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2',
+            'fixed left-1/2 top-1/2 z-[100] w-full max-w-lg -translate-x-1/2 -translate-y-1/2',
             'max-h-[90vh] overflow-y-auto hide-scrollbar rounded-[var(--radius-card)]',
-            'bg-[var(--canvas)] border border-[var(--border)] p-6 shadow-xl outline-none',
+            'app-modal border border-[var(--border)] p-6 shadow-xl outline-none',
             className
           )}
         >

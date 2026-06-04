@@ -6,17 +6,19 @@ export function StatHero({
   sublabel,
   variant = 'default',
   className,
+  valueClassName,
 }: {
   label: string;
   value: React.ReactNode;
   sublabel?: React.ReactNode;
   variant?: 'default' | 'positive' | 'negative' | 'hero';
   className?: string;
+  valueClassName?: string;
 }) {
   return (
     <div
       className={cn(
-        'rounded-[var(--radius-card)] p-5 md:p-6',
+        'flex h-full min-h-[8.5rem] flex-col rounded-[var(--radius-card)] p-5 md:p-6',
         variant === 'hero' && 'gradient-hero text-white',
         variant === 'positive' && 'gradient-positive text-white',
         variant === 'negative' && 'gradient-negative text-white',
@@ -34,7 +36,9 @@ export function StatHero({
       </p>
       <div
         className={cn(
-          'font-black tracking-tighter text-4xl md:text-5xl lg:text-6xl',
+          'min-w-0 flex-1 font-black tracking-tighter tabular-nums leading-tight',
+          valueClassName ??
+            'text-[clamp(1.35rem,3.5vw,2.25rem)]',
           variant === 'default' && 'text-[var(--text-primary)]'
         )}
       >
@@ -43,7 +47,7 @@ export function StatHero({
       {sublabel && (
         <div
           className={cn(
-            'mt-3 text-sm font-medium',
+            'mt-auto pt-3 text-sm font-medium',
             variant === 'default' ? 'text-[var(--text-muted)]' : 'text-white/80'
           )}
         >

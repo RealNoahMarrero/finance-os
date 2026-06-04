@@ -221,6 +221,7 @@ export async function receiveProjectedIncome(
       account_id: projection.account_id,
       category_id: projection.category_id,
       source_type: projection.source_type,
+      certainty: projection.certainty ?? 'guaranteed',
       is_repeating: projection.is_repeating,
       repeat_period: projection.repeat_period,
       notes: projection.notes,

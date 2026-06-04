@@ -8,8 +8,10 @@ import { ResponsiveModal } from '@/components/ui/responsive-modal';
 import { Select } from '@/components/ui/select';
 import { formatMoney, roundMoney } from '@/lib/money';
 import {
+  PROJECTED_INCOME_CERTAINTY_LABELS,
   PROJECTED_INCOME_SOURCE_LABELS,
   clampProjectedExpectedDateToToday,
+  defaultCertaintyForSourceType,
   todayDateString,
 } from '@/lib/projected-income';
 import {
@@ -23,6 +25,7 @@ import type {
   Category,
   ProjectedIncome,
   ProjectedIncomePayload,
+  ProjectedIncomeCertainty,
   ProjectedIncomeRepeatPeriod,
   ProjectedIncomeSourceType,
 } from '@/lib/types';
@@ -34,6 +37,7 @@ type FormState = {
   account_id: string;
   category_id: string;
   source_type: ProjectedIncomeSourceType;
+  certainty: ProjectedIncomeCertainty;
   is_repeating: boolean;
   repeat_period: ProjectedIncomeRepeatPeriod;
   notes: string;
@@ -47,6 +51,7 @@ function makeDefaultForm(accountId: string): FormState {
     account_id: accountId,
     category_id: '',
     source_type: 'other',
+    certainty: 'anticipated',
     is_repeating: false,
     repeat_period: 'Monthly',
     notes: '',
@@ -86,6 +91,7 @@ export function ProjectedIncomeFormModal({
         account_id: String(editing.account_id),
         category_id: editing.category_id ? String(editing.category_id) : '',
         source_type: editing.source_type,
+        certainty: editing.certainty ?? defaultCertaintyForSourceType(editing.source_type),
         is_repeating: editing.is_repeating,
         repeat_period:
           editing.repeat_period && editing.repeat_period !== 'None'
@@ -108,6 +114,7 @@ export function ProjectedIncomeFormModal({
       account_id: Number(form.account_id),
       category_id: form.category_id ? Number(form.category_id) : null,
       source_type: form.source_type,
+      certainty: form.certainty,
       is_repeating: form.is_repeating,
       repeat_period: form.is_repeating ? form.repeat_period : 'None',
       notes: form.notes.trim() || null,
@@ -190,12 +197,14 @@ export function ProjectedIncomeFormModal({
             <Select
               className="w-full p-3 rounded-xl font-bold"
               value={form.source_type}
-              onChange={(e) =>
+              onChange={(e) => {
+                const source_type = e.target.value as ProjectedIncomeSourceType;
                 setForm({
                   ...form,
-                  source_type: e.target.value as ProjectedIncomeSourceType,
-                })
-              }
+                  source_type,
+                  certainty: defaultCertaintyForSourceType(source_type),
+                });
+              }}
             >
               {Object.entries(PROJECTED_INCOME_SOURCE_LABELS).map(([k, label]) => (
                 <option key={k} value={k}>
@@ -204,6 +213,33 @@ export function ProjectedIncomeFormModal({
               ))}
             </Select>
           </div>
+        </div>
+
+        <div>
+          <label className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-2 block">
+            Confidence
+          </label>
+          <div className="flex gap-2">
+            {(['guaranteed', 'anticipated'] as ProjectedIncomeCertainty[]).map((tier) => (
+              <button
+                key={tier}
+                type="button"
+                onClick={() => setForm({ ...form, certainty: tier })}
+                className={`flex-1 min-h-10 rounded-xl text-xs font-bold border transition-colors ${
+                  form.certainty === tier
+                    ? tier === 'guaranteed'
+                      ? 'bg-emerald-500 text-white border-emerald-500'
+                      : 'bg-amber-500 text-white border-amber-500'
+                    : 'app-card-subtle border-[var(--border)] text-[var(--text-muted)]'
+                }`}
+              >
+                {PROJECTED_INCOME_CERTAINTY_LABELS[tier]}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[10px] font-medium text-[var(--text-muted)]">
+            Guaranteed counts toward conservative planning RTA; anticipated is shown but optional for plans.
+          </p>
         </div>
 
         <div>
@@ -441,6 +477,16 @@ export function ProjectedIncomeListModal({
                   <p className="text-xs text-[var(--text-muted)]">
                     {format(new Date(item.expected_date + 'T00:00:00'), 'MMM d, yyyy')}
                     {item.accounts?.name ? ` · ${item.accounts.name}` : ''}
+                    {' · '}
+                    <span
+                      className={
+                        (item.certainty ?? 'guaranteed') === 'guaranteed'
+                          ? 'text-emerald-600'
+                          : 'text-amber-600'
+                      }
+                    >
+                      {PROJECTED_INCOME_CERTAINTY_LABELS[item.certainty ?? 'guaranteed']}
+                    </span>
                   </p>
                   {item.status !== 'pending' && (
                     <p className="text-[10px] font-bold uppercase text-[var(--text-muted)] mt-1">

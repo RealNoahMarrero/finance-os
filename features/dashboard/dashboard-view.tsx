@@ -8,12 +8,25 @@ import {
   ArrowUpRight, ArrowDownRight, ArrowRightLeft, Activity, X, 
   AlertCircle, Trash2, LayoutGrid, PieChart, ListOrdered, 
   Calendar, FileText, Download, Zap, Edit2, Tag, AlignLeft, Save, Loader2,
-  TrendingUp
+  TrendingUp, Split
 } from 'lucide-react';
 import { format, parseISO, addWeeks, addMonths, addYears } from 'date-fns';
 import SearchableDropdown from '@/app/components/SearchableDropdown';
 import { formatMoney, roundMoney, snapMoney } from '@/lib/money';
 import { applyBalanceAdjustment, applySmartBillPay } from '@/lib/balance-adjustment';
+import {
+  categorySupportsAdvanceDueDate,
+  categorySupportsSmartBillPay,
+} from '@/lib/smart-bill-pay';
+import { applyTransactionBalances } from '@/lib/transaction-balance';
+import { replaceTransactionSplits } from '@/lib/queries/transaction-splits';
+import {
+  emptySplitLine,
+  parseSplitLines,
+  splitsMatchTotal,
+  type SplitFormLine,
+} from '@/lib/transaction-splits';
+import { SplitTransactionFields } from '@/features/ledger/split-transaction-fields';
 import { PageSkeleton } from '@/components/ui/skeleton';
 import { Fab } from '@/components/layout/fab';
 import { useReadyToAssign } from '@/hooks/use-ready-to-assign';
@@ -23,11 +36,9 @@ import {
   fetchAllProjectedIncome,
   fetchPendingProjectedIncome,
 } from '@/lib/queries/projected-income';
-import { fetchTransactions } from '@/lib/queries/transactions';
-import {
-  buildFinanceOsExportText,
-  downloadTextFile,
-} from '@/lib/export/build-finance-export';
+import { attachSplitsToTransactions } from '@/lib/queries/transactions';
+import { ExportModal } from '@/features/export/export-modal';
+import { PROJECTED_INCOME_CERTAINTY_LABELS } from '@/lib/projected-income';
 import {
   ProjectedIncomeFormModal,
   ProjectedIncomeListModal,
@@ -58,6 +69,7 @@ export function DashboardView() {
   const [editingAccountId, setEditingAccountId] = useState<number | null>(null);
   
   const [isQuickEntryOpen, setIsQuickEntryOpen] = useState(false);
+  const [isExportOpen, setIsExportOpen] = useState(false);
   const [isSubmittingTxn, setIsSubmittingTxn] = useState(false);
 
   // Smart Bill Pay Logic States
@@ -84,6 +96,12 @@ export function DashboardView() {
     type: 'Expense', date: format(new Date(), 'yyyy-MM-dd'), amount: '', 
     payee: '', category_id: '', account_id: '', to_account_id: '', notes: ''
   });
+
+  const [isSplitMode, setIsSplitMode] = useState(false);
+  const [splitLines, setSplitLines] = useState<SplitFormLine[]>([
+    emptySplitLine(),
+    emptySplitLine(),
+  ]);
 
   useEffect(() => {
     fetchDashboardData();
@@ -283,11 +301,13 @@ export function DashboardView() {
   }
 
   // --- QUICK ENTRY LOGIC ---
-  function openQuickEntry(accId: number) {
+  function openQuickEntry(accId?: number) {
       setQuickForm({
         type: 'Expense', date: format(new Date(), 'yyyy-MM-dd'), amount: '', 
-        payee: '', category_id: '', account_id: accId.toString(), to_account_id: '', notes: ''
+        payee: '', category_id: '', account_id: (accId ?? accounts[0]?.id)?.toString() || '', to_account_id: '', notes: ''
       });
+      setIsSplitMode(false);
+      setSplitLines([emptySplitLine(), emptySplitLine()]);
       setSmartBillPay({ showToggle: false, advanceCycle: true, deductDebt: true, category: null });
       setIsQuickEntryOpen(true);
   }
@@ -317,88 +337,114 @@ export function DashboardView() {
           setSmartBillPay({ showToggle: false, advanceCycle: true, deductDebt: true, category: null });
           return;
       }
-      const cat = categories.find(c => c.id.toString() === catId);
-      if (cat) {
-          // Fetch full category details to get target_amount and balance if needed
-          supabase.from('categories').select('*').eq('id', catId).single().then(({ data }) => {
-              if (data && (data.is_repeating || data.is_debt)) {
-                  setSmartBillPay({
-                      showToggle: true,
-                      advanceCycle: data.is_repeating,
-                      deductDebt: data.is_debt,
-                      category: data
-                  });
-              } else {
-                  setSmartBillPay({ showToggle: false, advanceCycle: true, deductDebt: true, category: null });
-              }
-          });
-      }
+      supabase.from('categories').select('*').eq('id', catId).single().then(({ data }) => {
+          if (data && categorySupportsSmartBillPay(data)) {
+              setSmartBillPay({
+                  showToggle: true,
+                  advanceCycle: categorySupportsAdvanceDueDate(data),
+                  deductDebt: Boolean(data.is_debt),
+                  category: data,
+              });
+          } else {
+              setSmartBillPay({ showToggle: false, advanceCycle: true, deductDebt: true, category: null });
+          }
+      });
   };
 
   const handleBalanceAdjustment = (txn: any) => applyBalanceAdjustment(txn, 'apply');
+
+  function resetQuickEntryForm() {
+      setQuickForm({
+          type: 'Expense',
+          date: format(new Date(), 'yyyy-MM-dd'),
+          amount: '',
+          payee: '',
+          category_id: '',
+          account_id: accounts[0]?.id?.toString() || '',
+          to_account_id: '',
+          notes: '',
+      });
+      setIsSplitMode(false);
+      setSplitLines([emptySplitLine(), emptySplitLine()]);
+      setSmartBillPay({ showToggle: false, advanceCycle: true, deductDebt: true, category: null });
+  }
 
   async function saveQuickEntry(e: React.FormEvent) {
       e.preventDefault();
       setIsSubmittingTxn(true);
 
       const amount = roundMoney(parseFloat(quickForm.amount) || 0);
+      const useSplit = isSplitMode && quickForm.type !== 'Transfer';
+      const parsedSplits = useSplit ? parseSplitLines(splitLines) : [];
+
+      if (useSplit) {
+          if (parsedSplits.length < 2) {
+              alert('Add at least two categories with amounts for a split transaction.');
+              setIsSubmittingTxn(false);
+              return;
+          }
+          if (!splitsMatchTotal(amount, splitLines)) {
+              alert('Split amounts must equal the transaction total.');
+              setIsSubmittingTxn(false);
+              return;
+          }
+      }
+
       const payload = {
           date: quickForm.date,
           amount: amount,
           payee: quickForm.type === 'Transfer' ? 'Transfer' : quickForm.payee,
-          category_id: quickForm.type === 'Transfer' ? null : (quickForm.category_id ? parseInt(quickForm.category_id) : null),
+          category_id:
+            quickForm.type === 'Transfer'
+              ? null
+              : useSplit
+                ? null
+                : quickForm.category_id
+                  ? parseInt(quickForm.category_id)
+                  : null,
           account_id: parseInt(quickForm.account_id),
           to_account_id: quickForm.type === 'Transfer' ? parseInt(quickForm.to_account_id) : null,
           type: quickForm.type,
-          notes: quickForm.notes || null
+          notes: quickForm.notes || null,
       };
 
       const { data: inserted } = await supabase.from('transactions').insert([payload]).select().single();
       if (inserted) {
-          await handleBalanceAdjustment(payload);
-          
-          // Feature 6: Smart Bill Pay Logic
-          if (smartBillPay.showToggle && smartBillPay.category) {
-              await applySmartBillPay(smartBillPay.category, {
-                  advanceCycle: smartBillPay.advanceCycle,
-                  deductDebt: smartBillPay.deductDebt,
-              });
+          if (useSplit) {
+              await replaceTransactionSplits(inserted.id, parsedSplits);
+              const [fullTxn] = await attachSplitsToTransactions([inserted]);
+              await applyTransactionBalances(fullTxn);
+          } else {
+              await handleBalanceAdjustment(payload);
+              if (smartBillPay.showToggle && smartBillPay.category) {
+                  await applySmartBillPay(smartBillPay.category, {
+                      advanceCycle: smartBillPay.advanceCycle,
+                      deductDebt: smartBillPay.deductDebt,
+                  });
+              }
           }
 
           setIsQuickEntryOpen(false);
-          await fetchDashboardData(); 
+          resetQuickEntryForm();
+          await fetchDashboardData();
       }
       setIsSubmittingTxn(false);
   }
 
   const netWorth = snapMoney(accounts.reduce((sum, acc) => acc.type === 'Credit Card' ? sum - Math.abs(acc.balance) : sum + Number(acc.balance), 0));
-  const { liquidCash, readyToAssign, projectedReadyToAssign, pendingInflow } = useReadyToAssign(
+  const {
+    liquidCash,
+    readyToAssign,
+    projectedReadyToAssign,
+    conservativeProjectedRta,
+    pendingInflow,
+    guaranteedInflow,
+    anticipatedInflow,
+  } = useReadyToAssign(
     accounts,
     categories.map((c) => ({ ...c, is_hidden: c.is_hidden ?? false, assigned_amount: c.assigned_amount })),
     pendingProjected
   );
-
-  async function exportFullReport() {
-    const [{ data: allTxns }, { data: allProj }, { data: fullCats }] = await Promise.all([
-      fetchTransactions(),
-      fetchAllProjectedIncome(),
-      supabase.from('categories').select('*').order('name'),
-    ]);
-
-    const text = buildFinanceOsExportText({
-      accounts: accounts as Account[],
-      categories: (fullCats || []) as Category[],
-      transactions: allTxns || [],
-      projectedIncome: allProj || [],
-      netWorth,
-      liquidCash,
-      readyToAssign,
-      projectedReadyToAssign,
-      pendingInflow,
-    });
-
-    downloadTextFile(text, `FinanceOS_Full_Export_${format(new Date(), 'yyyy-MM-dd')}.txt`);
-  }
 
   const upcomingProjected = sortPendingByDate(pendingProjected).slice(0, 5);
 
@@ -439,8 +485,8 @@ export function DashboardView() {
       <div className="mb-8">
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
             <h1 className="text-4xl font-extrabold text-[var(--text-primary)] tracking-tight">Finance<span className="text-emerald-500">OS</span></h1>
-            <button onClick={exportFullReport} className="w-full md:w-auto app-card px-4 py-2 rounded-xl text-[var(--text-muted)] font-bold border border-[var(--border)] shadow-sm flex items-center justify-center gap-2 hover:bg-[var(--surface-hover)] transition-colors">
-                <Download size={16}/> Export Full Report
+            <button type="button" onClick={() => setIsExportOpen(true)} className="w-full md:w-auto app-card px-4 py-2 rounded-xl text-[var(--text-muted)] font-bold border border-[var(--border)] shadow-sm flex items-center justify-center gap-2 hover:bg-[var(--surface-hover)] transition-colors">
+                <Download size={16}/> Export
             </button>
         </div>
         
@@ -471,10 +517,18 @@ export function DashboardView() {
             </div>
             {readyToAssign < 0 && <p className="text-xs bg-red-700/50 text-white px-2 py-1 rounded mt-3 font-bold z-10 flex items-center gap-1 border border-red-400"><AlertCircle size={12}/> Overbudgeted</p>}
             {pendingInflow > 0 && (
-              <p className="text-xs text-white/80 mt-3 z-10 font-medium leading-snug">
-                If pending income arrives:{' '}
-                <span className="font-black text-white">${formatMoney(projectedReadyToAssign)}</span>
-              </p>
+              <div className="text-xs text-white/80 mt-3 z-10 font-medium leading-snug space-y-1">
+                <p>
+                  If guaranteed arrives:{' '}
+                  <span className="font-black text-white">${formatMoney(conservativeProjectedRta)}</span>
+                </p>
+                {anticipatedInflow > 0 && (
+                  <p>
+                    If all pending (${formatMoney(guaranteedInflow)} + ${formatMoney(anticipatedInflow)}):{' '}
+                    <span className="font-black text-white">${formatMoney(projectedReadyToAssign)}</span>
+                  </p>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -505,6 +559,16 @@ export function DashboardView() {
                     <p className="text-xs text-[var(--text-muted)]">
                       {format(new Date(item.expected_date + 'T00:00:00'), 'MMM d')}
                       {item.accounts?.name ? ` · ${item.accounts.name}` : ''}
+                      {' · '}
+                      <span
+                        className={
+                          (item.certainty ?? 'guaranteed') === 'guaranteed'
+                            ? 'text-emerald-600'
+                            : 'text-amber-600'
+                        }
+                      >
+                        {PROJECTED_INCOME_CERTAINTY_LABELS[item.certainty ?? 'guaranteed']}
+                      </span>
                     </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -742,31 +806,70 @@ export function DashboardView() {
               </div>
 
               {quickForm.type !== 'Transfer' && (
-                  <div>
-                      <SearchableDropdown 
-                        label="Budget Envelope"
-                        icon={<Tag size={14}/>}
-                        options={[
+                  <>
+                    <label className="flex items-center gap-3 cursor-pointer app-card-subtle p-3 rounded-xl border border-[var(--border)]">
+                      <input
+                        type="checkbox"
+                        checked={isSplitMode}
+                        onChange={(e) => {
+                          const on = e.target.checked;
+                          setIsSplitMode(on);
+                          if (on) {
+                            setSmartBillPay({ showToggle: false, advanceCycle: true, deductDebt: true, category: null });
+                            const lines =
+                              quickForm.category_id && quickForm.amount
+                                ? [
+                                    { category_id: quickForm.category_id, amount: quickForm.amount },
+                                    emptySplitLine(),
+                                  ]
+                                : [emptySplitLine(), emptySplitLine()];
+                            setSplitLines(lines);
+                          }
+                        }}
+                        className="w-4 h-4 rounded"
+                      />
+                      <span className="text-sm font-bold text-[var(--text-primary)] flex items-center gap-2">
+                        <Split size={16} className="text-violet-500" />
+                        Split across categories
+                      </span>
+                    </label>
+
+                    {isSplitMode ? (
+                      <SplitTransactionFields
+                        totalAmount={quickForm.amount}
+                        lines={splitLines}
+                        onChange={setSplitLines}
+                        categories={categories}
+                        txnType={quickForm.type as 'Expense' | 'Income'}
+                      />
+                    ) : (
+                      <div>
+                        <SearchableDropdown
+                          label="Budget Envelope"
+                          icon={<Tag size={14}/>}
+                          options={[
                             { id: '', name: quickForm.type === 'Income' ? 'Ready to Assign (Uncategorized)' : 'Uncategorized Expense' },
                             ...categories.map(c => ({ id: c.id, name: c.name, emoji: c.emoji, group: 'Envelopes' }))
-                        ]}
-                        value={quickForm.category_id}
-                        onChange={(val) => {
+                          ]}
+                          value={quickForm.category_id}
+                          onChange={(val) => {
                             setQuickForm({...quickForm, category_id: val});
                             checkSmartBillPay(val);
-                        }}
-                      />
-                  </div>
+                          }}
+                        />
+                      </div>
+                    )}
+                  </>
               )}
 
               {/* Feature 6: Smart Bill Pay UI */}
-              {smartBillPay.showToggle && (
+              {!isSplitMode && smartBillPay.showToggle && (
                   <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-2xl space-y-3 animate-in slide-in-from-top-2">
                       <div className="flex items-center gap-2 text-emerald-700 font-bold text-xs uppercase tracking-widest">
                           <Zap size={14}/> Smart Bill Pay
                       </div>
                       <div className="space-y-2">
-                          {smartBillPay.category?.is_repeating && (
+                          {categorySupportsAdvanceDueDate(smartBillPay.category) && (
                               <label className="flex items-center gap-3 cursor-pointer group">
                                   <div className="relative">
                                       <input type="checkbox" className="sr-only peer" checked={smartBillPay.advanceCycle} onChange={e => setSmartBillPay({...smartBillPay, advanceCycle: e.target.checked})} />
@@ -945,6 +1048,11 @@ export function DashboardView() {
           setIsProjectedListOpen(false);
         }}
         onCancel={handleCancelProjected}
+      />
+      <ExportModal
+        open={isExportOpen}
+        onOpenChange={setIsExportOpen}
+        initialPreset="full"
       />
 
       <Fab
