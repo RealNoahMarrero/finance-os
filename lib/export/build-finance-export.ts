@@ -129,7 +129,7 @@ export function buildFinanceOsExportText(input: FinanceExportInput): string {
   const visible = input.categories.filter((c) => !c.is_hidden);
   visible.forEach((c) => {
     text += `${c.emoji ? c.emoji + ' ' : ''}${c.name}\n`;
-    text += `  Assigned: $${formatMoney(c.assigned_amount)}`;
+    text += `  Available: $${formatMoney(c.assigned_amount)} | Budgeted: $${formatMoney(c.budgeted_amount ?? 0)}`;
     if (Number(c.target_amount) > 0) {
       text += ` | Goal: $${formatMoney(c.target_amount)} (${c.target_type})`;
     }

@@ -113,10 +113,10 @@ export function DashboardView() {
     const { data: accs } = await supabase.from('accounts').select('*').order('type').order('name');
     if (accs) setAccounts(accs);
 
-    const { data: cats } = await supabase.from('categories').select('id, name, emoji, assigned_amount, is_hidden').order('name');
+    const { data: cats } = await supabase.from('categories').select('id, name, emoji, assigned_amount, budgeted_amount, is_hidden').order('name');
     if (cats) {
         setCategories(cats);
-        setTotalAssigned(snapMoney(cats.filter(c => !c.is_hidden).reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0)));
+        setTotalAssigned(snapMoney(cats.filter(c => !c.is_hidden).reduce((sum, c) => sum + Math.max(0, Number(c.assigned_amount || 0)), 0)));
     }
 
     const { data: txns } = await supabase
@@ -165,13 +165,13 @@ export function DashboardView() {
 
     const { data: cats } = await supabase
       .from('categories')
-      .select('id, name, emoji, assigned_amount, is_hidden')
+      .select('id, name, emoji, assigned_amount, budgeted_amount, is_hidden')
       .order('name');
     if (cats) {
       setCategories(cats);
       setTotalAssigned(
         snapMoney(
-          cats.filter((c) => !c.is_hidden).reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0)
+          cats.filter((c) => !c.is_hidden).reduce((sum, c) => sum + Math.max(0, Number(c.assigned_amount || 0)), 0)
         )
       );
     }
@@ -442,7 +442,11 @@ export function DashboardView() {
     anticipatedInflow,
   } = useReadyToAssign(
     accounts,
-    categories.map((c) => ({ ...c, is_hidden: c.is_hidden ?? false, assigned_amount: c.assigned_amount })),
+    categories.map((c) => ({
+      ...c,
+      is_hidden: c.is_hidden ?? false,
+      assigned_amount: c.assigned_amount,
+    })),
     pendingProjected
   );
 

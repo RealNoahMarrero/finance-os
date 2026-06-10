@@ -35,7 +35,10 @@ export interface Category {
   is_debt: boolean;
   balance: number;
   is_asap: boolean;
+  /** Envelope available balance (budgeted minus activity). Can go negative when overspent. */
   assigned_amount: number;
+  /** YNAB-style assigned amount from RTA; unchanged by spending. */
+  budgeted_amount: number;
   sort_order: number;
   is_hidden: boolean;
 }

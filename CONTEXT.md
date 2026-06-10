@@ -42,6 +42,7 @@ Core tables: `accounts`, `category_groups`, `categories`, `transactions`, **`pro
 | [`supabase/migrations/004_credit_card_payments.sql`](supabase/migrations/004_credit_card_payments.sql) | `accounts.minimum_payment`, `accounts.payment_due_day` for CC calendar + insights |
 | [`supabase/migrations/005_credit_card_payment_cycle.sql`](supabase/migrations/005_credit_card_payment_cycle.sql) | `next_payment_due_date`, `payment_category_id` — mark paid advances cycle; budget funding colors |
 | [`supabase/migrations/006_projected_income_certainty.sql`](supabase/migrations/006_projected_income_certainty.sql) | `certainty` (`guaranteed` \| `anticipated`) on expected income for conservative vs full projected RTA |
+| [`supabase/migrations/007_budgeted_amount.sql`](supabase/migrations/007_budgeted_amount.sql) | Optional `budgeted_amount` column (legacy; **RTA does not use it**) |
 
 
 
@@ -65,10 +66,14 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 
 
-* **Actual RTA** = liquid cash − assigned (unchanged by projected income).
+* **Actual RTA** = liquid cash − sum of **positive** envelope balances only (`computeTotalAllocated` in `lib/reports/aggregations.ts`). Overspent (negative) categories do **not** inflate RTA — they show as red on Budget only.
 
-* **Planning RTA** = liquid + pending projected inflows to liquid accounts − assigned (`hooks/use-ready-to-assign.ts`, `lib/projected-income.ts`).
+* **Planning RTA** = actual RTA + pending projected inflows to liquid accounts. **Conservative** subtitle uses **guaranteed** pending only; **optimistic** uses all pending (`lib/projected-income.ts`, `hooks/use-ready-to-assign.ts`).
+
+* **Expected income certainty** — `guaranteed` = reliable (paycheck, salary); counts toward conservative projected RTA. `anticipated` = uncertain (invoice, gig, other); optimistic projected RTA only.
+
 * **Credit cards** — `minimum_payment`, `payment_due_day`, active `next_payment_due_date`, optional `payment_category_id` for envelope funding; **Mark paid** advances due date +1 month; calendar gold when funded (`lib/credit-cards.ts`, `features/credit-cards/`).
+
 * **Expected income dates** — pending rows cannot stay before today; auto-bumped on fetch and clamped on save (`lib/queries/projected-income.ts`).
 
 
@@ -235,23 +240,25 @@ Dashboard export fetches live data via `fetchTransactions()` (with splits), `fet
 
 
 
-Paste into **Extensions → Apps Script**, set `SUPABASE_URL` and `SUPABASE_KEY`, reload spreadsheet. Menu: **Finance OS → Sync Latest Data**.
+Paste into **Extensions → Apps Script**, set `SUPABASE_URL` and `SUPABASE_KEY`, reload spreadsheet. Menu: **Finance OS → Sync Latest Data**. Designed compact for AI: read **Summary** first (headline metrics + definitions), then detail sheets as needed.
 
 
 
-| Sheet | Supabase source |
+| Sheet | Supabase source | Notes |
 
-|-------|-----------------|
+|-------|-----------------|-------|
 
-| Accounts | `accounts` |
+| **Summary** | Computed from accounts, categories, pending `projected_income` | Net worth, liquid, RTA, envelope total, pending guaranteed/anticipated, projected RTA, plain-language definitions |
 
-| Categories | `categories` (non-hidden) |
+| Accounts | `accounts` | Includes CC min payment, due day, next due date, linked budget envelope |
 
-| Transactions | `transactions` + nested `transaction_splits` (`Is Split`, `Split Detail` columns) |
+| Categories | `categories` (non-hidden) | `Available` = envelope balance; `Overspent?` when negative |
 
-| ExpectedIncome | `projected_income` (pending only; received/cancelled omitted) |
+| Transactions | `transactions` + nested splits | `Is Split` / `Split Detail` columns |
 
-| TransactionSplits | `transaction_splits` (one row per split line) |
+| ExpectedIncome | `projected_income` **pending only** | `Certainty` (Guaranteed / Anticipated); received → Transactions |
+
+| TransactionSplits | `transaction_splits` | Optional detail; Transactions already has split summary |
 
 
 
@@ -263,7 +270,7 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 
 
 
-* **Zero-Based Math:** RTA = liquid cash − assigned envelopes; `snapMoney` / `roundMoney` in `lib/money.ts`
+* **Ready to Assign:** RTA = liquid cash − positive envelope balances only; `computeTotalAllocated` / `computeReadyToAssign` in `lib/reports/aggregations.ts`; `snapMoney` / `roundMoney` in `lib/money.ts`
 
 * **Balance sync:** All transaction writes use `lib/balance-adjustment.ts` (ledger-grade, fresh DB reads)
 
@@ -290,4 +297,6 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 5. **Exports** — Dashboard “Export Full Report” (`lib/export/build-finance-export.ts`): summary, accounts, expected income, transactions (split-aware), split detail, categories. Google Sheets sync: `scripts/google-sheets-sync.gs` (Accounts, Categories, Transactions, ExpectedIncome, TransactionSplits).
 6. **Credit cards & stale income** — payment cycle with mark-paid advance; budget envelope link; utilization on Insights (true %, including over limit); pending expected income auto-advances to today when overdue.
 7. **Unified export modal** — presets (full, insights, budget, transactions), TXT/CSV, expected-income certainty in exports; Insights page export restored with live period binding.
+8. **RTA formula fix** — RTA = liquid minus positive envelopes only; overspent categories no longer inflate RTA.
+9. **Google Sheets sync audit** — Summary sheet with app-matching RTA/projected RTA math, income certainty column, CC payment fields, overspent flag; pending-only expected income; inline definitions for AI.
 

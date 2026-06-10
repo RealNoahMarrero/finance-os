@@ -3,6 +3,7 @@ import {
   computeLiquidCash,
   computeNetWorth,
   computeReadyToAssign,
+  computeTotalAllocated,
 } from '@/lib/reports/aggregations';
 import {
   computePendingInflowBreakdown,
@@ -20,9 +21,7 @@ export function useReadyToAssign(
     const netWorth = computeNetWorth(accounts);
     const readyToAssign = computeReadyToAssign(liquidCash, categories);
     const inflow = computePendingInflowBreakdown(pendingProjected, accounts);
-    const assigned = categories
-      .filter((c) => !c.is_hidden)
-      .reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0);
+    const assigned = computeTotalAllocated(categories);
     const { projectedLiquid, projectedReadyToAssign } = computeProjectedPlanning(
       liquidCash,
       assigned,

@@ -193,8 +193,11 @@ export function BudgetView() {
 
       newAmount = roundMoney(newAmount);
 
-      const { error } = await supabase.from('categories').update({ assigned_amount: newAmount }).eq('id', fundingCatId);
-      
+      const { error } = await supabase
+        .from('categories')
+        .update({ assigned_amount: newAmount })
+        .eq('id', fundingCatId);
+
       if (!error) {
           setCategories(categories.map(c => c.id === fundingCatId ? { ...c, assigned_amount: newAmount } : c));
       }
@@ -246,7 +249,9 @@ export function BudgetView() {
           if (sourceCat) {
               const newAmt = roundMoney((Number(sourceCat.assigned_amount) || 0) - amt);
               await supabase.from('categories').update({ assigned_amount: newAmt }).eq('id', sourceCat.id);
-              updatedCategories = updatedCategories.map(c => c.id.toString() === fromId ? { ...c, assigned_amount: newAmt } : c);
+              updatedCategories = updatedCategories.map(c =>
+                c.id.toString() === fromId ? { ...c, assigned_amount: newAmt } : c
+              );
           }
       }
 
@@ -256,7 +261,9 @@ export function BudgetView() {
           if (destCat) {
               const newAmt = roundMoney((Number(destCat.assigned_amount) || 0) + amt);
               await supabase.from('categories').update({ assigned_amount: newAmt }).eq('id', destCat.id);
-              updatedCategories = updatedCategories.map(c => c.id.toString() === toId ? { ...c, assigned_amount: newAmt } : c);
+              updatedCategories = updatedCategories.map(c =>
+                c.id.toString() === toId ? { ...c, assigned_amount: newAmt } : c
+              );
           }
       }
 
@@ -421,7 +428,6 @@ export function BudgetView() {
   // Math (Only count visible categories for totals)
   const visibleCategories = categories.filter(c => !c.is_hidden);
   const archivedCategories = categories.filter(c => c.is_hidden);
-  const totalAssigned = visibleCategories.reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0);
   
   const {
     readyToAssign,

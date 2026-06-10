@@ -357,11 +357,26 @@ export function computeLiquidCash(accounts: Account[]) {
   );
 }
 
+/** Sum of money currently sitting in envelopes (positive available only). */
+export function computeTotalAllocated(categories: Category[]) {
+  return snapMoney(
+    categories
+      .filter((c) => !c.is_hidden)
+      .reduce(
+        (sum, c) => sum + Math.max(0, Number(c.assigned_amount || 0)),
+        0
+      )
+  );
+}
+
+/** @deprecated Use computeTotalAllocated — kept for exports that reference budgeted. */
+export function computeTotalBudgeted(categories: Category[]) {
+  return computeTotalAllocated(categories);
+}
+
+/** RTA = liquid cash not currently held in positive envelopes. Overspent categories do not inflate RTA. */
 export function computeReadyToAssign(liquidCash: number, categories: Category[]) {
-  const assigned = categories
-    .filter((c) => !c.is_hidden)
-    .reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0);
-  return snapMoney(liquidCash - assigned);
+  return snapMoney(liquidCash - computeTotalAllocated(categories));
 }
 
 export interface PayeeSpend {

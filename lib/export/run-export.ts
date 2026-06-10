@@ -5,6 +5,7 @@ import {
   computeLiquidCash,
   computeNetWorth,
   computeReadyToAssign,
+  computeTotalAllocated,
 } from '@/lib/reports/aggregations';
 import {
   computePendingInflowBreakdown,
@@ -97,9 +98,7 @@ function buildCsvExport(
   const readyToAssign = computeReadyToAssign(liquidCash, data.categories);
   const pending = proj.filter((p) => p.status === 'pending');
   const inflow = computePendingInflowBreakdown(pending, data.accounts);
-  const assigned = data.categories
-    .filter((c) => !c.is_hidden)
-    .reduce((s, c) => s + Number(c.assigned_amount || 0), 0);
+  const assigned = computeTotalAllocated(data.categories);
   const { projectedReadyToAssign } = computeProjectedPlanning(
     liquidCash,
     assigned,
@@ -186,12 +185,13 @@ function buildCsvExport(
     sections.push(
       csvSection(
         'CATEGORIES',
-        ['Group', 'Name', 'Assigned', 'Goal', 'Due Date', 'Is Debt', 'Debt Balance'],
+        ['Group', 'Name', 'Available', 'Budgeted', 'Goal', 'Due Date', 'Is Debt', 'Debt Balance'],
         visibleCats.map((c) =>
           csvRow([
             groupMap[c.group_id] || '',
             c.name,
             c.assigned_amount,
+            c.budgeted_amount ?? 0,
             c.target_amount,
             c.due_date ?? '',
             c.is_debt ? 'Yes' : 'No',
@@ -273,12 +273,13 @@ function buildBudgetCsv(
     '',
     csvSection(
       'ENVELOPES',
-      ['Group', 'Category', 'Assigned', 'Goal', 'Due Date'],
+      ['Group', 'Category', 'Available', 'Budgeted', 'Goal', 'Due Date'],
       visibleCats.map((c) =>
         csvRow([
           groupMap[c.group_id] || '',
           c.name,
           c.assigned_amount,
+          c.budgeted_amount ?? 0,
           c.target_amount,
           c.due_date ?? '',
         ]).split(',')
@@ -301,9 +302,7 @@ export async function runFinanceExport(
     options.filters
   );
   const inflow = computePendingInflowBreakdown(pending, data.accounts);
-  const assigned = data.categories
-    .filter((c) => !c.is_hidden)
-    .reduce((s, c) => s + Number(c.assigned_amount || 0), 0);
+  const assigned = computeTotalAllocated(data.categories);
   const { projectedReadyToAssign } = computeProjectedPlanning(
     liquidCash,
     assigned,
@@ -394,7 +393,7 @@ export async function runFinanceExport(
       if (groupCats.length === 0) return;
       text += `--- ${g.name.toUpperCase()} ---\n`;
       groupCats.forEach((c) => {
-        text += `${c.emoji ? c.emoji + ' ' : ''}${c.name}: $${formatMoney(c.assigned_amount)} assigned\n`;
+        text += `${c.emoji ? c.emoji + ' ' : ''}${c.name}: $${formatMoney(c.assigned_amount)} available | $${formatMoney(c.budgeted_amount ?? 0)} budgeted\n`;
       });
       text += '\n';
     });
