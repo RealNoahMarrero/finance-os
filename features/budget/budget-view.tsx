@@ -204,25 +204,7 @@ export function BudgetView() {
       setFundingCatId(null);
   }
 
-  // --- TRANSFER LOGIC ---
-  function openTransferModal(cat: any) {
-      // Feature 4: Autofill Amount and Smart Direction Defaults
-      const available = Number(cat.assigned_amount || 0);
-      const absAvailable = formatMoney(Math.abs(available));
-      
-      // If balance is POSITIVE, default: Transfer Out (Category -> RTA)
-      // If balance is NEGATIVE, default: Transfer In (RTA -> Category)
-      const fromId = available < 0 ? 'RTA' : cat.id.toString();
-      const toId = available < 0 ? cat.id.toString() : 'RTA';
-
-      setTransferForm({ 
-          fromCatId: fromId, 
-          toCatId: toId, 
-          amount: absAvailable === '0.00' ? '' : absAvailable
-      });
-      setIsTransferModalOpen(true);
-  }
-
+  // --- TRANSFER LOGIC (helpers defined after visibleCategories / readyToAssign below) ---
   const swapTransferDirection = () => {
       setTransferForm(prev => ({
           ...prev,
@@ -238,8 +220,23 @@ export function BudgetView() {
 
       const fromId = transferForm.fromCatId;
       const toId = transferForm.toCatId;
-      
-      if (fromId === toId) return; // Prevent transferring to itself
+
+      if (fromId === toId) return;
+      if (fromId !== 'RTA' && toId !== 'RTA') return;
+      if (fromId === 'RTA' && toId === 'RTA') return;
+      if (fromId === 'RTA' && amt > readyToAssign + MONEY_EPSILON) {
+          alert(`You only have $${formatMoney(readyToAssign)} ready to assign.`);
+          return;
+      }
+      if (toId === 'RTA' && !fromId) return;
+      if (fromId !== 'RTA') {
+          const sourceCat = categories.find((c) => c.id.toString() === fromId);
+          const sourceAvailable = snapMoney(Number(sourceCat?.assigned_amount || 0));
+          if (sourceAvailable < amt - MONEY_EPSILON) {
+              alert(`"${sourceCat?.name}" only has $${formatMoney(Math.max(0, sourceAvailable))} available.`);
+              return;
+          }
+      }
 
       let updatedCategories = [...categories];
 
@@ -449,6 +446,64 @@ export function BudgetView() {
       return assigned < 0;
   });
 
+  function pickDefaultDestinationCategory() {
+      const underfunded = visibleCategories.find((c) => {
+          const target = Number(c.target_amount || 0);
+          const assigned = snapMoney(Number(c.assigned_amount || 0));
+          return target > 0 && assigned < target;
+      });
+      if (underfunded) return underfunded.id.toString();
+      return visibleCategories[0]?.id.toString() || '';
+  }
+
+  function pickDefaultSourceCategory() {
+      const funded = visibleCategories
+          .filter((c) => snapMoney(Number(c.assigned_amount || 0)) > 0)
+          .sort(
+              (a, b) =>
+                  Number(b.assigned_amount || 0) - Number(a.assigned_amount || 0)
+          );
+      return funded[0]?.id.toString() || '';
+  }
+
+  function openRtaTransferModal() {
+      if (readyToAssign > 0) {
+          setTransferForm({
+              fromCatId: 'RTA',
+              toCatId: pickDefaultDestinationCategory(),
+              amount: formatMoney(readyToAssign),
+          });
+      } else if (readyToAssign < 0) {
+          setTransferForm({
+              fromCatId: pickDefaultSourceCategory(),
+              toCatId: 'RTA',
+              amount: formatMoney(Math.abs(readyToAssign)),
+          });
+      } else {
+          setTransferForm({
+              fromCatId: 'RTA',
+              toCatId: pickDefaultDestinationCategory(),
+              amount: '',
+          });
+      }
+      setIsTransferModalOpen(true);
+  }
+
+  function openTransferModal(cat: Category) {
+      const available = Number(cat.assigned_amount || 0);
+      const absAvailable = formatMoney(Math.abs(available));
+
+      const fromId = available < 0 ? 'RTA' : cat.id.toString();
+      const toId = available < 0 ? cat.id.toString() : 'RTA';
+
+      setTransferForm({
+          fromCatId: fromId,
+          toCatId: toId,
+          amount: absAvailable === '0.00' ? '' : absAvailable,
+      });
+      setIsTransferModalOpen(true);
+  }
+
   const orderedGroups = useMemo(
     () => [...groups].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id),
     [groups]
@@ -485,8 +540,27 @@ export function BudgetView() {
              </div>
            )}
         </div>
-        <div className="relative z-10 flex flex-col items-center md:items-end gap-3">
-            <div className="bg-white/20 backdrop-blur-md border border-white/20 rounded-xl p-4 w-full md:w-auto text-center">
+        <div className="relative z-10 flex flex-col items-stretch md:items-end gap-3 w-full md:w-auto md:min-w-[200px]">
+            <button
+                type="button"
+                onClick={openRtaTransferModal}
+                disabled={visibleCategories.length === 0}
+                className={`w-full min-h-12 md:min-h-0 md:w-auto px-5 py-3.5 md:py-3 rounded-xl font-black text-sm uppercase tracking-wide shadow-lg shadow-black/10 dark:shadow-black/30 flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 ${
+                    readyToAssign < 0
+                        ? 'bg-white/95 dark:bg-white/15 dark:backdrop-blur-md text-red-700 dark:text-white border border-transparent dark:border-white/25 hover:bg-white dark:hover:bg-white/25'
+                        : 'bg-white/95 dark:bg-white/15 dark:backdrop-blur-md text-emerald-700 dark:text-white border border-transparent dark:border-white/25 hover:bg-white dark:hover:bg-white/25'
+                }`}
+                title="Assign from Ready to Assign or pull money back into RTA"
+            >
+                <ArrowRightLeft size={18} className="shrink-0"/>
+                <span className="sm:hidden">
+                    {readyToAssign > 0 ? 'Assign' : readyToAssign < 0 ? 'Cover' : 'Move'}
+                </span>
+                <span className="hidden sm:inline">
+                    {readyToAssign > 0 ? 'Assign Money' : readyToAssign < 0 ? 'Cover Overbudget' : 'Move Money'}
+                </span>
+            </button>
+            <div className="bg-white/20 dark:bg-black/20 backdrop-blur-md border border-white/20 dark:border-white/10 rounded-xl p-4 w-full md:w-auto text-center">
                 <p className="text-white/80 text-xs font-bold uppercase mb-1">Total Target Goals</p>
                 <p className="text-xl font-bold">
                     ${formatMoney(visibleCategories.reduce((sum, c) => sum + Number(c.target_amount), 0))}
@@ -1049,7 +1123,36 @@ export function BudgetView() {
                     <label className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-2 block">Amount to Move</label>
                     <div className="relative">
                         <span className="absolute left-4 top-3.5 font-bold text-[var(--text-muted)]">$</span>
-                        <input required autoFocus type="number" step="0.01" max={transferForm.fromCatId !== 'RTA' ? (categories.find(c => c.id.toString() === transferForm.fromCatId)?.assigned_amount || 0) : undefined} placeholder="0.00" className="w-full pl-8 p-3 app-input rounded-xl font-black text-lg text-[var(--text-primary)] border border-[var(--border)] outline-none focus:border-emerald-300 focus:bg-[var(--surface-elevated)] transition-all" value={transferForm.amount} onChange={e => setTransferForm({...transferForm, amount: e.target.value})} />
+                        <input
+                            required
+                            autoFocus
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            max={
+                                transferForm.fromCatId === 'RTA'
+                                    ? Math.max(0, readyToAssign)
+                                    : transferForm.fromCatId
+                                      ? Math.max(
+                                            0,
+                                            snapMoney(
+                                                Number(
+                                                    categories.find(
+                                                        (c) =>
+                                                            c.id.toString() === transferForm.fromCatId
+                                                    )?.assigned_amount || 0
+                                                )
+                                            )
+                                        )
+                                      : undefined
+                            }
+                            placeholder="0.00"
+                            className="w-full pl-8 p-3 app-input rounded-xl font-black text-lg text-[var(--text-primary)] border border-[var(--border)] outline-none focus:border-emerald-300 focus:bg-[var(--surface-elevated)] transition-all"
+                            value={transferForm.amount}
+                            onChange={(e) =>
+                                setTransferForm({ ...transferForm, amount: e.target.value })
+                            }
+                        />
                     </div>
                 </div>
                 

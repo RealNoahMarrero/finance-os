@@ -184,7 +184,7 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 
 * **Dashboard** — Net worth + Ready to Assign hero row, then a spaced **Expected income** card below (`mt-6` / `md:mt-8`, not in the hero grid). Projected RTA subtitle on the RTA tile; full list modal.
 
-* **Budget** — Projected RTA subtitle on RTA banner.
+* **Budget** — Projected RTA subtitle on RTA banner; **Assign Money** on the banner opens Move Money (RTA ↔ categories) with smart defaults and RTA balance validation.
 
 * **Calendar** — Income chips + month stat; tap for receive/edit.
 
@@ -299,4 +299,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 7. **Unified export modal** — presets (full, insights, budget, transactions), TXT/CSV, expected-income certainty in exports; Insights page export restored with live period binding.
 8. **RTA formula fix** — RTA = liquid minus positive envelopes only; overspent categories no longer inflate RTA.
 9. **Google Sheets sync audit** — Summary sheet with app-matching RTA/projected RTA math, income certainty column, CC payment fields, overspent flag; pending-only expected income; inline definitions for AI.
+10. **Budget RTA assign** — Assign Money button on the RTA banner opens envelope transfers from RTA (mobile + dark-mode friendly); duplicate actionable RTA card removed.
 
