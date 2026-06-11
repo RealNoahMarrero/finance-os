@@ -471,9 +471,12 @@ export function BudgetView() {
       return visibleCategories[0]?.id.toString() || '';
   }
 
-  function pickDefaultSourceCategory() {
+  function pickDefaultSourceCategory(excludeCatId?: number) {
       const funded = visibleCategories
-          .filter((c) => snapMoney(Number(c.assigned_amount || 0)) > 0)
+          .filter((c) => {
+              if (excludeCatId != null && c.id === excludeCatId) return false;
+              return snapMoney(Number(c.assigned_amount || 0)) > 0;
+          })
           .sort(
               (a, b) =>
                   Number(b.assigned_amount || 0) - Number(a.assigned_amount || 0)
@@ -512,17 +515,20 @@ export function BudgetView() {
       const available = snapMoney(Number(cat.assigned_amount || 0));
       const absAvailable = Math.abs(available);
 
-      const fromId = available < 0 ? 'RTA' : cat.id.toString();
-      const toId = available < 0 ? cat.id.toString() : 'RTA';
-      const prefilled =
-          fromId === 'RTA'
-              ? Math.min(absAvailable, Math.max(0, readyToAssign))
-              : absAvailable;
+      if (available < 0) {
+          setTransferForm({
+              fromCatId: pickDefaultSourceCategory(cat.id) || 'RTA',
+              toCatId: cat.id.toString(),
+              amount: formatMoneyInput(absAvailable),
+          });
+          setIsTransferModalOpen(true);
+          return;
+      }
 
       setTransferForm({
-          fromCatId: fromId,
-          toCatId: toId,
-          amount: prefilled <= MONEY_EPSILON ? '' : formatMoneyInput(prefilled),
+          fromCatId: cat.id.toString(),
+          toCatId: 'RTA',
+          amount: absAvailable <= MONEY_EPSILON ? '' : formatMoneyInput(absAvailable),
       });
       setIsTransferModalOpen(true);
   }
