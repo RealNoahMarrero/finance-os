@@ -21,6 +21,11 @@ export function formatMoney(value: number | string | null | undefined): string {
   return moneyFormatter.format(snapMoney(value));
 }
 
+/** Plain decimal string for `<input type="number">` — no grouping commas. */
+export function formatMoneyInput(value: number | string | null | undefined): string {
+  return snapMoney(value).toFixed(2);
+}
+
 export function formatCurrency(value: number | string | null | undefined): string {
   const n = snapMoney(value);
   const abs = moneyFormatter.format(Math.abs(n));

@@ -126,7 +126,7 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 
 
-* `lib/supabase.ts`, `lib/money.ts` — `roundMoney`, `snapMoney`, `formatMoney`, `MONEY_EPSILON`
+* `lib/supabase.ts`, `lib/money.ts` — `roundMoney`, `snapMoney`, `formatMoney`, `formatMoneyInput` (plain decimals for number inputs), `MONEY_EPSILON`
 
 * `lib/balance-adjustment.ts` — txn → balance sync; `applySplitBalanceAdjustment` for splits (`accountsOnly` / `categoryOnly` flags)
 
@@ -184,7 +184,7 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 
 * **Dashboard** — Net worth + Ready to Assign hero row, then a spaced **Expected income** card below (`mt-6` / `md:mt-8`, not in the hero grid). Projected RTA subtitle on the RTA tile; full list modal.
 
-* **Budget** — Projected RTA subtitle on RTA banner; **Assign Money** on the banner opens Move Money (RTA ↔ categories) with smart defaults and RTA balance validation.
+* **Budget** — Projected RTA subtitle on RTA banner; **Assign Money** opens Move Money (RTA ↔ categories, or category ↔ category) with capped prefills, JS validation + alerts, and `formatMoneyInput` for amount fields (avoid comma/grouping issues in number inputs).
 
 * **Calendar** — Income chips + month stat; tap for receive/edit.
 
@@ -300,4 +300,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 8. **RTA formula fix** — RTA = liquid minus positive envelopes only; overspent categories no longer inflate RTA.
 9. **Google Sheets sync audit** — Summary sheet with app-matching RTA/projected RTA math, income certainty column, CC payment fields, overspent flag; pending-only expected income; inline definitions for AI.
 10. **Budget RTA assign** — Assign Money button on the RTA banner opens envelope transfers from RTA (mobile + dark-mode friendly); duplicate actionable RTA card removed.
+11. **Move Money fix** — Removed HTML `max`/`min` that silently blocked submit; `formatMoneyInput` for transfer amounts; clearer validation alerts and Supabase error surfacing.
 

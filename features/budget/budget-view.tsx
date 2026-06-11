@@ -12,7 +12,7 @@ import {
   ChevronUp
 } from 'lucide-react';
 import { format, parseISO, addWeeks, addMonths, addYears, isAfter } from 'date-fns';
-import { formatMoney, roundMoney, snapMoney, MONEY_EPSILON } from '@/lib/money';
+import { formatMoney, formatMoneyInput, roundMoney, snapMoney, MONEY_EPSILON } from '@/lib/money';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PageSkeleton } from '@/components/ui/skeleton';
 import { Select } from '@/components/ui/select';
@@ -216,19 +216,26 @@ export function BudgetView() {
   async function executeTransfer(e: React.FormEvent) {
       e.preventDefault();
       const amt = roundMoney(parseFloat(transferForm.amount) || 0);
-      if (amt <= 0) return;
+      if (amt <= 0) {
+          alert('Enter an amount greater than zero.');
+          return;
+      }
 
       const fromId = transferForm.fromCatId;
       const toId = transferForm.toCatId;
 
-      if (fromId === toId) return;
-      if (fromId !== 'RTA' && toId !== 'RTA') return;
-      if (fromId === 'RTA' && toId === 'RTA') return;
+      if (!fromId || !toId) {
+          alert('Choose both a source and destination.');
+          return;
+      }
+      if (fromId === toId) {
+          alert('Source and destination must be different.');
+          return;
+      }
       if (fromId === 'RTA' && amt > readyToAssign + MONEY_EPSILON) {
           alert(`You only have $${formatMoney(readyToAssign)} ready to assign.`);
           return;
       }
-      if (toId === 'RTA' && !fromId) return;
       if (fromId !== 'RTA') {
           const sourceCat = categories.find((c) => c.id.toString() === fromId);
           const sourceAvailable = snapMoney(Number(sourceCat?.assigned_amount || 0));
@@ -245,7 +252,11 @@ export function BudgetView() {
           const sourceCat = updatedCategories.find(c => c.id.toString() === fromId);
           if (sourceCat) {
               const newAmt = roundMoney((Number(sourceCat.assigned_amount) || 0) - amt);
-              await supabase.from('categories').update({ assigned_amount: newAmt }).eq('id', sourceCat.id);
+              const { error } = await supabase.from('categories').update({ assigned_amount: newAmt }).eq('id', sourceCat.id);
+              if (error) {
+                  alert(`Could not move funds: ${error.message}`);
+                  return;
+              }
               updatedCategories = updatedCategories.map(c =>
                 c.id.toString() === fromId ? { ...c, assigned_amount: newAmt } : c
               );
@@ -257,7 +268,11 @@ export function BudgetView() {
           const destCat = updatedCategories.find(c => c.id.toString() === toId);
           if (destCat) {
               const newAmt = roundMoney((Number(destCat.assigned_amount) || 0) + amt);
-              await supabase.from('categories').update({ assigned_amount: newAmt }).eq('id', destCat.id);
+              const { error } = await supabase.from('categories').update({ assigned_amount: newAmt }).eq('id', destCat.id);
+              if (error) {
+                  alert(`Could not move funds: ${error.message}`);
+                  return;
+              }
               updatedCategories = updatedCategories.map(c =>
                 c.id.toString() === toId ? { ...c, assigned_amount: newAmt } : c
               );
@@ -471,13 +486,17 @@ export function BudgetView() {
           setTransferForm({
               fromCatId: 'RTA',
               toCatId: pickDefaultDestinationCategory(),
-              amount: formatMoney(readyToAssign),
+              amount: formatMoneyInput(readyToAssign),
           });
       } else if (readyToAssign < 0) {
+          const sourceId = pickDefaultSourceCategory();
+          const sourceCat = visibleCategories.find((c) => c.id.toString() === sourceId);
+          const sourceAvailable = snapMoney(Number(sourceCat?.assigned_amount || 0));
+          const needed = Math.abs(readyToAssign);
           setTransferForm({
-              fromCatId: pickDefaultSourceCategory(),
+              fromCatId: sourceId,
               toCatId: 'RTA',
-              amount: formatMoney(Math.abs(readyToAssign)),
+              amount: formatMoneyInput(Math.min(needed, sourceAvailable)),
           });
       } else {
           setTransferForm({
@@ -490,16 +509,20 @@ export function BudgetView() {
   }
 
   function openTransferModal(cat: Category) {
-      const available = Number(cat.assigned_amount || 0);
-      const absAvailable = formatMoney(Math.abs(available));
+      const available = snapMoney(Number(cat.assigned_amount || 0));
+      const absAvailable = Math.abs(available);
 
       const fromId = available < 0 ? 'RTA' : cat.id.toString();
       const toId = available < 0 ? cat.id.toString() : 'RTA';
+      const prefilled =
+          fromId === 'RTA'
+              ? Math.min(absAvailable, Math.max(0, readyToAssign))
+              : absAvailable;
 
       setTransferForm({
           fromCatId: fromId,
           toCatId: toId,
-          amount: absAvailable === '0.00' ? '' : absAvailable,
+          amount: prefilled <= MONEY_EPSILON ? '' : formatMoneyInput(prefilled),
       });
       setIsTransferModalOpen(true);
   }
@@ -1128,24 +1151,6 @@ export function BudgetView() {
                             autoFocus
                             type="number"
                             step="0.01"
-                            min="0.01"
-                            max={
-                                transferForm.fromCatId === 'RTA'
-                                    ? Math.max(0, readyToAssign)
-                                    : transferForm.fromCatId
-                                      ? Math.max(
-                                            0,
-                                            snapMoney(
-                                                Number(
-                                                    categories.find(
-                                                        (c) =>
-                                                            c.id.toString() === transferForm.fromCatId
-                                                    )?.assigned_amount || 0
-                                                )
-                                            )
-                                        )
-                                      : undefined
-                            }
                             placeholder="0.00"
                             className="w-full pl-8 p-3 app-input rounded-xl font-black text-lg text-[var(--text-primary)] border border-[var(--border)] outline-none focus:border-emerald-300 focus:bg-[var(--surface-elevated)] transition-all"
                             value={transferForm.amount}
