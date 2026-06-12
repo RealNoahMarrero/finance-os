@@ -543,6 +543,9 @@ export function ReportsView() {
             onSelectedGroupIdChange={(id) => patch({ selectedGroupId: id })}
             expandedGroupIds={expandedGroupIds}
             onToggleGroup={toggleExpandedGroup}
+            transactions={transactions}
+            accounts={accounts}
+            periodRange={periodRange}
           />
           <GlassCard>
               <h3 className="mb-4 text-lg font-bold">Top payees</h3>

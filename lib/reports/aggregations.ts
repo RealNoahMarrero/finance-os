@@ -98,9 +98,21 @@ export function aggregateMonthlyCashflow(
 }
 
 export interface CategorySpend {
+  categoryId?: number;
   name: string;
   emoji: string | null;
   total: number;
+}
+
+export interface CategoryExpenseLine {
+  transactionId: number;
+  date: string;
+  payee: string | null;
+  amount: number;
+  accountName: string;
+  isSplit: boolean;
+  transactionTotal?: number;
+  notes: string | null;
 }
 
 export interface PeriodTotals {
@@ -187,6 +199,7 @@ export function aggregateSpendingGrouped(
     const bucket = buckets.get(groupId)!;
     const lineTotal = snapMoney(amount);
     bucket.categories.push({
+      categoryId: categoryId,
       name: cat.name,
       emoji: cat.emoji,
       total: lineTotal,
@@ -255,7 +268,12 @@ export function aggregateIncomeByCategory(
   totals.forEach((total, id) => {
     const cat = catMap[id];
     if (cat)
-      results.push({ name: cat.name, emoji: cat.emoji, total: snapMoney(total) });
+      results.push({
+        categoryId: id,
+        name: cat.name,
+        emoji: cat.emoji,
+        total: snapMoney(total),
+      });
   });
 
   let readyToAssign = 0;
@@ -331,10 +349,77 @@ export function aggregateSpendingByCategory(
   totals.forEach((total, id) => {
     const cat = catMap[id];
     if (cat)
-      results.push({ name: cat.name, emoji: cat.emoji, total: snapMoney(total) });
+      results.push({
+        categoryId: id,
+        name: cat.name,
+        emoji: cat.emoji,
+        total: snapMoney(total),
+      });
   });
 
   return results.sort((a, b) => b.total - a.total);
+}
+
+export function listCategoryExpenses(
+  transactions: {
+    id: number;
+    date: string;
+    amount: number;
+    type: string;
+    payee: string | null;
+    notes: string | null;
+    category_id: number | null;
+    account_id: number;
+    accounts?: { name: string } | null;
+    transaction_splits?: { category_id: number; amount: number }[];
+  }[],
+  categoryId: number,
+  range: PeriodRange,
+  accountNames?: Record<number, string>
+): CategoryExpenseLine[] {
+  const lines: CategoryExpenseLine[] = [];
+
+  filterByPeriod(transactions, range)
+    .filter((t) => t.type === 'Expense')
+    .forEach((t) => {
+      const accountName =
+        accountNames?.[t.account_id] ?? t.accounts?.name ?? 'Unknown account';
+      const splits = t.transaction_splits?.filter((s) => s.category_id) ?? [];
+
+      if (splits.length > 0) {
+        splits
+          .filter((s) => s.category_id === categoryId)
+          .forEach((s) => {
+            lines.push({
+              transactionId: t.id,
+              date: t.date,
+              payee: t.payee,
+              amount: snapMoney(Number(s.amount)),
+              accountName,
+              isSplit: true,
+              transactionTotal: snapMoney(Number(t.amount)),
+              notes: t.notes,
+            });
+          });
+        return;
+      }
+
+      if (t.category_id === categoryId) {
+        lines.push({
+          transactionId: t.id,
+          date: t.date,
+          payee: t.payee,
+          amount: snapMoney(Number(t.amount)),
+          accountName,
+          isSplit: false,
+          notes: t.notes,
+        });
+      }
+    });
+
+  return lines.sort(
+    (a, b) => b.date.localeCompare(a.date) || b.transactionId - a.transactionId
+  );
 }
 
 export function computeNetWorth(accounts: Account[]) {

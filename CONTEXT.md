@@ -140,7 +140,7 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 * `lib/export/build-finance-export.ts` — full `.txt` report builder + `downloadTextFile`
 
-* `lib/reports/` — aggregations (spending respects split lines) + debt simulator
+* `lib/reports/` — aggregations (spending respects split lines; `listCategoryExpenses` for per-category txn drill-down) + debt simulator
 
 * `hooks/use-ready-to-assign.ts`, `hooks/use-balance-adjustment.ts`
 
@@ -156,13 +156,17 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 * `features/ledger/split-transaction-fields.tsx` — split line UI in ledger modal
 
+* `features/reports/spending-breakdown.tsx` — Spending tab donut + by-group / by-category lists
+
+* `features/reports/category-spending-detail.tsx` — tap a category → transaction list modal for the current Insights period
+
 
 
 ## 4. REPORTS & INSIGHTS (`/reports`)
 
 
 
-Tabs: Overview (cashflow chart + monthly table, account list), Spending (category donut, by group, top payees), Income (by category, top sources), Debt (payoff simulator + timeline chart). Period selector: 30D / 90D / YTD / 12M / **Month** (picker). Period income/expense/net summary. **Export** (Insights report preset, TXT/CSV) uses the **current on-screen period** (not just saved prefs). UI prefs persist in `localStorage` (`hooks/use-insights-preferences.ts`): period, month, tab, spending view, expanded groups, debt simulator inputs. Category spending aggregates from **split lines** when present.
+Tabs: Overview (cashflow chart + monthly table, account list), Spending (category donut, by group, top payees), Income (by category, top sources), Debt (payoff simulator + timeline chart). Period selector: 30D / 90D / YTD / 12M / **Month** (picker). Period income/expense/net summary. **Export** (Insights report preset, TXT/CSV) uses the **current on-screen period** (not just saved prefs). UI prefs persist in `localStorage` (`hooks/use-insights-preferences.ts`): period, month, tab, spending view, expanded groups, debt simulator inputs. Category spending aggregates from **split lines** when present. **Spending drill-down:** tap any category (in **By category** or inside an expanded group) to open a modal listing every expense in that envelope for the selected period — split-aware (shows only the line amount attributed to that category).
 
 
 
@@ -184,7 +188,7 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 
 * **Dashboard** — Net worth + Ready to Assign hero row, then a spaced **Expected income** card below (`mt-6` / `md:mt-8`, not in the hero grid). Projected RTA subtitle on the RTA tile; full list modal.
 
-* **Budget** — Projected RTA subtitle on RTA banner; **Assign Money** opens Move Money (RTA ↔ categories, or category ↔ category) with smart prefills, JS validation + alerts, and `formatMoneyInput` for amount fields. Clicking **overspent Available** prefills the full deficit and defaults **From** to the largest funded envelope (fallback RTA) so you can cover quickly from another category.
+* **Budget** — Projected RTA subtitle on RTA banner; **Assign Money** opens Move Money (RTA ↔ categories, or category ↔ category) with smart prefills, JS validation + alerts, and `formatMoneyInput` for amount fields. Clicking **overspent Available** prefills the full deficit and defaults **From** to the largest funded envelope (fallback RTA) so you can cover quickly from another category. Move Money shows clearer network-error guidance, disables double-submit while saving, and rolls back the source envelope if the destination update fails mid-transfer.
 
 * **Calendar** — Income chips + month stat; tap for receive/edit.
 
@@ -302,4 +306,6 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 10. **Budget RTA assign** — Assign Money button on the RTA banner opens envelope transfers from RTA (mobile + dark-mode friendly); duplicate actionable RTA card removed.
 11. **Move Money fix** — Removed HTML `max`/`min` that silently blocked submit; `formatMoneyInput` for transfer amounts; clearer validation alerts and Supabase error surfacing.
 12. **Overspent transfer prefill** — Clicking negative Available prefills the full deficit amount and defaults source to another funded envelope (not RTA-capped).
+13. **Move Money resilience** — Network-error messaging for failed Supabase fetches, submit guard while transferring, rollback on partial category-to-category failure.
+14. **Insights category drill-down** — Tap a spending category to view all transactions in that envelope for the current period (`listCategoryExpenses`, split-line aware); `category-spending-detail` modal.
 

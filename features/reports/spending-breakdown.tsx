@@ -1,13 +1,15 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { formatMoney } from '@/lib/money';
 import { CategoryDonut, formatCategoryChartLabel } from '@/components/charts/category-donut';
 import { GlassCard } from '@/components/ui/glass-card';
 import { cn } from '@/lib/cn';
 import type { SpendingView } from '@/hooks/use-insights-preferences';
-import type { CategorySpend, GroupedSpending } from '@/lib/reports/aggregations';
+import type { CategorySpend, GroupedSpending, PeriodRange } from '@/lib/reports/aggregations';
+import type { Account, Transaction } from '@/lib/types';
+import { CategorySpendingDetail } from '@/features/reports/category-spending-detail';
 
 function SpendBar({ amount, max }: { amount: number; max: number }) {
   const pct = max > 0 ? Math.min(100, (amount / max) * 100) : 0;
@@ -21,6 +23,38 @@ function SpendBar({ amount, max }: { amount: number; max: number }) {
   );
 }
 
+function CategorySpendRow({
+  category,
+  onSelect,
+  trailing,
+  className,
+}: {
+  category: CategorySpend;
+  onSelect: (category: CategorySpend) => void;
+  trailing: ReactNode;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(category)}
+      disabled={category.categoryId == null}
+      className={cn(
+        'flex w-full items-center gap-2 text-left touch-manipulation transition-colors',
+        category.categoryId != null &&
+          'cursor-pointer rounded-lg hover:bg-[var(--surface-hover)] active:bg-[var(--surface-subtle)]',
+        category.categoryId == null && 'cursor-default',
+        className
+      )}
+    >
+      <span className="min-w-0 flex-1 truncate font-semibold text-[var(--text-primary)]">
+        {formatCategoryChartLabel(category.emoji, category.name)}
+      </span>
+      {trailing}
+    </button>
+  );
+}
+
 export function SpendingBreakdown({
   grouped,
   allCategories,
@@ -31,6 +65,9 @@ export function SpendingBreakdown({
   onSelectedGroupIdChange,
   expandedGroupIds,
   onToggleGroup,
+  transactions,
+  accounts,
+  periodRange,
 }: {
   grouped: GroupedSpending[];
   allCategories: CategorySpend[];
@@ -41,8 +78,17 @@ export function SpendingBreakdown({
   onSelectedGroupIdChange: (id: number | 'all') => void;
   expandedGroupIds: number[];
   onToggleGroup: (groupId: number) => void;
+  transactions: Transaction[];
+  accounts: Account[];
+  periodRange: PeriodRange;
 }) {
+  const [selectedCategory, setSelectedCategory] = useState<CategorySpend | null>(null);
   const expandedSet = useMemo(() => new Set(expandedGroupIds), [expandedGroupIds]);
+
+  function openCategoryDetail(category: CategorySpend) {
+    if (category.categoryId == null) return;
+    setSelectedCategory(category);
+  }
 
   const maxCategory = useMemo(
     () => Math.max(...allCategories.map((c) => c.total), 0),
@@ -161,19 +207,22 @@ export function SpendingBreakdown({
                           const catPct =
                             g.total > 0 ? Math.round((c.total / g.total) * 100) : 0;
                           return (
-                            <li
-                              key={c.name}
-                              className="flex items-center gap-2 py-2 pl-6 text-sm"
-                            >
-                              <span className="min-w-0 flex-1 truncate font-semibold text-[var(--text-primary)]">
-                                {formatCategoryChartLabel(c.emoji, c.name)}
-                              </span>
-                              <span className="shrink-0 text-[10px] font-bold text-[var(--text-muted)]">
-                                {catPct}% of group
-                              </span>
-                              <span className="shrink-0 font-black text-[var(--accent-negative)] tabular-nums">
-                                ${formatMoney(c.total)}
-                              </span>
+                            <li key={c.categoryId ?? c.name} className="py-1 pl-2 text-sm">
+                              <CategorySpendRow
+                                category={c}
+                                onSelect={openCategoryDetail}
+                                className="py-2 pl-4 pr-2"
+                                trailing={
+                                  <>
+                                    <span className="shrink-0 text-[10px] font-bold text-[var(--text-muted)]">
+                                      {catPct}% of group
+                                    </span>
+                                    <span className="shrink-0 font-black text-[var(--accent-negative)] tabular-nums">
+                                      ${formatMoney(c.total)}
+                                    </span>
+                                  </>
+                                }
+                              />
                             </li>
                           );
                         })}
@@ -189,27 +238,44 @@ export function SpendingBreakdown({
                 const pct =
                   periodExpense > 0 ? Math.round((c.total / periodExpense) * 100) : 0;
                 return (
-                  <li key={c.name} className="flex items-center gap-3">
-                    <span className="min-w-0 flex-1 truncate font-semibold text-[var(--text-primary)]">
-                      {formatCategoryChartLabel(c.emoji, c.name)}
-                    </span>
-                    <SpendBar amount={c.total} max={maxCategory} />
-                    <span className="shrink-0 w-8 text-right text-[10px] font-bold text-[var(--text-muted)]">
-                      {pct}%
-                    </span>
-                    <span className="shrink-0 font-black text-[var(--accent-negative)] tabular-nums">
-                      ${formatMoney(c.total)}
-                    </span>
+                  <li key={c.categoryId ?? c.name}>
+                    <CategorySpendRow
+                      category={c}
+                      onSelect={openCategoryDetail}
+                      className="gap-3 py-1"
+                      trailing={
+                        <>
+                          <SpendBar amount={c.total} max={maxCategory} />
+                          <span className="shrink-0 w-8 text-right text-[10px] font-bold text-[var(--text-muted)]">
+                            {pct}%
+                          </span>
+                          <span className="shrink-0 font-black text-[var(--accent-negative)] tabular-nums">
+                            ${formatMoney(c.total)}
+                          </span>
+                        </>
+                      }
+                    />
                   </li>
                 );
               })}
             </ul>
           )}
           <p className="mt-4 text-[10px] font-bold text-[var(--text-muted)]">
-            Tap a group to expand and see envelopes like Dining Out, Groceries, etc.
+            Tap a group to expand, then tap a category to see its transactions.
           </p>
         </GlassCard>
       </div>
+
+      <CategorySpendingDetail
+        open={selectedCategory != null}
+        onOpenChange={(open) => {
+          if (!open) setSelectedCategory(null);
+        }}
+        category={selectedCategory}
+        transactions={transactions}
+        accounts={accounts}
+        periodRange={periodRange}
+      />
     </div>
   );
 }

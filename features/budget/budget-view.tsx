@@ -23,6 +23,18 @@ import { CreditCardPaymentsPanel } from '@/features/credit-cards/credit-card-pay
 import { ExportModal } from '@/features/export/export-modal';
 import type { Account, Category, CategoryGroup, ProjectedIncome } from '@/lib/types';
 
+function transferErrorMessage(error: { message?: string; hint?: string }) {
+  const msg = error.message ?? 'Unknown error';
+  if (/failed to fetch/i.test(msg)) {
+    return [
+      'Could not reach Supabase (network error).',
+      'Check your internet, hard-refresh the page, and disable ad blockers for this site.',
+      'In DevTools → Network, look for a failed PATCH to supabase.co.',
+    ].join('\n\n');
+  }
+  return error.hint ? `${msg}\n\n${error.hint}` : msg;
+}
+
 export function BudgetView() {
   const searchParams = useSearchParams();
   const openedFromUrl = useRef(false);
@@ -65,6 +77,7 @@ export function BudgetView() {
   const [transferForm, setTransferForm] = useState({
       fromCatId: '', toCatId: 'RTA', amount: ''
   });
+  const [transferring, setTransferring] = useState(false);
 
   useEffect(() => { 
       // Load persistent filters and sorts
@@ -215,6 +228,8 @@ export function BudgetView() {
 
   async function executeTransfer(e: React.FormEvent) {
       e.preventDefault();
+      if (transferring) return;
+
       const amt = roundMoney(parseFloat(transferForm.amount) || 0);
       if (amt <= 0) {
           alert('Enter an amount greater than zero.');
@@ -245,42 +260,56 @@ export function BudgetView() {
           }
       }
 
+      setTransferring(true);
       let updatedCategories = [...categories];
+      let sourceRollback: { id: number; assigned_amount: number } | null = null;
 
-      // Handle DEDUCTION from Source
-      if (fromId !== 'RTA') {
-          const sourceCat = updatedCategories.find(c => c.id.toString() === fromId);
-          if (sourceCat) {
-              const newAmt = roundMoney((Number(sourceCat.assigned_amount) || 0) - amt);
-              const { error } = await supabase.from('categories').update({ assigned_amount: newAmt }).eq('id', sourceCat.id);
-              if (error) {
-                  alert(`Could not move funds: ${error.message}`);
-                  return;
+      try {
+          // Handle DEDUCTION from Source
+          if (fromId !== 'RTA') {
+              const sourceCat = updatedCategories.find(c => c.id.toString() === fromId);
+              if (sourceCat) {
+                  const previousAmt = roundMoney(Number(sourceCat.assigned_amount) || 0);
+                  const newAmt = roundMoney(previousAmt - amt);
+                  const { error } = await supabase.from('categories').update({ assigned_amount: newAmt }).eq('id', sourceCat.id);
+                  if (error) {
+                      alert(`Could not move funds: ${transferErrorMessage(error)}`);
+                      return;
+                  }
+                  sourceRollback = { id: sourceCat.id, assigned_amount: previousAmt };
+                  updatedCategories = updatedCategories.map(c =>
+                    c.id.toString() === fromId ? { ...c, assigned_amount: newAmt } : c
+                  );
               }
-              updatedCategories = updatedCategories.map(c =>
-                c.id.toString() === fromId ? { ...c, assigned_amount: newAmt } : c
-              );
           }
-      }
 
-      // Handle ADDITION to Destination
-      if (toId !== 'RTA') {
-          const destCat = updatedCategories.find(c => c.id.toString() === toId);
-          if (destCat) {
-              const newAmt = roundMoney((Number(destCat.assigned_amount) || 0) + amt);
-              const { error } = await supabase.from('categories').update({ assigned_amount: newAmt }).eq('id', destCat.id);
-              if (error) {
-                  alert(`Could not move funds: ${error.message}`);
-                  return;
+          // Handle ADDITION to Destination
+          if (toId !== 'RTA') {
+              const destCat = updatedCategories.find(c => c.id.toString() === toId);
+              if (destCat) {
+                  const newAmt = roundMoney((Number(destCat.assigned_amount) || 0) + amt);
+                  const { error } = await supabase.from('categories').update({ assigned_amount: newAmt }).eq('id', destCat.id);
+                  if (error) {
+                      if (sourceRollback) {
+                          await supabase
+                            .from('categories')
+                            .update({ assigned_amount: sourceRollback.assigned_amount })
+                            .eq('id', sourceRollback.id);
+                      }
+                      alert(`Could not move funds: ${transferErrorMessage(error)}`);
+                      return;
+                  }
+                  updatedCategories = updatedCategories.map(c =>
+                    c.id.toString() === toId ? { ...c, assigned_amount: newAmt } : c
+                  );
               }
-              updatedCategories = updatedCategories.map(c =>
-                c.id.toString() === toId ? { ...c, assigned_amount: newAmt } : c
-              );
           }
-      }
 
-      setCategories(updatedCategories);
-      setIsTransferModalOpen(false);
+          setCategories(updatedCategories);
+          setIsTransferModalOpen(false);
+      } finally {
+          setTransferring(false);
+      }
   }
 
   // --- DUE DATE ADVANCER (REPEATING GOALS) ---
@@ -1228,8 +1257,12 @@ export function BudgetView() {
                 </div>
             </div>
 
-            <button type="submit" className="w-full bg-emerald-500 text-white py-4 rounded-xl font-bold mt-8 shadow-lg shadow-emerald-200 hover:bg-emerald-600 transition-colors">
-              Move Funds
+            <button
+              type="submit"
+              disabled={transferring}
+              className="w-full bg-emerald-500 text-white py-4 rounded-xl font-bold mt-8 shadow-lg shadow-emerald-200 hover:bg-emerald-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {transferring ? 'Moving…' : 'Move Funds'}
             </button>
           </form>
         </div>
