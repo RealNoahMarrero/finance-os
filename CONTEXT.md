@@ -176,7 +176,9 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 
 * Month grid of bill due dates (funding colors), **credit card chips on `next_payment_due_date`** (gold when linked category is funded; tap → mark paid), and emerald chips for expected income (`projected_income`).
 
-* Header stats: bills due, funded, expected income this month.
+* **Event filters** — pill bar: All / Bills / Credit cards / Income. Filters grid chips and adapts header stats (due, funded, expected income, or CC funded count). Preference persists in `localStorage` (`finance_os_calendar_filter`). Mobile: horizontal scroll strip with short labels (“Cards”), 44px touch targets, edge-to-edge scroll for filters and stat cards.
+
+* Header stats: bills due, funded, expected income this month (scoped to active filter).
 
 * Bill chips deep-link to `/budget?category={id}`.
 
@@ -190,7 +192,7 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 
 * **Budget** — Projected RTA subtitle on RTA banner; **Assign Money** opens Move Money (RTA ↔ categories, or category ↔ category) with smart prefills, JS validation + alerts, and `formatMoneyInput` for amount fields. Clicking **overspent Available** prefills the full deficit and defaults **From** to the largest funded envelope (fallback RTA) so you can cover quickly from another category. Move Money shows clearer network-error guidance, disables double-submit while saving, and rolls back the source envelope if the destination update fails mid-transfer.
 
-* **Calendar** — Income chips + month stat; tap for receive/edit.
+* **Calendar** — Income chips + month stat; tap for receive/edit. Event filter bar (All / Bills / Credit cards / Income) with filter-aware stats.
 
 
 
@@ -309,4 +311,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 13. **Move Money resilience** — Network-error messaging for failed Supabase fetches, submit guard while transferring, rollback on partial category-to-category failure.
 14. **Insights category drill-down** — Tap a spending category to view all transactions in that envelope for the current period (`listCategoryExpenses`, split-line aware); `category-spending-detail` modal.
 15. **Mobile sheet scroll fix** — Vaul bottom sheets only dismiss from the top handle (`handleOnly`); scrollable content marked `data-vaul-no-drag` so add/edit expected income and other `ResponsiveModal` popups stay open while scrolling with the keyboard up.
+16. **Calendar event filters** — All / Bills / Credit cards / Income filter bar on `/calendar`; grid chips and header stats adapt to selection; preference in `localStorage`; mobile-optimized horizontal scroll and compact stat labels.
 
