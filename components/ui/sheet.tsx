@@ -19,7 +19,7 @@ export function Sheet({
   className?: string;
 }) {
   return (
-    <Drawer.Root open={open} onOpenChange={onOpenChange} shouldScaleBackground>
+    <Drawer.Root open={open} onOpenChange={onOpenChange} shouldScaleBackground handleOnly>
       <Drawer.Portal>
         <Drawer.Overlay className="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm" />
         <Drawer.Content
@@ -29,7 +29,7 @@ export function Sheet({
             className
           )}
         >
-          <div className="mx-auto mt-3 h-1.5 w-12 shrink-0 rounded-full bg-[var(--border)] lg:hidden" />
+          <Drawer.Handle className="mx-auto mt-3 h-1.5 w-12 shrink-0 rounded-full bg-[var(--border)] lg:hidden" />
           {title && (
             <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
               <Drawer.Title className="text-lg font-bold text-[var(--text-primary)]">
@@ -45,7 +45,12 @@ export function Sheet({
               </button>
             </div>
           )}
-          <div className="flex-1 overflow-y-auto hide-scrollbar p-5 safe-bottom">{children}</div>
+          <div
+            className="flex-1 overflow-y-auto hide-scrollbar p-5 safe-bottom overscroll-contain touch-pan-y"
+            data-vaul-no-drag
+          >
+            {children}
+          </div>
         </Drawer.Content>
       </Drawer.Portal>
     </Drawer.Root>

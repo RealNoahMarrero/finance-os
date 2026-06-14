@@ -280,7 +280,7 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 
 * **Smart Bill Pay:** Shared `applySmartBillPay` on dashboard quick entry and ledger (non-split only). UI only for **debt** or **scheduled bills** (`due_date` + repeating cycle) — not everyday envelopes like gas/groceries (`lib/smart-bill-pay.ts`).
 
-* **Mobile:** Bottom nav, FAB quick entry on home, bottom sheets on mobile / dialog on desktop
+* **Mobile:** Bottom nav, FAB quick entry on home, bottom sheets on mobile / dialog on desktop. Mobile sheets (`components/ui/sheet.tsx` via `ResponsiveModal`) use Vaul `handleOnly` + `data-vaul-no-drag` on scroll content so form scrolling (e.g. expected income, export) does not swipe-dismiss the popup — close via X or the top handle only.
 
 * **Motion:** Framer Motion on budget group expand, calendar month transitions
 
@@ -308,4 +308,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 12. **Overspent transfer prefill** — Clicking negative Available prefills the full deficit amount and defaults source to another funded envelope (not RTA-capped).
 13. **Move Money resilience** — Network-error messaging for failed Supabase fetches, submit guard while transferring, rollback on partial category-to-category failure.
 14. **Insights category drill-down** — Tap a spending category to view all transactions in that envelope for the current period (`listCategoryExpenses`, split-line aware); `category-spending-detail` modal.
+15. **Mobile sheet scroll fix** — Vaul bottom sheets only dismiss from the top handle (`handleOnly`); scrollable content marked `data-vaul-no-drag` so add/edit expected income and other `ResponsiveModal` popups stay open while scrolling with the keyboard up.
 
