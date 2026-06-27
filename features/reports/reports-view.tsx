@@ -49,7 +49,6 @@ import { GlassCard } from '@/components/ui/glass-card';
 import { CashflowChart } from '@/components/charts/cashflow-chart';
 import { CategoryDonut } from '@/components/charts/category-donut';
 import { SpendingBreakdown } from '@/features/reports/spending-breakdown';
-import { CreditScoresSection } from '@/features/reports/credit-scores-section';
 import { DebtTimelineChart } from '@/components/charts/debt-timeline-chart';
 import { cn } from '@/lib/cn';
 import {
@@ -531,8 +530,6 @@ export function ReportsView() {
               </div>
             </GlassCard>
           )}
-
-          <CreditScoresSection />
         </Tabs.Content>
 
         <Tabs.Content value="spending" className="space-y-6">

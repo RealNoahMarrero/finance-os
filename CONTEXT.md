@@ -26,7 +26,7 @@ Finance OS is a custom, manual-entry financial platform designed to replace YNAB
 
 
 
-Core tables: `accounts`, `category_groups`, `categories`, `transactions`, **`projected_income`**, **`transaction_splits`**, **`credit_score_entries`**.
+Core tables: `accounts`, `category_groups`, `categories`, `transactions`, **`projected_income`**, **`transaction_splits`**.
 
 
 
@@ -43,7 +43,6 @@ Core tables: `accounts`, `category_groups`, `categories`, `transactions`, **`pro
 | [`supabase/migrations/005_credit_card_payment_cycle.sql`](supabase/migrations/005_credit_card_payment_cycle.sql) | `next_payment_due_date`, `payment_category_id` — mark paid advances cycle; budget funding colors |
 | [`supabase/migrations/006_projected_income_certainty.sql`](supabase/migrations/006_projected_income_certainty.sql) | `certainty` (`guaranteed` \| `anticipated`) on expected income for conservative vs full projected RTA |
 | [`supabase/migrations/007_budgeted_amount.sql`](supabase/migrations/007_budgeted_amount.sql) | Optional `budgeted_amount` column (legacy; **RTA does not use it**) |
-| [`supabase/migrations/008_credit_scores.sql`](supabase/migrations/008_credit_scores.sql) | Manual credit score history (`credit_score_entries`) + RLS |
 
 
 
@@ -60,14 +59,6 @@ Label, amount, `expected_date`, `account_id` (deposit target), optional `categor
 
 
 Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `transactions` row holds the full amount and `category_id = null` when split. One account movement; envelope math per line.
-
-
-
-### `credit_score_entries`
-
-
-
-Manual score history on **Insights → Overview**. `person` (`me` \| `teria`), `provider` (`experian` \| `credit_karma` \| `chase` \| `capital_one`), optional `variant` (bureau slots: Experian/Equifax/TransUnion as `1`/`2`/`3`; CK: `transunion`/`equifax`), `score` (300–850), `recorded_date`, optional `notes`. Teria has no Capital One slot (DB check + UI). Slot definitions in `lib/credit-scores.ts`; queries in `lib/queries/credit-scores.ts`; UI in `features/reports/credit-scores-section.tsx`. Person preference in `localStorage` (`finance_os_credit_score_person`).
 
 
 
@@ -125,7 +116,7 @@ Manual score history on **Insights → Overview**. `person` (`me` \| `teria`), `
 
 * `components/ui/` — Button, GlassCard, Sheet, Dialog, ResponsiveModal, StatHero, Skeleton, **Select** (`app-select` + dark `option` styling)
 
-* `components/charts/` — CashflowChart, CategoryDonut, DebtTimelineChart, CreditScoreChart
+* `components/charts/` — CashflowChart, CategoryDonut, DebtTimelineChart
 
 * `app/globals.css` — design tokens (`--canvas`, `--surface-elevated`, `--text-primary`, etc.), utilities (`.app-card`, `.app-input`, `.app-select`), `color-scheme: dark` on `html.dark` for native controls
 
@@ -145,9 +136,7 @@ Manual score history on **Insights → Overview**. `person` (`me` \| `teria`), `
 
 * `lib/projected-income.ts` — planning RTA math
 
-* `lib/credit-scores.ts` — manual score slot definitions and aggregation helpers
-
-* `lib/queries/` — `transactions`, `transaction-splits`, `projected-income`, `credit-scores`, accounts, categories
+* `lib/queries/` — `transactions`, `transaction-splits`, `projected-income`, accounts, categories
 
 * `lib/export/build-finance-export.ts` — full `.txt` report builder + `downloadTextFile`
 
@@ -171,15 +160,13 @@ Manual score history on **Insights → Overview**. `person` (`me` \| `teria`), `
 
 * `features/reports/category-spending-detail.tsx` — tap a category → transaction list modal for the current Insights period
 
-* `features/reports/credit-scores-section.tsx` — Insights Overview credit score cards, batch log, per-slot history/chart (You / Teria)
-
 
 
 ## 4. REPORTS & INSIGHTS (`/reports`)
 
 
 
-Tabs: Overview (cashflow chart + monthly table, account list, **credit scores**), Spending (category donut, by group, top payees), Income (by category, top sources), Debt (payoff simulator + timeline chart). Period selector: 30D / 90D / YTD / 12M / **Month** (picker). Period income/expense/net summary. **Export** (Insights report preset, TXT/CSV) uses the **current on-screen period** (not just saved prefs). UI prefs persist in `localStorage` (`hooks/use-insights-preferences.ts`): period, month, tab, spending view, expanded groups, debt simulator inputs. Category spending aggregates from **split lines** when present. **Spending drill-down:** tap any category (in **By category** or inside an expanded group) to open a modal listing every expense in that envelope for the selected period — split-aware (shows only the line amount attributed to that category). **Credit scores:** You / Teria toggle (`finance_os_credit_score_person`); predefined slots (bureaus Experian/Equifax/TransUnion, Credit Karma TU/EQ, Chase, Capital One for you only); batch **Log scores** modal; tap a card for trend chart + history. Mobile: 44px touch targets, full-width log button, stacked batch rows, compact card labels.
+Tabs: Overview (cashflow chart + monthly table, account list), Spending (category donut, by group, top payees), Income (by category, top sources), Debt (payoff simulator + timeline chart). Period selector: 30D / 90D / YTD / 12M / **Month** (picker). Period income/expense/net summary. **Export** (Insights report preset, TXT/CSV) uses the **current on-screen period** (not just saved prefs). UI prefs persist in `localStorage` (`hooks/use-insights-preferences.ts`): period, month, tab, spending view, expanded groups, debt simulator inputs. Category spending aggregates from **split lines** when present. **Spending drill-down:** tap any category (in **By category** or inside an expanded group) to open a modal listing every expense in that envelope for the selected period — split-aware (shows only the line amount attributed to that category).
 
 
 
@@ -325,5 +312,4 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 14. **Insights category drill-down** — Tap a spending category to view all transactions in that envelope for the current period (`listCategoryExpenses`, split-line aware); `category-spending-detail` modal.
 15. **Mobile sheet scroll fix** — Vaul bottom sheets only dismiss from the top handle (`handleOnly`); scrollable content marked `data-vaul-no-drag` so add/edit expected income and other `ResponsiveModal` popups stay open while scrolling with the keyboard up.
 16. **Calendar event filters** — All / Bills / Credit cards / Income filter bar on `/calendar`; grid chips and header stats adapt to selection; preference in `localStorage`; mobile-optimized horizontal scroll and compact stat labels.
-17. **Credit score tracking** — `credit_score_entries` table; Insights Overview section for You and Teria with bureau/CK/bank slots, batch logging, per-slot trend chart and history; mobile-optimized touch targets and forms.
 

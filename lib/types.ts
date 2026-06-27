@@ -121,27 +121,3 @@ export interface ProjectedIncomePayload {
   repeat_period: ProjectedIncomeRepeatPeriod;
   notes: string | null;
 }
-
-export type CreditScorePerson = 'me' | 'teria';
-export type CreditScoreProvider = 'experian' | 'credit_karma' | 'chase' | 'capital_one';
-export type CreditScoreVariant = '1' | '2' | '3' | 'transunion' | 'equifax';
-
-export interface CreditScoreEntry {
-  id: number;
-  created_at?: string;
-  person: CreditScorePerson;
-  provider: CreditScoreProvider;
-  variant: CreditScoreVariant | null;
-  score: number;
-  recorded_date: string;
-  notes: string | null;
-}
-
-export interface CreditScorePayload {
-  person: CreditScorePerson;
-  provider: CreditScoreProvider;
-  variant: CreditScoreVariant | null;
-  score: number;
-  recorded_date: string;
-  notes: string | null;
-}
