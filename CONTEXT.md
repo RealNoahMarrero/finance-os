@@ -112,7 +112,7 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 * `app/layout.tsx` — fonts, ThemeProvider, AppShell
 
-* `components/layout/` — `app-shell`, `bottom-nav`, `top-bar`, `fab`, `page-header`
+* `components/layout/` — `app-shell`, `bottom-nav`, `top-bar` (desktop logo + nav + theme), `fab`, `page-header`
 
 * `components/ui/` — Button, GlassCard, Sheet, Dialog, ResponsiveModal, StatHero, Skeleton, **Select** (`app-select` + dark `option` styling)
 
@@ -188,7 +188,7 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 
 
 
-* **Dashboard** — Net worth + Ready to Assign hero row, then a spaced **Expected income** card below (`mt-6` / `md:mt-8`, not in the hero grid). Projected RTA subtitle on the RTA tile; full list modal.
+* **Dashboard** — **Finance OS** logo in desktop top bar only (no duplicate page title). Net worth + Ready to Assign hero row, then a spaced **Expected income** card below (`mt-6` / `md:mt-8`, not in the hero grid). Projected RTA subtitle on the RTA tile; full list modal. Export button top-right above hero.
 
 * **Budget** — Projected RTA subtitle on RTA banner; **Assign Money** opens Move Money (RTA ↔ categories, or category ↔ category) with smart prefills, JS validation + alerts, and `formatMoneyInput` for amount fields. Clicking **overspent Available** prefills the full deficit and defaults **From** to the largest funded envelope (fallback RTA) so you can cover quickly from another category. Move Money shows clearer network-error guidance, disables double-submit while saving, and rolls back the source envelope if the destination update fails mid-transfer.
 
@@ -312,4 +312,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 14. **Insights category drill-down** — Tap a spending category to view all transactions in that envelope for the current period (`listCategoryExpenses`, split-line aware); `category-spending-detail` modal.
 15. **Mobile sheet scroll fix** — Vaul bottom sheets only dismiss from the top handle (`handleOnly`); scrollable content marked `data-vaul-no-drag` so add/edit expected income and other `ResponsiveModal` popups stay open while scrolling with the keyboard up.
 16. **Calendar event filters** — All / Bills / Credit cards / Income filter bar on `/calendar`; grid chips and header stats adapt to selection; preference in `localStorage`; mobile-optimized horizontal scroll and compact stat labels.
+17. **Dashboard header cleanup** — Removed duplicate Finance OS title on home; branding stays in desktop top bar only.
 

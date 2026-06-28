@@ -487,8 +487,7 @@ export function DashboardView() {
       
       {/* HEADER & NET WORTH */}
       <div className="mb-8">
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
-            <h1 className="text-4xl font-extrabold text-[var(--text-primary)] tracking-tight">Finance<span className="text-emerald-500">OS</span></h1>
+        <div className="mb-6 flex justify-end">
             <button type="button" onClick={() => setIsExportOpen(true)} className="w-full md:w-auto app-card px-4 py-2 rounded-xl text-[var(--text-muted)] font-bold border border-[var(--border)] shadow-sm flex items-center justify-center gap-2 hover:bg-[var(--surface-hover)] transition-colors">
                 <Download size={16}/> Export
             </button>
