@@ -276,10 +276,6 @@ export function BudgetView() {
           alert('Source and destination must be different.');
           return;
       }
-      if (fromId === 'RTA' && amt > assignableReadyToAssign + MONEY_EPSILON) {
-          alert(`You only have $${formatMoney(assignableReadyToAssign)} ready to assign after covering overspent categories.`);
-          return;
-      }
 
       setTransferring(true);
       let updatedCategories = [...categories];
