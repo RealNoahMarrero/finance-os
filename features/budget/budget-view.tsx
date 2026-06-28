@@ -21,6 +21,11 @@ import { fetchPendingProjectedIncome } from '@/lib/queries/projected-income';
 import { backfillAccountPaymentDueDates } from '@/lib/queries/credit-card-payments';
 import { CreditCardPaymentsPanel } from '@/features/credit-cards/credit-card-payments-panel';
 import { ExportModal } from '@/features/export/export-modal';
+import {
+  displayReadyToAssign,
+  RtaBannerExtras,
+  rtaIsNegative,
+} from '@/components/budget/rta-banner-extras';
 import type { Account, Category, CategoryGroup, ProjectedIncome } from '@/lib/types';
 
 function transferErrorMessage(error: { message?: string; hint?: string }) {
@@ -217,7 +222,31 @@ export function BudgetView() {
       setFundingCatId(null);
   }
 
-  // --- TRANSFER LOGIC (helpers defined after visibleCategories / readyToAssign below) ---
+  const visibleCategories = categories.filter((c) => !c.is_hidden);
+
+  const {
+    readyToAssign,
+    totalOverspent,
+    assignableReadyToAssign,
+    projectedAssignableReadyToAssign,
+    conservativeAssignableRta,
+    pendingInflow,
+    guaranteedInflow,
+    anticipatedInflow,
+  } = useReadyToAssign(accounts, categories, pendingProjected);
+
+  const shownReadyToAssign = displayReadyToAssign(
+    readyToAssign,
+    assignableReadyToAssign,
+    totalOverspent
+  );
+  const rtaNegative = rtaIsNegative(
+    readyToAssign,
+    assignableReadyToAssign,
+    totalOverspent
+  );
+
+  // --- TRANSFER LOGIC ---
   const swapTransferDirection = () => {
       setTransferForm(prev => ({
           ...prev,
@@ -247,17 +276,9 @@ export function BudgetView() {
           alert('Source and destination must be different.');
           return;
       }
-      if (fromId === 'RTA' && amt > readyToAssign + MONEY_EPSILON) {
-          alert(`You only have $${formatMoney(readyToAssign)} ready to assign.`);
+      if (fromId === 'RTA' && amt > assignableReadyToAssign + MONEY_EPSILON) {
+          alert(`You only have $${formatMoney(assignableReadyToAssign)} ready to assign after covering overspent categories.`);
           return;
-      }
-      if (fromId !== 'RTA') {
-          const sourceCat = categories.find((c) => c.id.toString() === fromId);
-          const sourceAvailable = snapMoney(Number(sourceCat?.assigned_amount || 0));
-          if (sourceAvailable < amt - MONEY_EPSILON) {
-              alert(`"${sourceCat?.name}" only has $${formatMoney(Math.max(0, sourceAvailable))} available.`);
-              return;
-          }
       }
 
       setTransferring(true);
@@ -467,23 +488,7 @@ export function BudgetView() {
   }
 
   // Math (Only count visible categories for totals)
-  const visibleCategories = categories.filter(c => !c.is_hidden);
-  const archivedCategories = categories.filter(c => c.is_hidden);
-  
-  const {
-    readyToAssign,
-    projectedReadyToAssign,
-    conservativeProjectedRta,
-    pendingInflow,
-    guaranteedInflow,
-    anticipatedInflow,
-  } = useReadyToAssign(
-    accounts,
-    categories,
-    pendingProjected
-  );
-
-  // MATH FIX: Add the "snap to zero" logic to the global Overspent Check
+  const archivedCategories = categories.filter((c) => c.is_hidden);
   const hasNegativeCategories = visibleCategories.some(c => {
       let assigned = Number(c.assigned_amount || 0);
       assigned = snapMoney(assigned);
@@ -514,21 +519,21 @@ export function BudgetView() {
   }
 
   function openRtaTransferModal() {
-      if (readyToAssign > 0) {
+      if (assignableReadyToAssign > 0) {
           setTransferForm({
               fromCatId: 'RTA',
               toCatId: pickDefaultDestinationCategory(),
-              amount: formatMoneyInput(readyToAssign),
+              amount: formatMoneyInput(assignableReadyToAssign),
           });
-      } else if (readyToAssign < 0) {
+      } else if (assignableReadyToAssign < 0) {
           const sourceId = pickDefaultSourceCategory();
           const sourceCat = visibleCategories.find((c) => c.id.toString() === sourceId);
           const sourceAvailable = snapMoney(Number(sourceCat?.assigned_amount || 0));
-          const needed = Math.abs(readyToAssign);
+          const needed = Math.abs(assignableReadyToAssign);
           setTransferForm({
               fromCatId: sourceId,
               toCatId: 'RTA',
-              amount: formatMoneyInput(Math.min(needed, sourceAvailable)),
+              amount: formatMoneyInput(Math.min(needed, Math.max(0, sourceAvailable)) || needed),
           });
       } else {
           setTransferForm({
@@ -573,38 +578,38 @@ export function BudgetView() {
     <>
 
       {/* READY TO ASSIGN BANNER */}
-      <div className={`text-white rounded-3xl p-6 md:p-8 shadow-lg mb-8 relative overflow-hidden flex flex-col md:flex-row justify-between items-center md:items-start gap-4 transition-colors ${readyToAssign < 0 ? 'bg-red-500/100' : 'bg-emerald-500'}`}>
-        <div className={`absolute top-0 right-0 w-64 h-64 rounded-full mix-blend-screen filter blur-3xl opacity-50 translate-x-20 -translate-y-20 ${readyToAssign < 0 ? 'bg-red-400' : 'bg-emerald-400'}`}></div>
+      <div className={`text-white rounded-3xl p-6 md:p-8 shadow-lg mb-8 relative overflow-hidden flex flex-col md:flex-row justify-between items-center md:items-start gap-4 transition-colors ${rtaNegative ? 'bg-red-500/100' : 'bg-emerald-500'}`}>
+        <div className={`absolute top-0 right-0 w-64 h-64 rounded-full mix-blend-screen filter blur-3xl opacity-50 translate-x-20 -translate-y-20 ${rtaNegative ? 'bg-red-400' : 'bg-emerald-400'}`}></div>
         <div className="relative z-10 text-center md:text-left">
            <h2 className="text-white/80 font-bold uppercase tracking-widest text-sm mb-2 flex items-center justify-center md:justify-start gap-2">
-              <Wallet size={16}/> Ready to Assign
+              <Wallet size={16}/> {totalOverspent > 0 ? 'Assignable' : 'Ready to Assign'}
            </h2>
            <h1 className="text-5xl md:text-6xl font-black tracking-tighter">
-              ${formatMoney(readyToAssign)}
+              ${formatMoney(shownReadyToAssign)}
            </h1>
-           {readyToAssign < 0 && <p className="font-bold text-white mt-2 bg-red-600 inline-block px-3 py-1 rounded-lg text-sm">You assigned more money than you have in liquid cash.</p>}
-           {pendingInflow > 0 && (
-             <div className="text-sm text-white/80 mt-3 font-medium space-y-1">
-               <p>
-                 If guaranteed arrives:{' '}
-                 <span className="font-black text-white">${formatMoney(conservativeProjectedRta)}</span>
-               </p>
-               {anticipatedInflow > 0 && (
-                 <p>
-                   If all pending:{' '}
-                   <span className="font-black text-white">${formatMoney(projectedReadyToAssign)}</span>
-                 </p>
-               )}
-             </div>
+           {assignableReadyToAssign < 0 && (
+             <p className="font-bold text-white mt-2 bg-red-600 inline-block px-3 py-1 rounded-lg text-sm">
+               You assigned more money than you have in liquid cash.
+             </p>
            )}
+           <RtaBannerExtras
+             readyToAssign={readyToAssign}
+             assignableReadyToAssign={assignableReadyToAssign}
+             totalOverspent={totalOverspent}
+             pendingInflow={pendingInflow}
+             guaranteedInflow={guaranteedInflow}
+             anticipatedInflow={anticipatedInflow}
+             projectedAssignableReadyToAssign={projectedAssignableReadyToAssign}
+             conservativeAssignableRta={conservativeAssignableRta}
+           />
         </div>
         <div className="relative z-10 flex flex-col items-stretch md:items-end gap-3 w-full md:w-auto md:min-w-[200px]">
             <button
                 type="button"
                 onClick={openRtaTransferModal}
                 disabled={visibleCategories.length === 0}
-                className={`w-full min-h-12 md:min-h-0 md:w-auto px-5 py-3.5 md:py-3 rounded-xl font-black text-sm uppercase tracking-wide shadow-lg shadow-black/10 dark:shadow-black/30 flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 ${
-                    readyToAssign < 0
+                className={`w-full min-h-12 md:min-h-0 md:min-w-0 md:w-auto px-5 py-3.5 md:py-3 rounded-xl font-black text-sm uppercase tracking-wide shadow-lg shadow-black/10 dark:shadow-black/30 flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 ${
+                    assignableReadyToAssign < 0
                         ? 'bg-white/95 dark:bg-white/15 dark:backdrop-blur-md text-red-700 dark:text-white border border-transparent dark:border-white/25 hover:bg-white dark:hover:bg-white/25'
                         : 'bg-white/95 dark:bg-white/15 dark:backdrop-blur-md text-emerald-700 dark:text-white border border-transparent dark:border-white/25 hover:bg-white dark:hover:bg-white/25'
                 }`}
@@ -612,10 +617,10 @@ export function BudgetView() {
             >
                 <ArrowRightLeft size={18} className="shrink-0"/>
                 <span className="sm:hidden">
-                    {readyToAssign > 0 ? 'Assign' : readyToAssign < 0 ? 'Cover' : 'Move'}
+                    {assignableReadyToAssign > 0 ? 'Assign' : assignableReadyToAssign < 0 ? 'Cover' : 'Move'}
                 </span>
                 <span className="hidden sm:inline">
-                    {readyToAssign > 0 ? 'Assign Money' : readyToAssign < 0 ? 'Cover Overbudget' : 'Move Money'}
+                    {assignableReadyToAssign > 0 ? 'Assign Money' : assignableReadyToAssign < 0 ? 'Cover Overbudget' : 'Move Money'}
                 </span>
             </button>
             <div className="bg-white/20 dark:bg-black/20 backdrop-blur-md border border-white/20 dark:border-white/10 rounded-xl p-4 w-full md:w-auto text-center">
@@ -1232,7 +1237,7 @@ export function BudgetView() {
             {/* Actionable Categories Quick Reference */}
             <div className="mt-6 pt-6 border-t border-[var(--border)]">
                 <p className="text-[10px] font-black text-[var(--text-muted)] uppercase tracking-widest mb-3 flex items-center gap-2">
-                    <Activity size={12}/> Envelopes with Funds
+                    <Activity size={12}/> Envelope balances
                 </p>
                 <div className="space-y-2 max-h-40 overflow-y-auto pr-2 hide-scrollbar">
                     {visibleCategories.filter(c => Math.abs(Number(c.assigned_amount || 0)) >= MONEY_EPSILON).map(c => (
@@ -1246,12 +1251,25 @@ export function BudgetView() {
                             </span>
                         </div>
                     ))}
-                    {readyToAssign !== 0 && (
+                    {(assignableReadyToAssign !== 0 || totalOverspent > 0) && (
                         <div className="flex items-center justify-between p-2 rounded-lg bg-blue-50 border border-blue-100 mt-2">
-                            <span className="text-xs font-bold text-blue-700">Ready to Assign</span>
-                            <span className={`text-xs font-black ${readyToAssign < 0 ? 'text-red-500' : 'text-blue-600'}`}>
-                                {readyToAssign < 0 ? '-' : ''}${formatMoney(Math.abs(readyToAssign))}
+                            <span className="text-xs font-bold text-blue-700">
+                              {totalOverspent > 0 ? 'Assignable' : 'Ready to Assign'}
                             </span>
+                            <span className={`text-xs font-black ${assignableReadyToAssign < 0 ? 'text-red-500' : 'text-blue-600'}`}>
+                                {assignableReadyToAssign < 0 ? '-' : ''}${formatMoney(Math.abs(totalOverspent > 0 ? assignableReadyToAssign : readyToAssign))}
+                            </span>
+                        </div>
+                    )}
+                    {totalOverspent > 0 && (
+                        <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-2 dark:border-red-500/30 dark:bg-red-500/10">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-300">
+                            Overspent
+                          </p>
+                          <p className="text-[10px] font-bold text-red-700 dark:text-red-200">
+                            ${formatMoney(totalOverspent)} needs coverage · $
+                            {formatMoney(readyToAssign)} before
+                          </p>
                         </div>
                     )}
                 </div>

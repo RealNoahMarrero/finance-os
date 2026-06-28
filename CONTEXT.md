@@ -66,9 +66,11 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 
 
-* **Actual RTA** = liquid cash − sum of **positive** envelope balances only (`computeTotalAllocated` in `lib/reports/aggregations.ts`). Overspent (negative) categories do **not** inflate RTA — they show as red on Budget only.
+* **Actual RTA** = liquid cash − sum of **all** envelope Available balances, including overspent negatives (YNAB-style; `computeReadyToAssign` in `lib/reports/aggregations.ts`).
 
-* **Planning RTA** = actual RTA + pending projected inflows to liquid accounts. **Conservative** subtitle uses **guaranteed** pending only; **optimistic** uses all pending (`lib/projected-income.ts`, `hooks/use-ready-to-assign.ts`).
+* **Assignable RTA** = liquid cash − **positive** envelope Available only (`computeAssignableReadyToAssign`). Shown as the **primary** RTA figure on Dashboard/Budget/Insights when any category is overspent; subtitle shows overspent total and RTA before coverage. Move Money transfers **from RTA** cap at assignable, not the inflated pre-coverage number.
+
+* **Planning RTA** = assignable (or RTA when none overspent) + pending projected inflows to liquid accounts. **Conservative** subtitle uses **guaranteed** pending only; **optimistic** uses all pending (`lib/projected-income.ts`, `hooks/use-ready-to-assign.ts`). Banner shows overspent and expected-income in separate labeled cards (`components/budget/rta-banner-extras.tsx`).
 
 * **Expected income certainty** — `guaranteed` = reliable (paycheck, salary); counts toward conservative projected RTA. `anticipated` = uncertain (invoice, gig, other); optimistic projected RTA only.
 
@@ -117,6 +119,8 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 * `components/ui/` — Button, GlassCard, Sheet, Dialog, ResponsiveModal, StatHero, Skeleton, **Select** (`app-select` + dark `option` styling)
 
 * `components/charts/` — CashflowChart, CategoryDonut, DebtTimelineChart
+
+* `components/budget/rta-banner-extras.tsx` — Assignable RTA banner subtitles; separate **Overspent envelopes** vs **Expected income** cards
 
 * `app/globals.css` — design tokens (`--canvas`, `--surface-elevated`, `--text-primary`, etc.), utilities (`.app-card`, `.app-input`, `.app-select`), `color-scheme: dark` on `html.dark` for native controls
 
@@ -188,9 +192,9 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 
 
 
-* **Dashboard** — **Finance OS** logo in desktop top bar only (no duplicate page title). Net worth + Ready to Assign hero row, then a spaced **Expected income** card below (`mt-6` / `md:mt-8`, not in the hero grid). Projected RTA subtitle on the RTA tile; full list modal. Export button top-right above hero.
+* **Dashboard** — **Finance OS** logo in desktop top bar only (no duplicate page title). Net worth + **Assignable** / Ready to Assign hero tile with separate **Overspent envelopes** and **Expected income** cards when applicable; spaced **Expected income** list card below. Export top-right above hero.
 
-* **Budget** — Projected RTA subtitle on RTA banner; **Assign Money** opens Move Money (RTA ↔ categories, or category ↔ category) with smart prefills, JS validation + alerts, and `formatMoneyInput` for amount fields. Clicking **overspent Available** prefills the full deficit and defaults **From** to the largest funded envelope (fallback RTA) so you can cover quickly from another category. Move Money shows clearer network-error guidance, disables double-submit while saving, and rolls back the source envelope if the destination update fails mid-transfer.
+* **Budget** — RTA banner matches Dashboard (**Assignable** when overspent; labeled overspent vs expected-income cards). **Assign Money** opens Move Money; category ↔ category may go negative; transfers **from RTA** cap at **Assignable**. Overspent Available click prefills cover amount. Move Money: network-error guidance, submit guard, partial rollback on failure.
 
 * **Calendar** — Income chips + month stat; tap for receive/edit. Event filter bar (All / Bills / Credit cards / Income) with filter-aware stats.
 
@@ -254,7 +258,7 @@ Paste into **Extensions → Apps Script**, set `SUPABASE_URL` and `SUPABASE_KEY`
 
 |-------|-----------------|-------|
 
-| **Summary** | Computed from accounts, categories, pending `projected_income` | Net worth, liquid, RTA, envelope total, pending guaranteed/anticipated, projected RTA, plain-language definitions |
+| **Summary** | Computed from accounts, categories, pending `projected_income` | Net worth, liquid, net envelopes, overspent total, RTA before coverage, **Assignable**, pending guaranteed/anticipated, projected RTA + projected Assignable, plain-language definitions |
 
 | Accounts | `accounts` | Includes CC min payment, due day, next due date, linked budget envelope |
 
@@ -276,7 +280,7 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 
 
 
-* **Ready to Assign:** RTA = liquid cash − positive envelope balances only; `computeTotalAllocated` / `computeReadyToAssign` in `lib/reports/aggregations.ts`; `snapMoney` / `roundMoney` in `lib/money.ts`
+* **Ready to Assign:** RTA (YNAB) = liquid − net envelope Available; **Assignable** = liquid − positive envelopes only — primary display when overspent; `computeReadyToAssign` / `computeAssignableReadyToAssign` in `lib/reports/aggregations.ts`; `snapMoney` / `roundMoney` in `lib/money.ts`
 
 * **Balance sync:** All transaction writes use `lib/balance-adjustment.ts` (ledger-grade, fresh DB reads)
 
@@ -313,4 +317,8 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 15. **Mobile sheet scroll fix** — Vaul bottom sheets only dismiss from the top handle (`handleOnly`); scrollable content marked `data-vaul-no-drag` so add/edit expected income and other `ResponsiveModal` popups stay open while scrolling with the keyboard up.
 16. **Calendar event filters** — All / Bills / Credit cards / Income filter bar on `/calendar`; grid chips and header stats adapt to selection; preference in `localStorage`; mobile-optimized horizontal scroll and compact stat labels.
 17. **Dashboard header cleanup** — Removed duplicate Finance OS title on home; branding stays in desktop top bar only.
+18. **RTA formula (YNAB-style)** — Ready to Assign uses net envelope Available (overspent negatives count); Move Money and covering overspent categories behave intuitively vs liquid cash.
+19. **Move Money (negative envelopes)** — Category-to-category transfers no longer require positive source Available; envelopes may go negative when reallocating (e.g. shift spend between categories). RTA source still limited to actual Ready to Assign.
+20. **Assignable RTA display** — When categories are overspent, Dashboard/Budget/Insights show **Assignable** (liquid minus positive envelopes) as the headline figure, with overspent total and pre-coverage RTA as context; RTA transfers cap at assignable.
+21. **RTA banner cards** — Overspent vs expected-income subtitles use separate labeled cards on Dashboard/Budget RTA banners (`rta-banner-extras.tsx`); Google Sheets Summary sync matches assignable/overspent metrics.
 

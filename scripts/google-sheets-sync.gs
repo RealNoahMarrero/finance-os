@@ -84,8 +84,13 @@ function computeSummaryMetrics_(accounts, categories, pendingIncome) {
   });
 
   var totalInEnvelopes = 0;
+  var totalOverspent = 0;
   categories.forEach(function (cat) {
-    totalInEnvelopes += Math.max(0, Number(cat.assigned_amount) || 0);
+    var assigned = Number(cat.assigned_amount) || 0;
+    totalInEnvelopes += assigned;
+    if (assigned < 0) {
+      totalOverspent += Math.abs(assigned);
+    }
   });
 
   var guaranteedInflow = 0;
@@ -104,7 +109,9 @@ function computeSummaryMetrics_(accounts, categories, pendingIncome) {
   liquidCash = round2_(liquidCash);
   netWorth = round2_(netWorth);
   totalInEnvelopes = round2_(totalInEnvelopes);
+  totalOverspent = round2_(totalOverspent);
   var readyToAssign = round2_(liquidCash - totalInEnvelopes);
+  var assignableReadyToAssign = round2_(liquidCash - (totalInEnvelopes + totalOverspent));
   guaranteedInflow = round2_(guaranteedInflow);
   anticipatedInflow = round2_(anticipatedInflow);
   var totalPending = round2_(guaranteedInflow + anticipatedInflow);
@@ -113,11 +120,15 @@ function computeSummaryMetrics_(accounts, categories, pendingIncome) {
     liquidCash: liquidCash,
     netWorth: netWorth,
     totalInEnvelopes: totalInEnvelopes,
+    totalOverspent: totalOverspent,
     readyToAssign: readyToAssign,
+    assignableReadyToAssign: assignableReadyToAssign,
     guaranteedInflow: guaranteedInflow,
     anticipatedInflow: anticipatedInflow,
     projectedRtaGuaranteed: round2_(readyToAssign + guaranteedInflow),
     projectedRtaAllPending: round2_(readyToAssign + totalPending),
+    projectedAssignableGuaranteed: round2_(assignableReadyToAssign + guaranteedInflow),
+    projectedAssignableAllPending: round2_(assignableReadyToAssign + totalPending),
   };
 }
 
@@ -140,25 +151,49 @@ function syncSummary() {
     ['Synced At', syncedAt],
     ['Net Worth', m.netWorth],
     ['Liquid Cash', m.liquidCash],
-    ['In Envelopes (positive only)', m.totalInEnvelopes],
-    ['Ready to Assign', m.readyToAssign],
+    ['In Envelopes (net Available)', m.totalInEnvelopes],
+    ['Overspent (needs coverage)', m.totalOverspent],
+    ['Ready to Assign (before coverage)', m.readyToAssign],
+    ['Assignable (after overspend)', m.assignableReadyToAssign],
     ['Pending Income — Guaranteed', m.guaranteedInflow],
     ['Pending Income — Anticipated', m.anticipatedInflow],
     ['Projected RTA (guaranteed only)', m.projectedRtaGuaranteed],
     ['Projected RTA (all pending)', m.projectedRtaAllPending],
+    ['Projected Assignable (guaranteed)', m.projectedAssignableGuaranteed],
+    ['Projected Assignable (all pending)', m.projectedAssignableAllPending],
     ['', ''],
     ['— How to read this —', ''],
     [
-      'Ready to Assign',
-      'Liquid cash minus money sitting in positive envelopes. Overspent (negative) categories do not inflate RTA.',
+      'Ready to Assign (before coverage)',
+      'Liquid cash minus net envelope Available (YNAB-style; overspent lowers net assigned).',
+    ],
+    [
+      'Assignable',
+      'Liquid cash minus positive envelopes only — money you can assign after mentally covering overspent categories.',
+    ],
+    [
+      'Projected RTA (guaranteed only)',
+      'RTA before coverage plus guaranteed pending income (YNAB-style base).',
+    ],
+    [
+      'Projected RTA (all pending)',
+      'RTA before coverage plus all pending income.',
+    ],
+    [
+      'Projected Assignable (guaranteed)',
+      'Assignable plus guaranteed pending — matches app banner when overspent.',
+    ],
+    [
+      'Projected Assignable (all pending)',
+      'Assignable plus all pending income — optimistic assignable forecast.',
     ],
     [
       'Guaranteed income',
-      'Reliable inflows (paycheck, salary). Counts toward conservative Projected RTA.',
+      'Reliable inflows (paycheck, salary). Counts toward conservative projected Assignable / RTA.',
     ],
     [
       'Anticipated income',
-      'Uncertain inflows (invoice, gig, other). Optimistic Projected RTA only — not in guaranteed row.',
+      'Uncertain inflows (invoice, gig, other). Optimistic projected rows only — not in guaranteed row.',
     ],
     [
       'ExpectedIncome sheet',

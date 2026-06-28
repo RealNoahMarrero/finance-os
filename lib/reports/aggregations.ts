@@ -442,8 +442,33 @@ export function computeLiquidCash(accounts: Account[]) {
   );
 }
 
-/** Sum of money currently sitting in envelopes (positive available only). */
+/** Sum of envelope Available balances (includes overspent negatives — YNAB-style). */
 export function computeTotalAllocated(categories: Category[]) {
+  return snapMoney(
+    categories
+      .filter((c) => !c.is_hidden)
+      .reduce((sum, c) => sum + Number(c.assigned_amount || 0), 0)
+  );
+}
+
+/** Total $ needed to bring all overspent envelopes back to zero. */
+export function computeTotalOverspent(categories: Category[]) {
+  return snapMoney(
+    categories
+      .filter((c) => !c.is_hidden)
+      .reduce(
+        (sum, c) =>
+          sum +
+          (Number(c.assigned_amount || 0) < 0
+            ? Math.abs(Number(c.assigned_amount || 0))
+            : 0),
+        0
+      )
+  );
+}
+
+/** Money in positive envelopes only (excludes overspent negatives). */
+export function computeTotalPositiveAllocated(categories: Category[]) {
   return snapMoney(
     categories
       .filter((c) => !c.is_hidden)
@@ -459,9 +484,20 @@ export function computeTotalBudgeted(categories: Category[]) {
   return computeTotalAllocated(categories);
 }
 
-/** RTA = liquid cash not currently held in positive envelopes. Overspent categories do not inflate RTA. */
+/** RTA = liquid cash minus all envelope Available (negative overspending reduces the assigned total). */
 export function computeReadyToAssign(liquidCash: number, categories: Category[]) {
   return snapMoney(liquidCash - computeTotalAllocated(categories));
+}
+
+/**
+ * Assignable RTA — liquid minus positive envelopes only.
+ * Treats overspent categories as needing coverage; avoids inflated RTA when envelopes are negative.
+ */
+export function computeAssignableReadyToAssign(
+  liquidCash: number,
+  categories: Category[]
+) {
+  return snapMoney(liquidCash - computeTotalPositiveAllocated(categories));
 }
 
 export interface PayeeSpend {

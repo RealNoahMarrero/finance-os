@@ -29,6 +29,11 @@ import {
 import { SplitTransactionFields } from '@/features/ledger/split-transaction-fields';
 import { PageSkeleton } from '@/components/ui/skeleton';
 import { Fab } from '@/components/layout/fab';
+import {
+  displayReadyToAssign,
+  RtaBannerExtras,
+  rtaIsNegative,
+} from '@/components/budget/rta-banner-extras';
 import { useReadyToAssign } from '@/hooks/use-ready-to-assign';
 import { sortPendingByDate } from '@/lib/projected-income';
 import {
@@ -54,7 +59,6 @@ export function DashboardView() {
   const [recentTransactions, setRecentTransactions] = useState<any[]>([]);
   const [payeeSuggestions, setPayeeSuggestions] = useState<string[]>([]);
   const [monthlyStats, setMonthlyStats] = useState({ income: 0, expense: 0 });
-  const [totalAssigned, setTotalAssigned] = useState(0);
   const [pendingProjected, setPendingProjected] = useState<ProjectedIncome[]>([]);
   const [allProjected, setAllProjected] = useState<ProjectedIncome[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,7 +120,6 @@ export function DashboardView() {
     const { data: cats } = await supabase.from('categories').select('id, name, emoji, assigned_amount, budgeted_amount, is_hidden').order('name');
     if (cats) {
         setCategories(cats);
-        setTotalAssigned(snapMoney(cats.filter(c => !c.is_hidden).reduce((sum, c) => sum + Math.max(0, Number(c.assigned_amount || 0)), 0)));
     }
 
     const { data: txns } = await supabase
@@ -169,11 +172,6 @@ export function DashboardView() {
       .order('name');
     if (cats) {
       setCategories(cats);
-      setTotalAssigned(
-        snapMoney(
-          cats.filter((c) => !c.is_hidden).reduce((sum, c) => sum + Math.max(0, Number(c.assigned_amount || 0)), 0)
-        )
-      );
     }
   }
 
@@ -435,8 +433,10 @@ export function DashboardView() {
   const {
     liquidCash,
     readyToAssign,
-    projectedReadyToAssign,
-    conservativeProjectedRta,
+    totalOverspent,
+    assignableReadyToAssign,
+    projectedAssignableReadyToAssign,
+    conservativeAssignableRta,
     pendingInflow,
     guaranteedInflow,
     anticipatedInflow,
@@ -448,6 +448,17 @@ export function DashboardView() {
       assigned_amount: c.assigned_amount,
     })),
     pendingProjected
+  );
+
+  const shownReadyToAssign = displayReadyToAssign(
+    readyToAssign,
+    assignableReadyToAssign,
+    totalOverspent
+  );
+  const rtaNegative = rtaIsNegative(
+    readyToAssign,
+    assignableReadyToAssign,
+    totalOverspent
   );
 
   const upcomingProjected = sortPendingByDate(pendingProjected).slice(0, 5);
@@ -512,27 +523,29 @@ export function DashboardView() {
             </div>
           </div>
 
-          <div className={`text-white rounded-3xl p-6 shadow-lg flex flex-col justify-center items-center text-center relative overflow-hidden transition-colors ${readyToAssign < 0 ? 'bg-red-500/100' : 'bg-emerald-500'}`}>
-            <div className={`absolute top-0 left-0 w-32 h-32 rounded-full filter blur-2xl opacity-50 -translate-x-10 -translate-y-10 ${readyToAssign < 0 ? 'bg-red-400' : 'bg-emerald-400'}`}></div>
-            <h3 className="font-bold text-white/90 uppercase tracking-widest text-xs mb-2 z-10">Ready to Assign</h3>
+          <div className={`text-white rounded-3xl p-6 shadow-lg flex flex-col justify-center items-center text-center relative overflow-hidden transition-colors ${rtaNegative ? 'bg-red-500/100' : 'bg-emerald-500'}`}>
+            <div className={`absolute top-0 left-0 w-32 h-32 rounded-full filter blur-2xl opacity-50 -translate-x-10 -translate-y-10 ${rtaNegative ? 'bg-red-400' : 'bg-emerald-400'}`}></div>
+            <h3 className="font-bold text-white/90 uppercase tracking-widest text-xs mb-2 z-10">
+              {totalOverspent > 0 ? 'Assignable' : 'Ready to Assign'}
+            </h3>
             <div className="font-black text-4xl tracking-tighter z-10">
-               ${formatMoney(readyToAssign)}
+               ${formatMoney(shownReadyToAssign)}
             </div>
-            {readyToAssign < 0 && <p className="text-xs bg-red-700/50 text-white px-2 py-1 rounded mt-3 font-bold z-10 flex items-center gap-1 border border-red-400"><AlertCircle size={12}/> Overbudgeted</p>}
-            {pendingInflow > 0 && (
-              <div className="text-xs text-white/80 mt-3 z-10 font-medium leading-snug space-y-1">
-                <p>
-                  If guaranteed arrives:{' '}
-                  <span className="font-black text-white">${formatMoney(conservativeProjectedRta)}</span>
-                </p>
-                {anticipatedInflow > 0 && (
-                  <p>
-                    If all pending (${formatMoney(guaranteedInflow)} + ${formatMoney(anticipatedInflow)}):{' '}
-                    <span className="font-black text-white">${formatMoney(projectedReadyToAssign)}</span>
-                  </p>
-                )}
-              </div>
+            {assignableReadyToAssign < 0 && (
+              <p className="text-xs bg-red-700/50 text-white px-2 py-1 rounded mt-3 font-bold z-10 border border-red-400">
+                Overbudgeted
+              </p>
             )}
+            <RtaBannerExtras
+              readyToAssign={readyToAssign}
+              assignableReadyToAssign={assignableReadyToAssign}
+              totalOverspent={totalOverspent}
+              pendingInflow={pendingInflow}
+              guaranteedInflow={guaranteedInflow}
+              anticipatedInflow={anticipatedInflow}
+              projectedAssignableReadyToAssign={projectedAssignableReadyToAssign}
+              conservativeAssignableRta={conservativeAssignableRta}
+            />
           </div>
         </div>
 

@@ -25,6 +25,7 @@ import {
   fetchDebtCategories,
 } from '@/lib/queries/categories';
 import { ExportModal } from '@/features/export/export-modal';
+import { displayReadyToAssign } from '@/components/budget/rta-banner-extras';
 import { fetchTransactions } from '@/lib/queries/transactions';
 import {
   aggregateIncomeByCategory,
@@ -34,10 +35,12 @@ import {
   aggregateSpendingGrouped,
   aggregateTopIncomeSources,
   aggregateTopPayees,
+  computeAssignableReadyToAssign,
   computeLiquidCash,
   computeNetWorth,
   computePeriodTotals,
   computeReadyToAssign,
+  computeTotalOverspent,
   getPeriodRange,
   type ReportPeriod,
 } from '@/lib/reports/aggregations';
@@ -116,6 +119,18 @@ export function ReportsView() {
   const readyToAssign = useMemo(
     () => computeReadyToAssign(liquidCash, categories),
     [liquidCash, categories]
+  );
+  const totalOverspent = useMemo(
+    () => computeTotalOverspent(categories),
+    [categories]
+  );
+  const assignableReadyToAssign = useMemo(
+    () => computeAssignableReadyToAssign(liquidCash, categories),
+    [liquidCash, categories]
+  );
+  const shownReadyToAssign = useMemo(
+    () => displayReadyToAssign(readyToAssign, assignableReadyToAssign, totalOverspent),
+    [readyToAssign, assignableReadyToAssign, totalOverspent]
   );
 
   const periodRange = useMemo(
@@ -339,9 +354,17 @@ export function ReportsView() {
         <StatHero label="Net Worth" value={`$${formatMoney(netWorth)}`} variant="hero" />
         <StatHero label="Liquid Cash" value={`$${formatMoney(liquidCash)}`} />
         <StatHero
-          label="Ready to Assign"
-          value={`$${formatMoney(readyToAssign)}`}
-          variant={readyToAssign < 0 ? 'negative' : 'positive'}
+          label={totalOverspent > 0 ? 'Assignable' : 'Ready to Assign'}
+          value={`$${formatMoney(shownReadyToAssign)}`}
+          variant={shownReadyToAssign < 0 ? 'negative' : 'positive'}
+          sublabel={
+            totalOverspent > 0 ? (
+              <>
+                ${formatMoney(totalOverspent)} overspent · $
+                {formatMoney(readyToAssign)} before coverage
+              </>
+            ) : undefined
+          }
         />
         {creditSummary.length > 0 && (
           <StatHero
