@@ -1,11 +1,11 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { 
   ArrowUpRight, ArrowDownRight, ArrowRightLeft, Activity, X, 
-  Search, Plus, PieChart, LayoutGrid, ListOrdered, Calendar, Tag, 
+  Plus, PieChart, LayoutGrid, ListOrdered, Calendar, Tag, 
   FileText, Trash2, AlignLeft, Save, Loader2, Wallet, Edit2, CheckCircle2, AlertTriangle, Zap, Split
 } from 'lucide-react';
 import { format, parseISO, addWeeks, addMonths, addYears } from 'date-fns';
@@ -18,6 +18,7 @@ import {
 } from '@/lib/smart-bill-pay';
 import { applyTransactionBalances, reverseTransactionBalances } from '@/lib/transaction-balance';
 import { attachSplitsToTransactions } from '@/lib/queries/transactions';
+import { fetchCategoryGroups } from '@/lib/queries/categories';
 import {
   deleteSplitsForTransaction,
   replaceTransactionSplits,
@@ -30,23 +31,29 @@ import {
   type SplitFormLine,
 } from '@/lib/transaction-splits';
 import { SplitTransactionFields } from '@/features/ledger/split-transaction-fields';
+import {
+  LedgerFiltersBar,
+  LedgerSummaryStrip,
+} from '@/features/ledger/ledger-filters-bar';
+import {
+  computeLedgerTotals,
+  filterLedgerTransactions,
+  hasActiveLedgerFilters,
+} from '@/lib/ledger/filters';
+import { useLedgerFilters } from '@/hooks/use-ledger-filters';
 import { PageSkeleton } from '@/components/ui/skeleton';
-import { Select } from '@/components/ui/select';
 import type { Transaction } from '@/lib/types';
 
 export function LedgerView() {
   const searchParams = useSearchParams();
+  const { filters, patch, reset, initialized } = useLedgerFilters();
   
   const [transactions, setTransactions] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  const [categoryGroups, setCategoryGroups] = useState<any[]>([]);
   const [payeeSuggestions, setPayeeSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // Filters
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterAccount, setFilterAccount] = useState('All');
-  const [filterType, setFilterType] = useState('All');
 
   // Modal & Edit State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -91,16 +98,19 @@ export function LedgerView() {
 
   async function fetchData(urlAccountId: string | null = null) {
     setLoading(true);
-    const { data: accs } = await supabase.from('accounts').select('*').order('name');
-    const { data: cats } = await supabase.from('categories').select('id, name, group_id, emoji, assigned_amount').order('name');
+    const [{ data: accs }, { data: cats }, { data: grps }] = await Promise.all([
+      supabase.from('accounts').select('*').order('name'),
+      supabase.from('categories').select('id, name, group_id, emoji, assigned_amount').order('name'),
+      fetchCategoryGroups(),
+    ]);
     
     if (accs) setAccounts(accs);
     if (cats) setCategories(cats);
+    if (grps) setCategoryGroups(grps);
 
-    // Apply URL Filters or set Defaults
-    if (urlAccountId) {
-        setFilterAccount(urlAccountId);
-        setTxnForm(prev => ({ ...prev, account_id: urlAccountId }));
+    const accountId = urlAccountId || (filters.filterAccount !== 'All' ? filters.filterAccount : null);
+    if (accountId) {
+        setTxnForm(prev => ({ ...prev, account_id: accountId }));
     } else if (accs && accs.length > 0 && !txnForm.account_id) {
         setTxnForm(prev => ({ ...prev, account_id: accs[0].id.toString() }));
     }
@@ -219,7 +229,7 @@ export function LedgerView() {
           amount: '',
           payee: '',
           category_id: '',
-          account_id: filterAccount !== 'All' ? filterAccount : (accounts.length > 0 ? accounts[0].id.toString() : ''),
+          account_id: filters.filterAccount !== 'All' ? filters.filterAccount : (accounts.length > 0 ? accounts[0].id.toString() : ''),
           to_account_id: '',
           notes: ''
       });
@@ -312,76 +322,66 @@ export function LedgerView() {
     }
   };
 
-  const processedTxns = transactions.filter(t => {
-      if (filterType !== 'All' && t.type !== filterType) return false;
-      if (filterAccount !== 'All' && t.account_id?.toString() !== filterAccount && t.to_account_id?.toString() !== filterAccount) return false;
-      if (searchQuery) {
-          const q = searchQuery.toLowerCase();
-          const splitNames = (t.transaction_splits || [])
-            .map((s: { categories?: { name?: string } | null }) => s.categories?.name?.toLowerCase())
-            .filter(Boolean)
-            .join(' ');
-          return (
-            t.payee?.toLowerCase().includes(q) ||
-            t.notes?.toLowerCase().includes(q) ||
-            t.categories?.name?.toLowerCase().includes(q) ||
-            splitNames.includes(q)
-          );
-      }
-      return true;
-  });
+  const processedTxns = useMemo(
+    () => filterLedgerTransactions(transactions, filters, accounts, categories),
+    [transactions, filters, accounts, categories]
+  );
 
-  if (loading) return <PageSkeleton />;
+  const ledgerTotals = useMemo(
+    () => computeLedgerTotals(processedTxns),
+    [processedTxns]
+  );
+
+  const filtersActive = hasActiveLedgerFilters(filters);
+
+  if (loading || !initialized) return <PageSkeleton />;
 
   return (
     <>
 
-      <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
-        <div>
-          <h1 className="text-3xl md:text-4xl font-extrabold text-[var(--text-primary)] tracking-tight flex items-center gap-3">
+      <div className="mb-6 flex flex-col gap-4 md:mb-8 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-extrabold tracking-tight text-[var(--text-primary)] sm:text-3xl md:text-4xl">
               Master Ledger
           </h1>
-          <div className="flex items-center gap-4 mt-1">
-            <p className="text-[var(--text-muted)] font-bold text-sm">{transactions.length} total entries</p>
-            {filterAccount !== 'All' && accounts.find(a => a.id.toString() === filterAccount) && (
-              <div className="flex items-center gap-2 px-3 py-1 glass-card rounded-lg text-sm font-black shadow-sm">
-                <span className="text-[var(--text-muted)] font-bold uppercase text-[10px]">Current Balance:</span>
+          <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
+            <p className="text-sm font-bold text-[var(--text-muted)]">
+              {filtersActive || processedTxns.length !== transactions.length
+                ? `${processedTxns.length} of ${transactions.length} entries`
+                : `${transactions.length} total entries`}
+            </p>
+            {filters.filterAccount !== 'All' && accounts.find(a => a.id.toString() === filters.filterAccount) && (
+              <div className="flex w-fit items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-black glass-card shadow-sm">
+                <span className="text-[10px] font-bold uppercase text-[var(--text-muted)]">Balance</span>
                 <span>
-                  {snapMoney(accounts.find(a => a.id.toString() === filterAccount).balance) < 0 ? '-' : ''}
-                  ${formatMoney(Math.abs(accounts.find(a => a.id.toString() === filterAccount).balance))}
+                  {snapMoney(accounts.find(a => a.id.toString() === filters.filterAccount).balance) < 0 ? '-' : ''}
+                  ${formatMoney(Math.abs(accounts.find(a => a.id.toString() === filters.filterAccount).balance))}
                 </span>
               </div>
             )}
           </div>
         </div>
-        <button onClick={openNewTransactionModal} className="w-full md:w-auto px-6 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-200 transition-colors">
+        <button onClick={openNewTransactionModal} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-6 py-3 font-bold text-white shadow-lg shadow-emerald-200 transition-colors touch-manipulation hover:bg-emerald-600 md:w-auto">
             <Plus size={18}/> Log Transaction
         </button>
       </div>
 
-      {/* FILTERS */}
-      <div className="flex flex-col md:flex-row gap-3 mb-6 app-card p-3 rounded-2xl shadow-sm border border-[var(--border)]">
-          <div className="flex-grow relative">
-              <Search className="absolute left-3 top-3 text-[var(--text-muted)]" size={16}/>
-              <input 
-                  placeholder="Search payees, notes, or categories..." 
-                  className="w-full pl-9 p-2.5 app-input rounded-xl font-bold text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none focus:border-blue-300 border border-[var(--border)] transition-all"
-                  value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-              />
-          </div>
-          <div className="flex gap-2">
-              <Select className="w-full md:w-auto min-w-[140px]" value={filterType} onChange={e => setFilterType(e.target.value)}>
-                  <option value="All">All Types</option>
-                  <option value="Expense">Expenses Only</option>
-                  <option value="Income">Income Only</option>
-                  <option value="Transfer">Transfers Only</option>
-              </Select>
-              <Select className="w-full md:w-auto min-w-[140px]" value={filterAccount} onChange={e => setFilterAccount(e.target.value)}>
-                  <option value="All">All Accounts</option>
-                  {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </Select>
-          </div>
-      </div>
+      <LedgerFiltersBar
+        filters={filters}
+        onPatch={patch}
+        onReset={reset}
+        accounts={accounts}
+        categories={categories}
+        categoryGroups={categoryGroups}
+        payeeSuggestions={payeeSuggestions}
+      />
+
+      <LedgerSummaryStrip
+        totals={ledgerTotals}
+        totalCount={transactions.length}
+        filteredCount={processedTxns.length}
+        active={filtersActive}
+      />
 
       {/* TRANSACTIONS LIST */}
       <div className="app-card rounded-3xl shadow-sm border border-[var(--border)] overflow-hidden">
@@ -401,7 +401,7 @@ export function LedgerView() {
                               </div>
                           </div>
 
-                          <div className="flex flex-col md:flex-row md:items-center justify-between w-full md:w-3/5 gap-4 md:gap-0 pl-16 md:pl-0">
+                          <div className="flex w-full flex-col justify-between gap-3 pl-16 md:flex-row md:items-center md:gap-0 md:pl-0 md:w-3/5">
                               <div className="flex items-center gap-2 md:gap-4 flex-wrap">
                                   <span className="text-xs font-bold bg-[var(--surface-subtle)] text-[var(--text-muted)] px-2 py-1 rounded-lg flex items-center gap-1 border border-[var(--border)]">
                                       <Wallet size={12}/> {txn.accounts?.name}
@@ -432,8 +432,8 @@ export function LedgerView() {
                                       ? 'text-emerald-500' 
                                       : txn.type === 'Expense' 
                                       ? 'text-red-500' 
-                                      : filterAccount !== 'All' 
-                                      ? (txn.account_id?.toString() === filterAccount ? 'text-red-500' : 'text-emerald-500')
+                                      : filters.filterAccount !== 'All' 
+                                      ? (txn.account_id?.toString() === filters.filterAccount ? 'text-red-500' : 'text-emerald-500')
                                       : 'text-blue-500'
                                   }`}>
                                       {txn.type === 'Expense' ? '-' : txn.type === 'Income' ? '+' : ''}${formatMoney(txn.amount)}
@@ -456,8 +456,14 @@ export function LedgerView() {
                   <div className="w-16 h-16 bg-[var(--surface-subtle)] text-[var(--text-muted)] rounded-full flex items-center justify-center mx-auto mb-4">
                       <ListOrdered size={32}/>
                   </div>
-                  <h4 className="font-bold text-[var(--text-primary)] text-lg">Ledger is clear</h4>
-                  <p className="text-sm text-[var(--text-muted)] mt-1">Record an expense or income to see it here.</p>
+                  <h4 className="font-bold text-[var(--text-primary)] text-lg">
+                    {filtersActive ? 'No matching transactions' : 'Ledger is clear'}
+                  </h4>
+                  <p className="text-sm text-[var(--text-muted)] mt-1">
+                    {filtersActive
+                      ? 'Try adjusting your filters or search query.'
+                      : 'Record an expense or income to see it here.'}
+                  </p>
               </div>
           )}
       </div>

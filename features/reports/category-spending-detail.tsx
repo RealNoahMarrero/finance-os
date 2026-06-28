@@ -1,11 +1,13 @@
 'use client';
 
 import { useMemo } from 'react';
+import Link from 'next/link';
 import { format, parseISO } from 'date-fns';
-import { Calendar, Split, Wallet } from 'lucide-react';
+import { Calendar, ListOrdered, Split, Wallet } from 'lucide-react';
 import { formatCategoryChartLabel } from '@/components/charts/category-donut';
 import { ResponsiveModal } from '@/components/ui/responsive-modal';
 import { formatMoney } from '@/lib/money';
+import { buildLedgerHref } from '@/lib/ledger/filters';
 import {
   listCategoryExpenses,
   type CategorySpend,
@@ -43,6 +45,14 @@ export function CategorySpendingDetail({
     );
   }, [category, transactions, periodRange, accountNames]);
 
+  const ledgerHref = useMemo(() => {
+    if (!category?.categoryId) return '/ledger';
+    return buildLedgerHref(
+      { filterType: 'Expense' },
+      { categoryId: category.categoryId, periodRange }
+    );
+  }, [category, periodRange]);
+
   if (!category) return null;
 
   const title = formatCategoryChartLabel(category.emoji, category.name);
@@ -59,9 +69,19 @@ export function CategorySpendingDetail({
               {lines.length} transaction{lines.length === 1 ? '' : 's'}
             </p>
           </div>
-          <p className="text-xl font-black tabular-nums text-[var(--accent-negative)]">
-            ${formatMoney(category.total)}
-          </p>
+          <div className="flex flex-col items-end gap-2">
+            <p className="text-xl font-black tabular-nums text-[var(--accent-negative)]">
+              ${formatMoney(category.total)}
+            </p>
+            <Link
+              href={ledgerHref}
+              onClick={() => onOpenChange(false)}
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-700"
+            >
+              <ListOrdered size={14} />
+              Open in Ledger
+            </Link>
+          </div>
         </div>
 
         {lines.length === 0 ? (

@@ -144,9 +144,11 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 * `lib/export/build-finance-export.ts` — full `.txt` report builder + `downloadTextFile`
 
+* `lib/ledger/filters.ts` — ledger filter logic, split-aware category matching, URL helpers (`buildLedgerHref`, `parseLedgerSearchParams`)
+
 * `lib/reports/` — aggregations (spending respects split lines; `listCategoryExpenses` for per-category txn drill-down) + debt simulator
 
-* `hooks/use-ready-to-assign.ts`, `hooks/use-balance-adjustment.ts`
+* `hooks/use-ready-to-assign.ts`, `hooks/use-balance-adjustment.ts`, `hooks/use-ledger-filters.ts` — ledger filter state + `localStorage` persistence
 
 * `scripts/google-sheets-sync.gs` — Apps Script for Google Sheets ↔ Supabase REST sync (placeholders for URL/key; do not commit secrets)
 
@@ -158,11 +160,15 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 * `features/projected-income/projected-income-modals.tsx` — add/edit/receive/list expected income
 
+* `features/ledger/ledger-view.tsx` — master ledger list, add/edit modal, advanced filters
+
+* `features/ledger/ledger-filters-bar.tsx` — date presets, type/account/category filters, “More” panel, filtered summary strip
+
 * `features/ledger/split-transaction-fields.tsx` — split line UI in ledger modal
 
 * `features/reports/spending-breakdown.tsx` — Spending tab donut + by-group / by-category lists
 
-* `features/reports/category-spending-detail.tsx` — tap a category → transaction list modal for the current Insights period
+* `features/reports/category-spending-detail.tsx` — tap a category → transaction list modal for the current Insights period; **Open in Ledger** deep link
 
 
 
@@ -200,7 +206,29 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 
 
 
-## 7. SPLIT TRANSACTIONS (Ledger)
+## 7. LEDGER (`/ledger`)
+
+
+
+### Advanced filters (`lib/ledger/filters.ts`, `features/ledger/ledger-filters-bar.tsx`)
+
+
+
+* **Date** — All time (default), Insights-aligned presets (30D / 90D / YTD / 12M / Month + picker), or custom start/end range. Reuses `getPeriodRange` from `lib/reports/aggregations.ts`.
+
+* **Core** — text search (payee, notes, parent + split categories), type, account, category (split-aware via `transactionMatchesCategory`).
+
+* **More** — category group, account type (liquid / credit cards), transfer direction (when account selected), exact payee, special (splits / uncategorized / has notes), min/max amount. On mobile, **More** opens a bottom sheet (`ResponsiveModal`); on desktop, inline expand.
+
+* **Summary strip** — filtered income, expenses, net, and showing count when any filter is active.
+
+* **Persistence** — `localStorage` (`finance_os_ledger_filters`). URL params for deep links: `account`, `category`, `type`, `from`, `to`, `period`, `month`, `payee`, `group`, `special`, `q`. Insights category drill-down links to ledger with category + period pre-applied.
+
+* **Mobile** — edge-to-edge horizontal scroll for date pills and summary cards; short pill labels (“All”, “Mo”); 44px touch targets; full-width stacked selects; compact header balance chip.
+
+
+
+### Split transactions
 
 
 
@@ -321,4 +349,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 19. **Move Money (negative envelopes)** — Category-to-category transfers no longer require positive source Available; envelopes may go negative when reallocating. RTA-from transfers uncapped — assign any amount for planning.
 20. **Assignable RTA display** — When categories are overspent, Dashboard/Budget/Insights show **Assignable** (liquid minus positive envelopes) as the headline figure, with overspent total and pre-coverage RTA as context (display only).
 21. **RTA banner cards** — Overspent vs expected-income subtitles use separate labeled cards on Dashboard/Budget RTA banners (`rta-banner-extras.tsx`); Google Sheets Summary sync matches assignable/overspent metrics.
+22. **Ledger advanced filters** — Date presets + custom range, split-aware category filter, summary strip, URL deep links from Insights, `localStorage` persistence; mobile-optimized scroll strips, bottom sheet for More filters, 44px touch targets (`lib/ledger/filters.ts`, `ledger-filters-bar.tsx`).
 
