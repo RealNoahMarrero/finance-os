@@ -1,0 +1,322 @@
+'use client';
+
+import Link from 'next/link';
+import { format, parseISO } from 'date-fns';
+import {
+  AlertTriangle,
+  ArrowDownLeft,
+  ArrowUpRight,
+  CalendarDays,
+  CreditCard,
+  TrendingUp,
+  Wallet,
+} from 'lucide-react';
+import { ResponsiveModal } from '@/components/ui/responsive-modal';
+import {
+  billCalendarChipClass,
+  type DaySnapshot,
+} from '@/lib/calendar/day-snapshot';
+import { creditCardCalendarChipClass } from '@/lib/credit-cards';
+import { formatMoney, MONEY_EPSILON } from '@/lib/money';
+import { projectedIncomeChipClass } from '@/lib/projected-income';
+import type { Account, ProjectedIncome } from '@/lib/types';
+import { cn } from '@/lib/cn';
+
+type DayOverviewSheetProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  day: Date | null;
+  today: Date;
+  snapshot: DaySnapshot | null;
+  categoryOptions: Pick<
+    import('@/lib/types').Category,
+    'id' | 'name' | 'emoji' | 'assigned_amount'
+  >[];
+  onIncomeClick: (item: ProjectedIncome) => void;
+  onCardClick: (card: Account) => void;
+};
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-2">
+      {children}
+    </p>
+  );
+}
+
+export function DayOverviewSheet({
+  open,
+  onOpenChange,
+  day,
+  today,
+  snapshot,
+  categoryOptions,
+  onIncomeClick,
+  onCardClick,
+}: DayOverviewSheetProps) {
+  if (!day || !snapshot) return null;
+
+  const isToday =
+    format(day, 'yyyy-MM-dd') === format(today, 'yyyy-MM-dd');
+  const isPast = !snapshot.showProjection;
+  const hasEvents =
+    snapshot.income.length > 0 ||
+    snapshot.bills.length > 0 ||
+    snapshot.creditCards.length > 0;
+
+  const netPositive = snapshot.netForDay >= 0;
+  const position = snapshot.position;
+
+  return (
+    <ResponsiveModal
+      open={open}
+      onOpenChange={onOpenChange}
+      title={format(day, 'EEEE, MMMM d')}
+    >
+      <div className="space-y-5 pb-2" data-vaul-no-drag>
+        <div className="flex flex-wrap items-center gap-2">
+          {isToday && (
+            <span className="rounded-lg bg-blue-500/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-300">
+              Today
+            </span>
+          )}
+          {isPast && !isToday && (
+            <span className="rounded-lg bg-[var(--surface-subtle)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+              Past
+            </span>
+          )}
+          {!isToday && !isPast && (
+            <span className="rounded-lg bg-violet-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-violet-600 dark:text-violet-300">
+              Upcoming
+            </span>
+          )}
+        </div>
+
+        <div className="app-card rounded-2xl border border-[var(--border)] p-4">
+          <p className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">
+            Net for this day
+          </p>
+          <p
+            className={cn(
+              'text-3xl font-black tabular-nums',
+              netPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
+            )}
+          >
+            {netPositive ? '+' : '−'}$
+            {formatMoney(Math.abs(snapshot.netForDay))}
+          </p>
+          <p className="text-xs text-[var(--text-muted)] mt-1">
+            ${formatMoney(snapshot.inflowTotal)} in · $
+            {formatMoney(snapshot.outflowTotal)} due
+          </p>
+        </div>
+
+        {!hasEvents && (
+          <div className="flex items-center gap-3 rounded-2xl border border-dashed border-[var(--border)] px-4 py-6 text-[var(--text-muted)]">
+            <CalendarDays size={20} className="shrink-0 opacity-60" />
+            <p className="text-sm font-medium">Nothing scheduled this day</p>
+          </div>
+        )}
+
+        {snapshot.income.length > 0 && (
+          <section>
+            <SectionLabel>Money in</SectionLabel>
+            <div className="space-y-2">
+              {snapshot.income.map((inc) => (
+                <button
+                  key={inc.id}
+                  type="button"
+                  onClick={() => onIncomeClick(inc)}
+                  className={cn(
+                    'w-full min-h-11 rounded-xl border px-3 py-2.5 text-left touch-manipulation transition-all hover:brightness-95 active:scale-[0.99]',
+                    projectedIncomeChipClass(inc.certainty)
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <ArrowDownLeft size={14} className="shrink-0 opacity-70" />
+                      <span className="font-bold text-sm truncate">{inc.label}</span>
+                    </div>
+                    <span className="font-black text-sm tabular-nums shrink-0">
+                      +${formatMoney(inc.amount)}
+                    </span>
+                  </div>
+                  {inc.accounts?.name && (
+                    <p className="text-[10px] font-medium opacity-75 mt-0.5 ml-6">
+                      → {inc.accounts.name}
+                    </p>
+                  )}
+                </button>
+              ))}
+            </div>
+            {snapshot.anticipatedInflow > 0 && (
+              <p className="text-[10px] font-bold text-[var(--text-muted)] mt-2">
+                ${formatMoney(snapshot.guaranteedInflow)} guaranteed · $
+                {formatMoney(snapshot.anticipatedInflow)} anticipated
+              </p>
+            )}
+          </section>
+        )}
+
+        {(snapshot.bills.length > 0 || snapshot.creditCards.length > 0) && (
+          <section>
+            <SectionLabel>Money out</SectionLabel>
+            <div className="space-y-2">
+              {snapshot.bills.map((bill) => (
+                <Link
+                  key={bill.id}
+                  href={`/budget?category=${bill.id}`}
+                  className={cn(
+                    'flex min-h-11 items-center justify-between gap-2 rounded-xl border px-3 py-2.5 touch-manipulation transition-all hover:brightness-95 active:scale-[0.99]',
+                    billCalendarChipClass(bill, today)
+                  )}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <ArrowUpRight size={14} className="shrink-0 opacity-70" />
+                    <span>{bill.emoji}</span>
+                    <span className="font-bold text-sm truncate">{bill.name}</span>
+                  </div>
+                  <span className="font-black text-sm tabular-nums shrink-0">
+                    ${formatMoney(bill.target_amount)}
+                  </span>
+                </Link>
+              ))}
+              {snapshot.creditCards.map((card) => (
+                <button
+                  key={card.id}
+                  type="button"
+                  onClick={() => onCardClick(card)}
+                  className={cn(
+                    'w-full flex min-h-11 items-center justify-between gap-2 rounded-xl border px-3 py-2.5 touch-manipulation transition-all hover:brightness-95 active:scale-[0.99]',
+                    creditCardCalendarChipClass(card, today, categoryOptions)
+                  )}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <CreditCard size={14} className="shrink-0" />
+                    <span className="font-bold text-sm truncate">{card.name}</span>
+                  </div>
+                  <span className="font-black text-sm tabular-nums shrink-0">
+                    ${formatMoney(Number(card.minimum_payment) || 0)}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-xl bg-[var(--surface-subtle)] px-2 py-2">
+                <p className="text-[9px] font-bold uppercase text-[var(--text-muted)]">
+                  Due
+                </p>
+                <p className="text-sm font-black tabular-nums text-[var(--text-primary)]">
+                  ${formatMoney(snapshot.outflowTotal)}
+                </p>
+              </div>
+              <div className="rounded-xl bg-[var(--surface-subtle)] px-2 py-2">
+                <p className="text-[9px] font-bold uppercase text-[var(--text-muted)]">
+                  Funded
+                </p>
+                <p className="text-sm font-black tabular-nums text-[var(--text-primary)]">
+                  ${formatMoney(snapshot.billFunded)}
+                  {snapshot.creditCards.length > 0 && (
+                    <span className="text-[10px] font-bold text-[var(--text-muted)]">
+                      {' '}
+                      · {snapshot.ccFundedCount}/{snapshot.creditCards.length}{' '}
+                      cards
+                    </span>
+                  )}
+                </p>
+              </div>
+              <div className="rounded-xl bg-[var(--surface-subtle)] px-2 py-2">
+                <p className="text-[9px] font-bold uppercase text-[var(--text-muted)]">
+                  Shortfall
+                </p>
+                <p
+                  className={cn(
+                    'text-sm font-black tabular-nums',
+                    snapshot.outflowTotal - snapshot.billFunded > MONEY_EPSILON
+                      ? 'text-red-600 dark:text-red-400'
+                      : 'text-[var(--text-primary)]'
+                  )}
+                >
+                  $
+                  {formatMoney(
+                    Math.max(0, snapshot.outflowTotal - snapshot.billFunded)
+                  )}
+                </p>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {position && (
+          <section>
+            <SectionLabel>Position through this day</SectionLabel>
+            <p className="text-xs text-[var(--text-muted)] mb-3 leading-relaxed">
+              If expected income through{' '}
+              {format(parseISO(snapshot.dayIso), 'MMM d')} arrives in liquid
+              accounts. Envelope balances stay as they are today until you assign
+              or transact.
+            </p>
+
+            <div className="app-card rounded-2xl border border-[var(--border)] p-4 space-y-3">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-300 flex items-center justify-center shrink-0">
+                  <Wallet size={18} />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                    Projected liquid
+                  </p>
+                  <p className="text-xl font-black tabular-nums text-[var(--text-primary)]">
+                    ${formatMoney(position.projectedLiquid)}
+                  </p>
+                  <p className="text-[10px] text-[var(--text-muted)]">
+                    ${formatMoney(position.liquidCash)} now + $
+                    {formatMoney(position.totalInflowThroughDay)} expected
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3 pt-2 border-t border-[var(--border)]">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                  <TrendingUp size={18} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                    {position.totalOverspent > MONEY_EPSILON
+                      ? 'Projected assignable'
+                      : 'Projected ready to assign'}
+                  </p>
+                  <p className="text-xl font-black tabular-nums text-[var(--text-primary)]">
+                    ${formatMoney(position.displayProjectedRta)}
+                  </p>
+                  {position.anticipatedInflow > 0 && (
+                    <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                      Guaranteed only: $
+                      {formatMoney(position.displayConservativeRta)}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {position.totalOverspent > MONEY_EPSILON && (
+                <div className="rounded-xl border border-red-300/35 dark:border-red-500/30 bg-red-500/5 dark:bg-red-500/10 px-3 py-2.5 flex items-start gap-2">
+                  <AlertTriangle
+                    size={14}
+                    className="shrink-0 text-red-600 dark:text-red-400 mt-0.5"
+                  />
+                  <p className="text-xs text-[var(--text-primary)]">
+                    <span className="font-black text-red-600 dark:text-red-400">
+                      ${formatMoney(position.totalOverspent)}
+                    </span>{' '}
+                    overspent · ${formatMoney(position.readyToAssign)} RTA
+                    before coverage today
+                  </p>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+      </div>
+    </ResponsiveModal>
+  );
+}

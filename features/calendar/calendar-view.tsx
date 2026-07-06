@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { 
@@ -8,15 +8,18 @@ import {
 } from 'lucide-react';
 import { 
   format, addMonths, subMonths, startOfMonth, endOfMonth, 
-  startOfWeek, endOfWeek, addDays, isSameMonth, isSameDay, isBefore, startOfDay, parseISO
+  startOfWeek, endOfWeek, addDays, isSameMonth, isSameDay, startOfDay, parseISO
 } from 'date-fns';
 import { formatMoney, snapMoney } from '@/lib/money';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PageSkeleton } from '@/components/ui/skeleton';
 import { ResponsiveModal } from '@/components/ui/responsive-modal';
 import {
+  fetchPendingProjectedIncome,
   fetchProjectedIncomeForMonth,
 } from '@/lib/queries/projected-income';
+import { computeDaySnapshot, billCalendarChipClass } from '@/lib/calendar/day-snapshot';
+import { DayOverviewSheet } from '@/features/calendar/day-overview-sheet';
 import {
   ProjectedIncomeFormModal,
   ProjectedIncomeReceiveModal,
@@ -51,8 +54,10 @@ const CALENDAR_FILTER_STORAGE_KEY = 'finance_os_calendar_filter';
 export function CalendarView() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [monthDirection, setMonthDirection] = useState(1);
-  const [categories, setCategories] = useState<any[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [allCategories, setAllCategories] = useState<Category[]>([]);
   const [projectedIncome, setProjectedIncome] = useState<ProjectedIncome[]>([]);
+  const [pendingProjected, setPendingProjected] = useState<ProjectedIncome[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categoryOptions, setCategoryOptions] = useState<
     Pick<Category, 'id' | 'name' | 'emoji' | 'assigned_amount'>[]
@@ -66,10 +71,12 @@ export function CalendarView() {
   const [receiveProjected, setReceiveProjected] = useState<ProjectedIncome | null>(null);
   const [isProjectedFormOpen, setIsProjectedFormOpen] = useState(false);
   const [eventFilter, setEventFilter] = useState<CalendarEventFilter>('all');
+  const [selectedDay, setSelectedDay] = useState<Date | null>(null);
 
   useEffect(() => {
     fetchData();
     fetchAccountsAndCategories();
+    fetchAllPending();
   }, []);
 
   useEffect(() => {
@@ -107,6 +114,16 @@ export function CalendarView() {
       .eq('is_hidden', false)
       .order('name');
     if (cats) setCategoryOptions(cats);
+    const { data: allCats } = await supabase
+      .from('categories')
+      .select('*')
+      .eq('is_hidden', false);
+    if (allCats) setAllCategories(allCats as Category[]);
+  }
+
+  async function fetchAllPending() {
+    const { data } = await fetchPendingProjectedIncome();
+    if (data) setPendingProjected(data);
   }
 
   async function refreshAccounts() {
@@ -135,6 +152,7 @@ export function CalendarView() {
 
   async function refreshProjected() {
     await fetchProjectedForMonth();
+    await fetchAllPending();
   }
 
   const nextMonth = () => {
@@ -170,6 +188,29 @@ export function CalendarView() {
   }
 
   const today = startOfDay(new Date());
+
+  const daySnapshot = useMemo(() => {
+    if (!selectedDay) return null;
+    return computeDaySnapshot(
+      selectedDay,
+      today,
+      categories,
+      projectedIncome,
+      pendingProjected,
+      accounts,
+      allCategories,
+      categoryOptions
+    );
+  }, [
+    selectedDay,
+    today,
+    categories,
+    projectedIncome,
+    pendingProjected,
+    accounts,
+    allCategories,
+    categoryOptions,
+  ]);
 
   // Math for the header stats
   const currentMonthBills = categories.filter(c => c.due_date && isSameMonth(parseISO(c.due_date), currentMonth));
@@ -353,8 +394,25 @@ export function CalendarView() {
               format(day, 'yyyy-MM-dd')
             );
 
+            const hasDayEvents =
+              (showIncome && dayIncome.length > 0) ||
+              (showCreditCards && dayCcPayments.length > 0) ||
+              (showBills && dayBills.length > 0);
+
             return (
-              <div key={i} className={`min-h-[100px] md:min-h-[140px] app-card p-1 md:p-2 transition-colors ${!isCurrentMonth ? 'opacity-40 bg-[var(--surface-subtle)]' : 'hover:bg-[var(--surface-hover)]'}`}>
+              <div
+                key={i}
+                role="button"
+                tabIndex={0}
+                onClick={() => setSelectedDay(day)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelectedDay(day);
+                  }
+                }}
+                className={`min-h-[100px] md:min-h-[140px] app-card p-1 md:p-2 transition-colors cursor-pointer touch-manipulation ${!isCurrentMonth ? 'opacity-40 bg-[var(--surface-subtle)]' : 'hover:bg-[var(--surface-hover)]'} ${hasDayEvents && isCurrentMonth ? 'ring-inset' : ''}`}
+              >
                 
                 <div className={`text-right text-xs md:text-sm font-bold w-6 h-6 flex items-center justify-center rounded-full ml-auto ${isToday ? 'bg-blue-500 text-white shadow-md' : 'text-[var(--text-muted)]'}`}>
                     {format(day, 'd')}
@@ -365,7 +423,10 @@ export function CalendarView() {
                     <button
                       key={`inc-${inc.id}`}
                       type="button"
-                      onClick={() => setDetailItem(inc)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDetailItem(inc);
+                      }}
                       className={`px-1.5 py-1 md:p-1.5 rounded border text-[9px] md:text-xs font-bold flex flex-col xl:flex-row xl:items-center justify-between gap-0.5 xl:gap-2 truncate touch-manipulation hover:brightness-95 active:scale-[0.98] transition-all ${projectedIncomeChipClass(inc.certainty)}`}
                     >
                       <span className="truncate max-w-[4rem] sm:max-w-none">{inc.label}</span>
@@ -376,7 +437,10 @@ export function CalendarView() {
                     <button
                       key={`cc-${card.id}`}
                       type="button"
-                      onClick={() => setDetailCard(card)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDetailCard(card);
+                      }}
                       className={`px-1.5 py-1 md:p-1.5 rounded border text-[9px] md:text-xs font-bold flex flex-col xl:flex-row xl:items-center justify-between gap-0.5 xl:gap-2 truncate touch-manipulation hover:brightness-95 active:scale-[0.98] transition-all ${creditCardCalendarChipClass(card, today, categoryOptions)}`}
                     >
                       <div className="flex items-center gap-1 truncate">
@@ -389,18 +453,12 @@ export function CalendarView() {
                     </button>
                   ))}
                   {showBills && dayBills.map(bill => {
-                      const isPastDue = isBefore(parseISO(bill.due_date), today);
-                      const isFullyFunded = Number(bill.assigned_amount) >= Number(bill.target_amount);
-
-                      let statusClass = "bg-[var(--surface-subtle)] border-[var(--border)] text-[var(--text-muted)]"; // Default
-                      if (bill.is_asap || (isPastDue && !isFullyFunded)) statusClass = "bg-red-500/10 border-red-500/30 text-red-700 shadow-sm"; // Emergency
-                      else if (isFullyFunded && bill.target_amount > 0) statusClass = "bg-gradient-to-br from-yellow-400 to-amber-500 text-white border-amber-500 shadow-sm"; // Gold Gamification Sync
-
                       return (
                           <Link
                             key={bill.id}
                             href={`/budget?category=${bill.id}`}
-                            className={`px-1.5 py-1 md:p-1.5 rounded border text-[9px] md:text-xs font-bold flex flex-col xl:flex-row xl:items-center justify-between gap-0.5 xl:gap-2 truncate touch-manipulation hover:brightness-95 active:scale-[0.98] transition-all ${statusClass}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className={`px-1.5 py-1 md:p-1.5 rounded border text-[9px] md:text-xs font-bold flex flex-col xl:flex-row xl:items-center justify-between gap-0.5 xl:gap-2 truncate touch-manipulation hover:brightness-95 active:scale-[0.98] transition-all ${billCalendarChipClass(bill, today)}`}
                           >
                               <div className="flex items-center gap-1 truncate">
                                   <span>{bill.emoji}</span>
@@ -418,6 +476,23 @@ export function CalendarView() {
         </div>
       </motion.div>
       </AnimatePresence>
+
+      <DayOverviewSheet
+        open={!!selectedDay}
+        onOpenChange={(open) => !open && setSelectedDay(null)}
+        day={selectedDay}
+        today={today}
+        snapshot={daySnapshot}
+        categoryOptions={categoryOptions}
+        onIncomeClick={(inc) => {
+          setSelectedDay(null);
+          setDetailItem(inc);
+        }}
+        onCardClick={(card) => {
+          setSelectedDay(null);
+          setDetailCard(card);
+        }}
+      />
 
       <ResponsiveModal
         open={!!detailCard}

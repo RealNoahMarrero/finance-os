@@ -119,9 +119,9 @@ export function projectedIncomeChipClass(
   certainty?: ProjectedIncomeCertainty | null
 ): string {
   if (certainty === 'anticipated') {
-    return 'bg-amber-500/15 border-amber-500/40 text-amber-900 border-dashed';
+    return 'bg-amber-500/15 border-amber-500/40 text-amber-900 dark:text-amber-200 border-dashed';
   }
-  return 'bg-emerald-500/15 border-emerald-500/40 text-emerald-800';
+  return 'bg-emerald-500/15 border-emerald-500/40 text-emerald-800 dark:text-emerald-200';
 }
 
 export function sortPendingByDate(pending: ProjectedIncome[]) {
