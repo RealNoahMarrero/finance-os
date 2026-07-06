@@ -198,7 +198,7 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 
 * Bill chips deep-link to `/budget?category={id}`.
 
-* **Day overview** — tap any day cell to open a `ResponsiveModal` sheet (bottom sheet on mobile, dialog on desktop). Shows **net for the day** (income minus bills/CC minimums), **Money in** / **Money out** lists with due · funded · shortfall, and **Position through this day** for today and future dates: projected liquid + projected RTA/Assignable using pending income with `expected_date <=` selected day (guaranteed vs all pending). Past days show events only. Individual chips still work (`stopPropagation`) for budget, mark paid, receive/edit. Logic in `lib/calendar/day-snapshot.ts`; UI in `features/calendar/day-overview-sheet.tsx`. Loads all pending projected income for accurate cross-month projection. Theme tokens + `dark:` accents; 44px touch targets on sheet rows; `data-vaul-no-drag` for scroll-safe mobile sheet.
+* **Day overview** — tap any day cell to open a `ResponsiveModal` sheet (bottom sheet on mobile, dialog on desktop). Shows **net for the day** (income minus bills/CC minimums), **Money in** / **Money out** lists with due · funded · shortfall, and **If this day's income arrives** for today and future dates: projected liquid + projected RTA/Assignable using **only** pending income on that calendar day (not later deposits). Optional **Planning · by end of [date]** sub-card when earlier pending income exists through that day (cumulative runway, clearly labeled as not money today). Past days show events only. Individual chips still work (`stopPropagation`) for budget, mark paid, receive/edit. Logic in `lib/calendar/day-snapshot.ts`; UI in `features/calendar/day-overview-sheet.tsx`.
 
 
 
@@ -358,5 +358,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 20. **Assignable RTA display** — When categories are overspent, Dashboard/Budget/Insights show **Assignable** (liquid minus positive envelopes) as the headline figure, with overspent total and pre-coverage RTA as context (display only).
 21. **RTA banner cards** — Overspent vs expected-income subtitles use separate labeled cards on Dashboard/Budget RTA banners (`rta-banner-extras.tsx`); Google Sheets Summary sync matches assignable/overspent metrics.
 22. **Ledger advanced filters** — Date presets + custom range, split-aware category filter, summary strip, URL deep links from Insights, `localStorage` persistence; mobile-optimized scroll strips, bottom sheet for More filters, 44px touch targets (`lib/ledger/filters.ts`, `ledger-filters-bar.tsx`).
-23. **Calendar day overview** — Tap a day for net cashflow, money in/out lists, and projected liquid/RTA through that date; chip taps unchanged; `lib/calendar/day-snapshot.ts`, `features/calendar/day-overview-sheet.tsx`; dark-mode and mobile sheet polish.
+23. **Calendar day overview** — Tap a day for net cashflow, money in/out lists, and projected liquid/RTA for **that day's income only**; optional cumulative planning card when earlier pending income applies; `lib/calendar/day-snapshot.ts`, `features/calendar/day-overview-sheet.tsx`.
 

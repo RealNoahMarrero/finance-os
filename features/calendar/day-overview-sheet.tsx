@@ -66,6 +66,8 @@ export function DayOverviewSheet({
 
   const netPositive = snapshot.netForDay >= 0;
   const position = snapshot.position;
+  const cumulativePosition = snapshot.cumulativePosition;
+  const dayLabel = format(parseISO(snapshot.dayIso), 'MMM d');
 
   return (
     <ResponsiveModal
@@ -249,12 +251,11 @@ export function DayOverviewSheet({
 
         {position && (
           <section>
-            <SectionLabel>Position through this day</SectionLabel>
+            <SectionLabel>If this day&apos;s income arrives</SectionLabel>
             <p className="text-xs text-[var(--text-muted)] mb-3 leading-relaxed">
-              If expected income through{' '}
-              {format(parseISO(snapshot.dayIso), 'MMM d')} arrives in liquid
-              accounts. Envelope balances stay as they are today until you assign
-              or transact.
+              Only expected income scheduled for {dayLabel} — not deposits on
+              later days. Envelope balances stay as they are until you assign or
+              transact.
             </p>
 
             <div className="app-card rounded-2xl border border-[var(--border)] p-4 space-y-3">
@@ -270,8 +271,15 @@ export function DayOverviewSheet({
                     ${formatMoney(position.projectedLiquid)}
                   </p>
                   <p className="text-[10px] text-[var(--text-muted)]">
-                    ${formatMoney(position.liquidCash)} now + $
-                    {formatMoney(position.totalInflowThroughDay)} expected
+                    ${formatMoney(position.liquidCash)} now
+                    {position.totalInflowOnDay > MONEY_EPSILON ? (
+                      <>
+                        {' '}
+                        + ${formatMoney(position.totalInflowOnDay)} on {dayLabel}
+                      </>
+                    ) : (
+                      <> · no income on this day</>
+                    )}
                   </p>
                 </div>
               </div>
@@ -291,7 +299,7 @@ export function DayOverviewSheet({
                   </p>
                   {position.anticipatedInflow > 0 && (
                     <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
-                      Guaranteed only: $
+                      Guaranteed on this day: $
                       {formatMoney(position.displayConservativeRta)}
                     </p>
                   )}
@@ -314,6 +322,40 @@ export function DayOverviewSheet({
                 </div>
               )}
             </div>
+
+            {cumulativePosition && (
+              <div className="mt-3 rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface-subtle)] p-4 space-y-2">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                  Planning · by end of {dayLabel}
+                </p>
+                <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+                  If every expected deposit from now through {dayLabel} lands
+                  (${formatMoney(cumulativePosition.totalInflowOnDay)} total
+                  income), not money you have today.
+                </p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                  <p className="text-[var(--text-primary)]">
+                    <span className="font-bold text-[var(--text-muted)]">
+                      Liquid{' '}
+                    </span>
+                    <span className="font-black tabular-nums">
+                      ${formatMoney(cumulativePosition.projectedLiquid)}
+                    </span>
+                  </p>
+                  <p className="text-[var(--text-primary)]">
+                    <span className="font-bold text-[var(--text-muted)]">
+                      {cumulativePosition.totalOverspent > MONEY_EPSILON
+                        ? 'Assignable '
+                        : 'RTA '}
+                    </span>
+                    <span className="font-black tabular-nums">
+                      $
+                      {formatMoney(cumulativePosition.displayProjectedRta)}
+                    </span>
+                  </p>
+                </div>
+              </div>
+            )}
           </section>
         )}
       </div>

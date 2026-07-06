@@ -1,5 +1,5 @@
 import { format, isBefore, parseISO, startOfDay } from 'date-fns';
-import { snapMoney } from '@/lib/money';
+import { snapMoney, MONEY_EPSILON } from '@/lib/money';
 import {
   creditCardsDueOnDay,
   getCreditCardPaymentFundingStatus,
@@ -37,7 +37,17 @@ export function incomeDueOnDay(projected: ProjectedIncome[], dayIso: string) {
   return projected.filter((p) => p.expected_date === dayIso);
 }
 
-/** Pending projected income expected on or before the selected day. */
+/** Pending projected income expected on this calendar day only. */
+export function pendingIncomeOnDay(
+  pending: ProjectedIncome[],
+  dayIso: string
+) {
+  return pending.filter(
+    (p) => p.status === 'pending' && p.expected_date === dayIso
+  );
+}
+
+/** Pending projected income expected on or before the selected day (planning runway). */
 export function pendingIncomeThroughDay(
   pending: ProjectedIncome[],
   dayIso: string
@@ -80,7 +90,7 @@ export interface DayPosition {
   displayConservativeRta: number;
   guaranteedInflow: number;
   anticipatedInflow: number;
-  totalInflowThroughDay: number;
+  totalInflowOnDay: number;
 }
 
 export interface DaySnapshot {
@@ -99,12 +109,14 @@ export interface DaySnapshot {
   netForDay: number;
   showProjection: boolean;
   position: DayPosition | null;
+  /** Cumulative runway when earlier pending income exists before/on this day. */
+  cumulativePosition: DayPosition | null;
 }
 
 export function computeDayPosition(
   accounts: Account[],
   categories: Category[],
-  pendingThroughDay: ProjectedIncome[]
+  pendingIncome: ProjectedIncome[]
 ): DayPosition {
   const liquidCash = computeLiquidCash(accounts);
   const assigned = computeTotalAllocated(categories);
@@ -114,7 +126,7 @@ export function computeDayPosition(
     categories
   );
   const totalOverspent = computeTotalOverspent(categories);
-  const inflow = computePendingInflowBreakdown(pendingThroughDay, accounts);
+  const inflow = computePendingInflowBreakdown(pendingIncome, accounts);
   const { projectedLiquid, projectedReadyToAssign } = computeProjectedPlanning(
     liquidCash,
     assigned,
@@ -152,7 +164,7 @@ export function computeDayPosition(
     ),
     guaranteedInflow: inflow.guaranteed,
     anticipatedInflow: inflow.anticipated,
-    totalInflowThroughDay: inflow.total,
+    totalInflowOnDay: inflow.total,
   };
 }
 
@@ -199,13 +211,22 @@ export function computeDaySnapshot(
   ).length;
 
   const showProjection = !isBefore(startOfDay(day), startOfDay(today));
+  const incomeOnDay = pendingIncomeOnDay(allPendingIncome, dayIso);
   const position = showProjection
-    ? computeDayPosition(
-        accounts,
-        allCategories,
-        pendingIncomeThroughDay(allPendingIncome, dayIso)
-      )
+    ? computeDayPosition(accounts, allCategories, incomeOnDay)
     : null;
+
+  const cumulativePending = pendingIncomeThroughDay(allPendingIncome, dayIso);
+  const dayInflowTotal = computePendingInflowBreakdown(incomeOnDay, accounts).total;
+  const cumulativeInflowTotal = computePendingInflowBreakdown(
+    cumulativePending,
+    accounts
+  ).total;
+  const cumulativePosition =
+    showProjection &&
+    cumulativeInflowTotal > dayInflowTotal + MONEY_EPSILON
+      ? computeDayPosition(accounts, allCategories, cumulativePending)
+      : null;
 
   return {
     dayIso,
@@ -223,5 +244,6 @@ export function computeDaySnapshot(
     netForDay: snapMoney(inflowTotal - outflowTotal),
     showProjection,
     position,
+    cumulativePosition,
   };
 }
