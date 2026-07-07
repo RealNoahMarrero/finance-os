@@ -12,6 +12,7 @@ import {
   PROJECTED_INCOME_SOURCE_LABELS,
   clampProjectedExpectedDateToToday,
   defaultCertaintyForSourceType,
+  sortPendingByDate,
   todayDateString,
 } from '@/lib/projected-income';
 import {
@@ -440,8 +441,11 @@ export function ProjectedIncomeListModal({
   onCancel: (id: number) => void;
 }) {
   const [tab, setTab] = useState<'pending' | 'history'>('pending');
-  const pending = items.filter((i) => i.status === 'pending');
-  const history = items.filter((i) => i.status !== 'pending');
+  const pending = sortPendingByDate(items.filter((i) => i.status === 'pending'));
+  const history = [...items.filter((i) => i.status !== 'pending')].sort(
+    (a, b) =>
+      new Date(b.expected_date).getTime() - new Date(a.expected_date).getTime()
+  );
   const list = tab === 'pending' ? pending : history;
 
   return (

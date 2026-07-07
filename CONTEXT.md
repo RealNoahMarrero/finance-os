@@ -206,7 +206,7 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 
 
 
-* **Dashboard** — **Finance OS** logo in desktop top bar only (no duplicate page title). Net worth + **Assignable** / Ready to Assign hero tile with separate **Overspent envelopes** and **Expected income** cards when applicable; spaced **Expected income** list card below. Export top-right above hero.
+* **Dashboard** — **Finance OS** logo in desktop top bar only (no duplicate page title). Net worth + **Assignable** / Ready to Assign hero tile with separate **Overspent envelopes** and **Expected income** cards when applicable; spaced **Expected income** list card below (soonest date first). **View all expected income** modal matches that order for pending rows; history tab is newest-first. Export top-right above hero.
 
 * **Budget** — RTA banner matches Dashboard (**Assignable** when overspent; labeled overspent vs expected-income cards). **Assign Money** opens Move Money with **no balance caps** — any amount, any source (RTA or category), envelopes and displayed RTA may go negative for planning. Move Money: network-error guidance, submit guard, partial rollback on failure.
 
@@ -359,4 +359,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 21. **RTA banner cards** — Overspent vs expected-income subtitles use separate labeled cards on Dashboard/Budget RTA banners (`rta-banner-extras.tsx`); Google Sheets Summary sync matches assignable/overspent metrics.
 22. **Ledger advanced filters** — Date presets + custom range, split-aware category filter, summary strip, URL deep links from Insights, `localStorage` persistence; mobile-optimized scroll strips, bottom sheet for More filters, 44px touch targets (`lib/ledger/filters.ts`, `ledger-filters-bar.tsx`).
 23. **Calendar day overview** — Tap a day for net cashflow, money in/out lists, and projected liquid/RTA for **that day's income only**; optional cumulative planning card when earlier pending income applies; `lib/calendar/day-snapshot.ts`, `features/calendar/day-overview-sheet.tsx`.
+24. **Expected income list sort** — View-all modal pending tab uses `sortPendingByDate` (soonest first) to match the Dashboard preview; history tab sorts newest-first (`features/projected-income/projected-income-modals.tsx`).
 
