@@ -3,6 +3,8 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
+import { prefetchRouteData } from '@/hooks/use-finance-queries';
 import { useTheme } from 'next-themes';
 import {
   PieChart,
@@ -26,6 +28,7 @@ const navItems = [
 
 export function TopBar() {
   const pathname = usePathname();
+  const queryClient = useQueryClient();
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = React.useState(false);
   React.useEffect(() => setMounted(true), []);
@@ -47,6 +50,8 @@ export function TopBar() {
               <Link
                 key={item.path}
                 href={item.path}
+                onMouseEnter={() => prefetchRouteData(queryClient, item.path)}
+                onFocus={() => prefetchRouteData(queryClient, item.path)}
                 className={cn(
                   'flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-colors',
                   isActive

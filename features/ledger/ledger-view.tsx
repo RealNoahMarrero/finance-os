@@ -18,7 +18,6 @@ import {
 } from '@/lib/smart-bill-pay';
 import { applyTransactionBalances, reverseTransactionBalances } from '@/lib/transaction-balance';
 import { attachSplitsToTransactions } from '@/lib/queries/transactions';
-import { fetchCategoryGroups } from '@/lib/queries/categories';
 import {
   deleteSplitsForTransaction,
   replaceTransactionSplits,
@@ -41,19 +40,33 @@ import {
   hasActiveLedgerFilters,
 } from '@/lib/ledger/filters';
 import { useLedgerFilters } from '@/hooks/use-ledger-filters';
+import {
+  useAccounts,
+  useCategories,
+  useCategoryGroups,
+  useInvalidateFinance,
+  useTransactions,
+} from '@/hooks/use-finance-queries';
 import { PageSkeleton } from '@/components/ui/skeleton';
 import type { Transaction } from '@/lib/types';
 
 export function LedgerView() {
   const searchParams = useSearchParams();
   const { filters, patch, reset, initialized } = useLedgerFilters();
-  
-  const [transactions, setTransactions] = useState<any[]>([]);
-  const [accounts, setAccounts] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
-  const [categoryGroups, setCategoryGroups] = useState<any[]>([]);
-  const [payeeSuggestions, setPayeeSuggestions] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
+  const invalidate = useInvalidateFinance();
+  const { data: transactions = [], isLoading: transactionsLoading } = useTransactions();
+  const { data: accounts = [], isLoading: accountsLoading } = useAccounts();
+  const { data: categories = [], isLoading: categoriesLoading } = useCategories();
+  const { data: categoryGroups = [], isLoading: groupsLoading } = useCategoryGroups();
+
+  const payeeSuggestions = useMemo(
+    () =>
+      Array.from(new Set(transactions.map((t) => t.payee).filter(Boolean))) as string[],
+    [transactions]
+  );
+
+  const loading =
+    transactionsLoading || accountsLoading || categoriesLoading || groupsLoading;
 
   // Modal & Edit State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -87,47 +100,23 @@ export function LedgerView() {
   ]);
 
   useEffect(() => {
-    // Capture URL params safely via Next.js hook on mount
     const urlAccountId = searchParams.get('account');
     const isNew = searchParams.get('new') === 'true';
-    
-    fetchData(urlAccountId);
-    
     if (isNew) setIsModalOpen(true);
-  }, []);
+    if (accounts.length === 0) return;
 
-  async function fetchData(urlAccountId: string | null = null) {
-    setLoading(true);
-    const [{ data: accs }, { data: cats }, { data: grps }] = await Promise.all([
-      supabase.from('accounts').select('*').order('name'),
-      supabase.from('categories').select('id, name, group_id, emoji, assigned_amount').order('name'),
-      fetchCategoryGroups(),
-    ]);
-    
-    if (accs) setAccounts(accs);
-    if (cats) setCategories(cats);
-    if (grps) setCategoryGroups(grps);
-
-    const accountId = urlAccountId || (filters.filterAccount !== 'All' ? filters.filterAccount : null);
+    const accountId =
+      urlAccountId ||
+      (filters.filterAccount !== 'All' ? filters.filterAccount : null);
     if (accountId) {
-        setTxnForm(prev => ({ ...prev, account_id: accountId }));
-    } else if (accs && accs.length > 0 && !txnForm.account_id) {
-        setTxnForm(prev => ({ ...prev, account_id: accs[0].id.toString() }));
+      setTxnForm((prev) => ({ ...prev, account_id: accountId }));
+    } else if (!txnForm.account_id) {
+      setTxnForm((prev) => ({ ...prev, account_id: accounts[0].id.toString() }));
     }
+  }, [searchParams, accounts, filters.filterAccount]);
 
-    const { data: txns } = await supabase
-      .from('transactions')
-      .select('*, categories(name, emoji), accounts!account_id(name, type)')
-      .order('date', { ascending: false })
-      .order('created_at', { ascending: false });
-      
-    if (txns) {
-        const withSplits = await attachSplitsToTransactions(txns);
-        setTransactions(withSplits);
-        const unique = Array.from(new Set(txns.map(t => t.payee).filter(Boolean)));
-        setPayeeSuggestions(unique as string[]);
-    }
-    setLoading(false);
+  async function refreshLedger() {
+    await invalidate.invalidateAfterTransaction();
   }
 
   async function txnWithSplits(txn: Transaction): Promise<Transaction> {
@@ -207,7 +196,7 @@ export function LedgerView() {
       }
 
       closeModal();
-      await fetchData(); 
+      await refreshLedger(); 
       setIsSubmitting(false);
   }
 
@@ -215,8 +204,7 @@ export function LedgerView() {
       if (!confirm("Permanently delete and reverse all math for this transaction?")) return;
       await reverseTransactionBalances(txn);
       await supabase.from('transactions').delete().eq('id', txn.id);
-      setTransactions(transactions.filter(t => t.id !== txn.id));
-      await fetchData();
+      await refreshLedger();
   }
 
   const openNewTransactionModal = () => {
@@ -350,15 +338,22 @@ export function LedgerView() {
                 ? `${processedTxns.length} of ${transactions.length} entries`
                 : `${transactions.length} total entries`}
             </p>
-            {filters.filterAccount !== 'All' && accounts.find(a => a.id.toString() === filters.filterAccount) && (
+            {(() => {
+              const filteredAccount =
+                filters.filterAccount !== 'All'
+                  ? accounts.find((a) => a.id.toString() === filters.filterAccount)
+                  : undefined;
+              if (!filteredAccount) return null;
+              return (
               <div className="flex w-fit items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-black glass-card shadow-sm">
                 <span className="text-[10px] font-bold uppercase text-[var(--text-muted)]">Balance</span>
                 <span>
-                  {snapMoney(accounts.find(a => a.id.toString() === filters.filterAccount).balance) < 0 ? '-' : ''}
-                  ${formatMoney(Math.abs(accounts.find(a => a.id.toString() === filters.filterAccount).balance))}
+                  {snapMoney(filteredAccount.balance) < 0 ? '-' : ''}
+                  ${formatMoney(Math.abs(filteredAccount.balance))}
                 </span>
               </div>
-            )}
+              );
+            })()}
           </div>
         </div>
         <button onClick={openNewTransactionModal} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-6 py-3 font-bold text-white shadow-lg shadow-emerald-200 transition-colors touch-manipulation hover:bg-emerald-600 md:w-auto">
@@ -589,7 +584,7 @@ export function LedgerView() {
                             ...categories.map((c) => ({
                               id: c.id,
                               name: c.name,
-                              emoji: c.emoji,
+                              emoji: c.emoji ?? undefined,
                               group: 'Envelopes',
                             })),
                           ]}

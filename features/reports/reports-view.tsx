@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useMemo } from 'react';
+import dynamic from 'next/dynamic';
 import * as Tabs from '@radix-ui/react-tabs';
 import { format, addMonths, parseISO } from 'date-fns';
 import {
@@ -18,15 +19,14 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { formatMoney, snapMoney } from '@/lib/money';
-import { fetchAccounts } from '@/lib/queries/accounts';
 import {
-  fetchCategories,
-  fetchCategoryGroups,
-  fetchDebtCategories,
-} from '@/lib/queries/categories';
-import { ExportModal } from '@/features/export/export-modal';
+  useAccounts,
+  useCategories,
+  useCategoryGroups,
+  useDebtCategories,
+  useTransactions,
+} from '@/hooks/use-finance-queries';
 import { displayReadyToAssign } from '@/components/budget/rta-banner-extras';
-import { fetchTransactions } from '@/lib/queries/transactions';
 import {
   aggregateIncomeByCategory,
   aggregateMonthlyCashflow,
@@ -49,10 +49,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { PageSkeleton } from '@/components/ui/skeleton';
 import { StatHero } from '@/components/ui/stat-hero';
 import { GlassCard } from '@/components/ui/glass-card';
-import { CashflowChart } from '@/components/charts/cashflow-chart';
-import { CategoryDonut } from '@/components/charts/category-donut';
 import { SpendingBreakdown } from '@/features/reports/spending-breakdown';
-import { DebtTimelineChart } from '@/components/charts/debt-timeline-chart';
 import { cn } from '@/lib/cn';
 import {
   computeAggregateCreditUtilization,
@@ -65,6 +62,23 @@ import {
   useInsightsPreferences,
 } from '@/hooks/use-insights-preferences';
 
+const CashflowChart = dynamic(
+  () => import('@/components/charts/cashflow-chart').then((m) => ({ default: m.CashflowChart })),
+  { ssr: false, loading: () => <PageSkeleton /> }
+);
+const CategoryDonut = dynamic(
+  () => import('@/components/charts/category-donut').then((m) => ({ default: m.CategoryDonut })),
+  { ssr: false }
+);
+const DebtTimelineChart = dynamic(
+  () => import('@/components/charts/debt-timeline-chart').then((m) => ({ default: m.DebtTimelineChart })),
+  { ssr: false }
+);
+const ExportModal = dynamic(
+  () => import('@/features/export/export-modal').then((m) => m.ExportModal),
+  { ssr: false }
+);
+
 const PERIODS: { id: ReportPeriod; label: string }[] = [
   { id: '30d', label: '30D' },
   { id: '90d', label: '90D' },
@@ -76,13 +90,15 @@ const PERIODS: { id: ReportPeriod; label: string }[] = [
 export function ReportsView() {
   const { prefs, patch } = useInsightsPreferences();
   const shouldSeedExpanded = useRef(!hasStoredInsightsPreferences());
-  const [loading, setLoading] = useState(true);
-  const [accounts, setAccounts] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
-  const [groups, setGroups] = useState<any[]>([]);
-  const [transactions, setTransactions] = useState<any[]>([]);
-  const [debts, setDebts] = useState<any[]>([]);
+  const { data: accounts = [], isLoading: accountsLoading } = useAccounts();
+  const { data: categories = [], isLoading: categoriesLoading } = useCategories();
+  const { data: groups = [], isLoading: groupsLoading } = useCategoryGroups();
+  const { data: transactions = [], isLoading: transactionsLoading } = useTransactions();
+  const { data: debts = [], isLoading: debtsLoading } = useDebtCategories();
   const [isExportOpen, setIsExportOpen] = useState(false);
+
+  const loading =
+    accountsLoading || categoriesLoading || groupsLoading || transactionsLoading || debtsLoading;
 
   const {
     period,
@@ -94,25 +110,6 @@ export function ReportsView() {
     selectedGroupId,
     expandedGroupIds,
   } = prefs;
-
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const [accs, cats, grps, txns, debtCats] = await Promise.all([
-        fetchAccounts(),
-        fetchCategories(),
-        fetchCategoryGroups(),
-        fetchTransactions(),
-        fetchDebtCategories(),
-      ]);
-      if (accs.data) setAccounts(accs.data);
-      if (cats.data) setCategories(cats.data);
-      if (grps.data) setGroups(grps.data);
-      if (txns.data) setTransactions(txns.data);
-      if (debtCats.data) setDebts(debtCats.data);
-      setLoading(false);
-    })();
-  }, []);
 
   const netWorth = useMemo(() => computeNetWorth(accounts), [accounts]);
   const liquidCash = useMemo(() => computeLiquidCash(accounts), [accounts]);

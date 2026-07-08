@@ -1,7 +1,6 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { supabase } from '@/lib/supabase';
 import { 
   ChevronLeft, ChevronRight, Calendar as CalendarIcon, 
   CheckCircle2, TrendingUp, CreditCard
@@ -15,9 +14,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { PageSkeleton } from '@/components/ui/skeleton';
 import { ResponsiveModal } from '@/components/ui/responsive-modal';
 import {
-  fetchPendingProjectedIncome,
-  fetchProjectedIncomeForMonth,
-} from '@/lib/queries/projected-income';
+  useAccounts,
+  useCalendarBillCategories,
+  useCategories,
+  useInvalidateFinance,
+  usePendingProjectedIncome,
+  useProjectedIncomeForMonth,
+} from '@/hooks/use-finance-queries';
 import { computeDaySnapshot, billCalendarChipClass } from '@/lib/calendar/day-snapshot';
 import { DayOverviewSheet } from '@/features/calendar/day-overview-sheet';
 import {
@@ -34,11 +37,10 @@ import {
 import { cn } from '@/lib/cn';
 import {
   advanceCreditCardPaymentCycle,
-  backfillAccountPaymentDueDates,
 } from '@/lib/queries/credit-card-payments';
 import { CreditCardPaymentDetail } from '@/features/credit-cards/credit-card-payment-detail';
 import { projectedIncomeChipClass } from '@/lib/projected-income';
-import type { Account, Category, ProjectedIncome } from '@/lib/types';
+import type { Account, ProjectedIncome } from '@/lib/types';
 
 type CalendarEventFilter = 'all' | 'bills' | 'credit-cards' | 'income';
 
@@ -52,17 +54,34 @@ const CALENDAR_FILTERS: { id: CalendarEventFilter; label: string; shortLabel?: s
 const CALENDAR_FILTER_STORAGE_KEY = 'finance_os_calendar_filter';
 
 export function CalendarView() {
+  const invalidate = useInvalidateFinance();
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [monthDirection, setMonthDirection] = useState(1);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [allCategories, setAllCategories] = useState<Category[]>([]);
-  const [projectedIncome, setProjectedIncome] = useState<ProjectedIncome[]>([]);
-  const [pendingProjected, setPendingProjected] = useState<ProjectedIncome[]>([]);
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [categoryOptions, setCategoryOptions] = useState<
-    Pick<Category, 'id' | 'name' | 'emoji' | 'assigned_amount'>[]
-  >([]);
-  const [loading, setLoading] = useState(true);
+  const monthStartKey = format(startOfMonth(currentMonth), 'yyyy-MM-dd');
+  const monthEndKey = format(endOfMonth(currentMonth), 'yyyy-MM-dd');
+
+  const { data: categories = [], isLoading: billsLoading } = useCalendarBillCategories();
+  const { data: accounts = [], isLoading: accountsLoading } = useAccounts();
+  const { data: allCategoriesData = [], isLoading: allCatsLoading } = useCategories();
+  const { data: pendingProjected = [] } = usePendingProjectedIncome();
+  const { data: projectedIncome = [] } = useProjectedIncomeForMonth(monthStartKey, monthEndKey);
+
+  const allCategories = useMemo(
+    () => allCategoriesData.filter((c) => !c.is_hidden),
+    [allCategoriesData]
+  );
+  const categoryOptions = useMemo(
+    () =>
+      allCategories.map((c) => ({
+        id: c.id,
+        name: c.name,
+        emoji: c.emoji,
+        assigned_amount: c.assigned_amount,
+      })),
+    [allCategories]
+  );
+
+  const loading = billsLoading || accountsLoading || allCatsLoading;
 
   const [detailItem, setDetailItem] = useState<ProjectedIncome | null>(null);
   const [detailCard, setDetailCard] = useState<Account | null>(null);
@@ -74,64 +93,14 @@ export function CalendarView() {
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
 
   useEffect(() => {
-    fetchData();
-    fetchAccountsAndCategories();
-    fetchAllPending();
-  }, []);
-
-  useEffect(() => {
     const saved = localStorage.getItem(CALENDAR_FILTER_STORAGE_KEY);
     if (saved && CALENDAR_FILTERS.some((f) => f.id === saved)) {
       setEventFilter(saved as CalendarEventFilter);
     }
   }, []);
 
-  useEffect(() => {
-    fetchProjectedForMonth();
-  }, [currentMonth]);
-
-  async function fetchData() {
-    setLoading(true);
-    const { data } = await supabase
-      .from('categories')
-      .select('*')
-      .eq('is_hidden', false)
-      .not('due_date', 'is', null);
-      
-    if (data) setCategories(data);
-    setLoading(false);
-  }
-
-  async function fetchAccountsAndCategories() {
-    const { data: accs } = await supabase.from('accounts').select('*');
-    if (accs) {
-      const filled = await backfillAccountPaymentDueDates(accs as Account[]);
-      setAccounts(filled);
-    }
-    const { data: cats } = await supabase
-      .from('categories')
-      .select('id, name, emoji, assigned_amount')
-      .eq('is_hidden', false)
-      .order('name');
-    if (cats) setCategoryOptions(cats);
-    const { data: allCats } = await supabase
-      .from('categories')
-      .select('*')
-      .eq('is_hidden', false);
-    if (allCats) setAllCategories(allCats as Category[]);
-  }
-
-  async function fetchAllPending() {
-    const { data } = await fetchPendingProjectedIncome();
-    if (data) setPendingProjected(data);
-  }
-
   async function refreshAccounts() {
-    const { data: accs } = await supabase.from('accounts').select('*');
-    if (accs) {
-      const filled = await backfillAccountPaymentDueDates(accs as Account[]);
-      setAccounts(filled);
-    }
+    await invalidate.invalidateAccounts();
   }
 
   async function handleMarkCardPaid() {
@@ -143,16 +112,9 @@ export function CalendarView() {
     await refreshAccounts();
   }
 
-  async function fetchProjectedForMonth() {
-    const monthStart = format(startOfMonth(currentMonth), 'yyyy-MM-dd');
-    const monthEnd = format(endOfMonth(currentMonth), 'yyyy-MM-dd');
-    const { data } = await fetchProjectedIncomeForMonth(monthStart, monthEnd);
-    if (data) setProjectedIncome(data);
-  }
-
   async function refreshProjected() {
-    await fetchProjectedForMonth();
-    await fetchAllPending();
+    await invalidate.invalidateProjected();
+    await invalidate.invalidateAfterTransaction();
   }
 
   const nextMonth = () => {

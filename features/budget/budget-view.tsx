@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState, useRef, useMemo } from 'react';
+import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
@@ -17,16 +18,25 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { PageSkeleton } from '@/components/ui/skeleton';
 import { Select } from '@/components/ui/select';
 import { useReadyToAssign } from '@/hooks/use-ready-to-assign';
-import { fetchPendingProjectedIncome } from '@/lib/queries/projected-income';
-import { backfillAccountPaymentDueDates } from '@/lib/queries/credit-card-payments';
+import {
+  useAccounts,
+  useCategories,
+  useCategoryGroups,
+  useInvalidateFinance,
+  usePendingProjectedIncome,
+} from '@/hooks/use-finance-queries';
 import { CreditCardPaymentsPanel } from '@/features/credit-cards/credit-card-payments-panel';
-import { ExportModal } from '@/features/export/export-modal';
 import {
   displayReadyToAssign,
   RtaBannerExtras,
   rtaIsNegative,
 } from '@/components/budget/rta-banner-extras';
 import type { Account, Category, CategoryGroup, ProjectedIncome } from '@/lib/types';
+
+const ExportModal = dynamic(
+  () => import('@/features/export/export-modal').then((m) => m.ExportModal),
+  { ssr: false }
+);
 
 function transferErrorMessage(error: { message?: string; hint?: string }) {
   const msg = error.message ?? 'Unknown error';
@@ -43,13 +53,17 @@ function transferErrorMessage(error: { message?: string; hint?: string }) {
 export function BudgetView() {
   const searchParams = useSearchParams();
   const openedFromUrl = useRef(false);
+  const invalidate = useInvalidateFinance();
+  const { data: accountsFromQuery = [], isLoading: accountsLoading } = useAccounts();
+  const { data: categoriesFromQuery = [], isLoading: categoriesLoading } = useCategories();
+  const { data: groupsFromQuery = [], isLoading: groupsLoading } = useCategoryGroups();
+  const { data: pendingProjectedFromQuery = [] } = usePendingProjectedIncome();
+
   const [groups, setGroups] = useState<CategoryGroup[]>([]);
   const [reorderingGroups, setReorderingGroups] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [liquidCash, setLiquidCash] = useState(0);
   const [pendingProjected, setPendingProjected] = useState<ProjectedIncome[]>([]);
-  const [loading, setLoading] = useState(true);
   const [isExportOpen, setIsExportOpen] = useState(false);
 
   // UI States (Persistent)
@@ -84,6 +98,41 @@ export function BudgetView() {
   });
   const [transferring, setTransferring] = useState(false);
 
+  const liquidCash = useMemo(
+    () =>
+      snapMoney(
+        accounts
+          .filter((a) => ['Checking', 'Savings', 'Cash'].includes(a.type))
+          .reduce((sum, a) => sum + Number(a.balance), 0)
+      ),
+    [accounts]
+  );
+
+  const pageLoading = accountsLoading || categoriesLoading || groupsLoading;
+
+  useEffect(() => {
+    setAccounts(accountsFromQuery);
+  }, [accountsFromQuery]);
+
+  useEffect(() => {
+    setCategories(categoriesFromQuery);
+  }, [categoriesFromQuery]);
+
+  useEffect(() => {
+    setPendingProjected(pendingProjectedFromQuery);
+  }, [pendingProjectedFromQuery]);
+
+  useEffect(() => {
+    if (groupsFromQuery.length === 0) return;
+    setGroups(groupsFromQuery);
+    const savedExpanded = localStorage.getItem('finance_os_expanded');
+    if (savedExpanded) {
+      setExpandedGroups(new Set(JSON.parse(savedExpanded)));
+    } else {
+      setExpandedGroups(new Set(groupsFromQuery.map((group) => group.id)));
+    }
+  }, [groupsFromQuery]);
+
   useEffect(() => { 
       // Load persistent filters and sorts
       const savedSort = localStorage.getItem('finance_os_sort');
@@ -91,12 +140,10 @@ export function BudgetView() {
 
       const savedFilter = localStorage.getItem('finance_os_filter');
       if (savedFilter) setCategoryFilter(savedFilter);
-
-      fetchData(); 
   }, []);
 
   useEffect(() => {
-      if (loading || openedFromUrl.current) return;
+      if (pageLoading || openedFromUrl.current) return;
       const categoryId = searchParams.get('category');
       if (!categoryId || categories.length === 0) return;
       const cat = categories.find((c) => c.id.toString() === categoryId);
@@ -121,7 +168,7 @@ export function BudgetView() {
           is_hidden: !!cat.is_hidden,
       });
       setIsCategoryModalOpen(true);
-  }, [loading, categories, searchParams]);
+  }, [pageLoading, categories, searchParams]);
 
   const handleSortChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
       const val = e.target.value;
@@ -142,40 +189,8 @@ export function BudgetView() {
       localStorage.setItem('finance_os_expanded', JSON.stringify(Array.from(next)));
   };
 
-  async function fetchData() {
-    setLoading(true);
-    
-    const { data: accs } = await supabase.from('accounts').select('*');
-    if (accs) {
-        const filled = await backfillAccountPaymentDueDates(accs as Account[]);
-        setAccounts(filled);
-        const liquid = snapMoney(
-          filled
-            .filter((a) => ['Checking', 'Savings', 'Cash'].includes(a.type))
-            .reduce((sum, a) => sum + Number(a.balance), 0)
-        );
-        setLiquidCash(liquid);
-    }
-
-    const { data: pending } = await fetchPendingProjectedIncome();
-    if (pending) setPendingProjected(pending);
-
-    const { data: g } = await supabase.from('category_groups').select('*').order('sort_order', { ascending: true }).order('id');
-    const { data: c } = await supabase.from('categories').select('*').order('sort_order', { ascending: true }).order('id');
-    
-    if (g) {
-        setGroups(g as CategoryGroup[]);
-        // Load persistent expanded groups, or default to all open
-        const savedExpanded = localStorage.getItem('finance_os_expanded');
-        if (savedExpanded) {
-            setExpandedGroups(new Set(JSON.parse(savedExpanded)));
-        } else {
-            setExpandedGroups(new Set(g.map(group => group.id)));
-        }
-    }
-    if (c) setCategories(c as Category[]);
-    
-    setLoading(false);
+  async function refreshBudgetData() {
+    await invalidate.invalidateAfterBudgetChange();
   }
 
   // --- FUNDING & INLINE MATH LOGIC ---
@@ -568,7 +583,7 @@ export function BudgetView() {
     [groups]
   );
 
-  if (loading) return <PageSkeleton />;
+  if (pageLoading) return <PageSkeleton />;
 
   return (
     <>
@@ -631,7 +646,7 @@ export function BudgetView() {
       <CreditCardPaymentsPanel
         accounts={accounts}
         categories={categories.filter((c) => !c.is_hidden)}
-        onUpdated={fetchData}
+        onUpdated={refreshBudgetData}
       />
 
       {/* OVERSPENDING WARNING BANNER */}

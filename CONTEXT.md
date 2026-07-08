@@ -2,7 +2,7 @@
 
 
 
-**Tech Stack:** Next.js 16 (App Router), Tailwind CSS v4, Supabase, Framer Motion, Recharts, Radix UI, Vaul (sheets), next-themes.
+**Tech Stack:** Next.js 16 (App Router), Tailwind CSS v4, Supabase, TanStack Query, Framer Motion, Recharts, Radix UI, Vaul (sheets), next-themes.
 
 
 
@@ -112,7 +112,11 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 
 
-* `app/layout.tsx` — fonts, ThemeProvider, AppShell
+* `app/layout.tsx` — fonts, ThemeProvider, QueryProvider, AppShell
+
+* `app/providers/query-provider.tsx` — TanStack Query client (5 min stale time, shared cache across tabs)
+
+* `components/layout/prefetch-on-nav.tsx` — warms accounts/categories/groups/projected-income cache on app mount; nav links prefetch route-specific data on hover/focus/touch
 
 * `components/layout/` — `app-shell`, `bottom-nav`, `top-bar` (desktop logo + nav + theme), `fab`, `page-header`
 
@@ -149,6 +153,8 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 * `lib/reports/` — aggregations (spending respects split lines; `listCategoryExpenses` for per-category txn drill-down) + debt simulator
 
 * `hooks/use-ready-to-assign.ts`, `hooks/use-balance-adjustment.ts`, `hooks/use-ledger-filters.ts` — ledger filter state + `localStorage` persistence
+
+* `hooks/use-finance-queries.ts`, `lib/query-keys.ts` — shared Supabase data cache (accounts, categories, transactions, projected income); `useInvalidateFinance()` for post-mutation refresh; Ledger + Insights share one `transactions` query
 
 * `scripts/google-sheets-sync.gs` — Apps Script for Google Sheets ↔ Supabase REST sync (placeholders for URL/key; do not commit secrets)
 
@@ -324,7 +330,9 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 
 * **Mobile:** Bottom nav, FAB quick entry on home, bottom sheets on mobile / dialog on desktop. Mobile sheets (`components/ui/sheet.tsx` via `ResponsiveModal`) use Vaul `handleOnly` + `data-vaul-no-drag` on scroll content so form scrolling (e.g. expected income, export) does not swipe-dismiss the popup — close via X or the top handle only.
 
-* **Motion:** Framer Motion on budget group expand, calendar month transitions
+* **Motion:** Framer Motion on budget group expand, calendar month transitions (page-level route fade removed from AppShell for snappier tab switches)
+
+* **Performance:** TanStack Query caches finance data across tab navigation; Export modal and Insights charts lazy-loaded via `next/dynamic`; nav prefetch on hover/focus
 
 
 
@@ -360,4 +368,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 22. **Ledger advanced filters** — Date presets + custom range, split-aware category filter, summary strip, URL deep links from Insights, `localStorage` persistence; mobile-optimized scroll strips, bottom sheet for More filters, 44px touch targets (`lib/ledger/filters.ts`, `ledger-filters-bar.tsx`).
 23. **Calendar day overview** — Tap a day for net cashflow, money in/out lists, and projected liquid/RTA for **that day's income only**; optional cumulative planning card when earlier pending income applies; `lib/calendar/day-snapshot.ts`, `features/calendar/day-overview-sheet.tsx`.
 24. **Expected income list sort** — View-all modal pending tab uses `sortPendingByDate` (soonest first) to match the Dashboard preview; history tab sorts newest-first (`features/projected-income/projected-income-modals.tsx`).
+25. **Performance / responsiveness** — TanStack Query shared cache (`hooks/use-finance-queries.ts`) so revisiting tabs shows cached data instantly; removed AppShell page fade; nav prefetch; lazy-loaded Export modal + Insights charts; all feature views refactored off per-mount `useEffect` fetches.
 

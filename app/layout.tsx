@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
 import { ThemeProvider } from './providers/theme-provider';
+import { QueryProvider } from './providers/query-provider';
 import { AppShell } from '@/components/layout/app-shell';
 
 const jakarta = Plus_Jakarta_Sans({
@@ -33,9 +34,11 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${jakarta.variable} font-sans antialiased`}>
-        <ThemeProvider>
-          <AppShell>{children}</AppShell>
-        </ThemeProvider>
+        <QueryProvider>
+          <ThemeProvider>
+            <AppShell>{children}</AppShell>
+          </ThemeProvider>
+        </QueryProvider>
       </body>
     </html>
   );

@@ -1,5 +1,6 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -27,7 +28,7 @@ import {
   type SplitFormLine,
 } from '@/lib/transaction-splits';
 import { SplitTransactionFields } from '@/features/ledger/split-transaction-fields';
-import { PageSkeleton } from '@/components/ui/skeleton';
+import { PageSkeleton, Skeleton } from '@/components/ui/skeleton';
 import { Fab } from '@/components/layout/fab';
 import {
   displayReadyToAssign,
@@ -35,14 +36,20 @@ import {
   rtaIsNegative,
 } from '@/components/budget/rta-banner-extras';
 import { useReadyToAssign } from '@/hooks/use-ready-to-assign';
+import {
+  useAccounts,
+  useAllProjectedIncome,
+  useDashboardCategories,
+  useInvalidateFinance,
+  useMonthTransactionStats,
+  usePendingProjectedIncome,
+  useRecentTransactions,
+} from '@/hooks/use-finance-queries';
 import { sortPendingByDate } from '@/lib/projected-income';
 import {
   cancelProjectedIncome,
-  fetchAllProjectedIncome,
-  fetchPendingProjectedIncome,
 } from '@/lib/queries/projected-income';
 import { attachSplitsToTransactions } from '@/lib/queries/transactions';
-import { ExportModal } from '@/features/export/export-modal';
 import { PROJECTED_INCOME_CERTAINTY_LABELS } from '@/lib/projected-income';
 import {
   ProjectedIncomeFormModal,
@@ -52,16 +59,27 @@ import {
 import { computeInitialNextPaymentDueDate } from '@/lib/credit-cards';
 import type { Account, Category, ProjectedIncome } from '@/lib/types';
 
+const ExportModal = dynamic(
+  () => import('@/features/export/export-modal').then((m) => m.ExportModal),
+  { ssr: false }
+);
+
 export function DashboardView() {
   const router = useRouter();
-  const [accounts, setAccounts] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
-  const [recentTransactions, setRecentTransactions] = useState<any[]>([]);
-  const [payeeSuggestions, setPayeeSuggestions] = useState<string[]>([]);
-  const [monthlyStats, setMonthlyStats] = useState({ income: 0, expense: 0 });
-  const [pendingProjected, setPendingProjected] = useState<ProjectedIncome[]>([]);
-  const [allProjected, setAllProjected] = useState<ProjectedIncome[]>([]);
-  const [loading, setLoading] = useState(true);
+  const invalidate = useInvalidateFinance();
+  const { data: accounts = [], isLoading: accountsLoading } = useAccounts();
+  const { data: categories = [], isLoading: categoriesLoading } = useDashboardCategories();
+  const { data: recentTransactions = [], isPending: recentTxnsPending } = useRecentTransactions(10);
+  const { data: monthlyStats = { income: 0, expense: 0 }, isPending: statsPending } =
+    useMonthTransactionStats();
+  const { data: pendingProjected = [] } = usePendingProjectedIncome();
+  const { data: allProjected = [] } = useAllProjectedIncome();
+
+  const payeeSuggestions = useMemo(
+    () =>
+      Array.from(new Set(recentTransactions.map((t) => t.payee).filter(Boolean))) as string[],
+    [recentTransactions]
+  );
 
   const [isProjectedFormOpen, setIsProjectedFormOpen] = useState(false);
   const [editingProjected, setEditingProjected] = useState<ProjectedIncome | null>(null);
@@ -107,72 +125,15 @@ export function DashboardView() {
     emptySplitLine(),
   ]);
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
-
-  async function fetchDashboardData() {
-    setLoading(true);
-    
-    const { data: accs } = await supabase.from('accounts').select('*').order('type').order('name');
-    if (accs) setAccounts(accs);
-
-    const { data: cats } = await supabase.from('categories').select('id, name, emoji, assigned_amount, budgeted_amount, is_hidden').order('name');
-    if (cats) {
-        setCategories(cats);
-    }
-
-    const { data: txns } = await supabase
-      .from('transactions')
-      .select('*, categories(name, emoji), accounts!account_id(name, type)')
-      .order('date', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(10);
-      
-    if (txns) {
-        setRecentTransactions(txns);
-        const unique = Array.from(new Set(txns.map(t => t.payee).filter(Boolean)));
-        setPayeeSuggestions(unique as string[]);
-    }
-
-    // Calculate Monthly Cashflow
-    const startOfMonth = format(new Date(), 'yyyy-MM-01');
-    const { data: monthTxns } = await supabase.from('transactions').select('amount, type').gte('date', startOfMonth);
-    
-    let inc = 0; let exp = 0;
-    if (monthTxns) {
-        monthTxns.forEach(t => {
-            if (t.type === 'Income') inc = roundMoney(inc + Number(t.amount));
-            if (t.type === 'Expense') exp = roundMoney(exp + Number(t.amount));
-        });
-    }
-    setMonthlyStats({ income: inc, expense: exp });
-
-    const { data: pending } = await fetchPendingProjectedIncome();
-    if (pending) setPendingProjected(pending);
-
-    const { data: allProj } = await fetchAllProjectedIncome();
-    if (allProj) setAllProjected(allProj);
-
-    setLoading(false);
+  async function refreshFinanceData() {
+    await invalidate.invalidateAfterTransaction();
+    await invalidate.invalidateProjected();
   }
 
   async function refreshProjectedIncome() {
-    const { data: pending } = await fetchPendingProjectedIncome();
-    if (pending) setPendingProjected(pending);
-    const { data: allProj } = await fetchAllProjectedIncome();
-    if (allProj) setAllProjected(allProj);
-
-    const { data: accs } = await supabase.from('accounts').select('*').order('type').order('name');
-    if (accs) setAccounts(accs);
-
-    const { data: cats } = await supabase
-      .from('categories')
-      .select('id, name, emoji, assigned_amount, budgeted_amount, is_hidden')
-      .order('name');
-    if (cats) {
-      setCategories(cats);
-    }
+    await invalidate.invalidateProjected();
+    await invalidate.invalidateAccounts();
+    await invalidate.invalidateCategories();
   }
 
   async function handleCancelProjected(id: number) {
@@ -287,7 +248,7 @@ export function DashboardView() {
     }
     
     setIsAccountModalOpen(false);
-    fetchDashboardData(); 
+    await invalidate.invalidateAccounts();
   }
 
   async function deleteAccount() {
@@ -295,7 +256,7 @@ export function DashboardView() {
     if (!confirm("Are you sure you want to delete this account? This will break associated transactions.")) return;
     await supabase.from('accounts').delete().eq('id', editingAccountId);
     setIsAccountModalOpen(false);
-    fetchDashboardData();
+    await invalidate.invalidateAccounts();
   }
 
   // --- QUICK ENTRY LOGIC ---
@@ -424,7 +385,7 @@ export function DashboardView() {
 
           setIsQuickEntryOpen(false);
           resetQuickEntryForm();
-          await fetchDashboardData();
+          await refreshFinanceData();
       }
       setIsSubmittingTxn(false);
   }
@@ -491,7 +452,9 @@ export function DashboardView() {
     }
   };
 
-  if (loading) return <PageSkeleton />;
+  const heroLoading = accountsLoading || categoriesLoading;
+
+  if (heroLoading) return <PageSkeleton />;
 
   return (
     <>
@@ -865,7 +828,7 @@ export function DashboardView() {
                           icon={<Tag size={14}/>}
                           options={[
                             { id: '', name: quickForm.type === 'Income' ? 'Ready to Assign (Uncategorized)' : 'Uncategorized Expense' },
-                            ...categories.map(c => ({ id: c.id, name: c.name, emoji: c.emoji, group: 'Envelopes' }))
+                            ...categories.map(c => ({ id: c.id, name: c.name, emoji: c.emoji ?? undefined, group: 'Envelopes' }))
                           ]}
                           value={quickForm.category_id}
                           onChange={(val) => {
