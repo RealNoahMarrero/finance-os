@@ -39,7 +39,7 @@ import { useReadyToAssign } from '@/hooks/use-ready-to-assign';
 import {
   useAccounts,
   useAllProjectedIncome,
-  useDashboardCategories,
+  useCategories,
   useInvalidateFinance,
   useMonthTransactionStats,
   usePendingProjectedIncome,
@@ -68,7 +68,7 @@ export function DashboardView() {
   const router = useRouter();
   const invalidate = useInvalidateFinance();
   const { data: accounts = [], isLoading: accountsLoading } = useAccounts();
-  const { data: categories = [], isLoading: categoriesLoading } = useDashboardCategories();
+  const { data: categories = [], isLoading: categoriesLoading } = useCategories();
   const { data: recentTransactions = [], isPending: recentTxnsPending } = useRecentTransactions(10);
   const { data: monthlyStats = { income: 0, expense: 0 }, isPending: statsPending } =
     useMonthTransactionStats();

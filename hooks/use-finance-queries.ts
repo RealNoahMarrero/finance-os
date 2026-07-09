@@ -58,14 +58,6 @@ async function loadRecentTransactions(limit: number) {
   return { data: withSplits as Transaction[], error: null };
 }
 
-async function loadDashboardCategories() {
-  const { data, error } = await supabase
-    .from('categories')
-    .select('id, name, emoji, assigned_amount, budgeted_amount, is_hidden')
-    .order('name');
-  return { data: (data || []) as Category[], error };
-}
-
 export function useAccounts() {
   return useQuery({
     queryKey: financeKeys.accounts(),
@@ -79,15 +71,6 @@ export function useCategories() {
   return useQuery({
     queryKey: financeKeys.categories(),
     queryFn: fetchCategories,
-    select: (result) => result.data ?? [],
-    ...financeQueryDefaults,
-  });
-}
-
-export function useDashboardCategories() {
-  return useQuery({
-    queryKey: [...financeKeys.categories(), 'dashboard'] as const,
-    queryFn: loadDashboardCategories,
     select: (result) => result.data ?? [],
     ...financeQueryDefaults,
   });
@@ -188,12 +171,15 @@ export function useInvalidateFinance() {
   const qc = useQueryClient();
 
   const patchCategories = (updater: (categories: Category[]) => Category[]) => {
-    qc.setQueryData(
-      financeKeys.categories(),
-      (prev: Awaited<ReturnType<typeof fetchCategories>> | undefined) => ({
-        data: updater(prev?.data ?? []),
-        error: prev?.error ?? null,
-      })
+    qc.setQueriesData<Awaited<ReturnType<typeof fetchCategories>>>(
+      { queryKey: [...financeKeys.all, 'categories'] },
+      (prev) => {
+        if (!prev) return prev;
+        return {
+          data: updater(prev.data ?? []),
+          error: prev.error ?? null,
+        };
+      }
     );
   };
 
@@ -221,14 +207,14 @@ export function useInvalidateFinance() {
       await Promise.all([
         qc.invalidateQueries({ queryKey: financeKeys.transactions() }),
         qc.invalidateQueries({ queryKey: financeKeys.accounts() }),
-        qc.invalidateQueries({ queryKey: financeKeys.categories() }),
+        qc.invalidateQueries({ queryKey: [...financeKeys.all, 'categories'] }),
         qc.invalidateQueries({ queryKey: financeKeys.recentTransactions(10) }),
         qc.invalidateQueries({ queryKey: [...financeKeys.all, 'transactions', 'month'] }),
       ]);
     },
     invalidateAfterBudgetChange: async () => {
       await Promise.all([
-        qc.invalidateQueries({ queryKey: financeKeys.categories() }),
+        qc.invalidateQueries({ queryKey: [...financeKeys.all, 'categories'] }),
         qc.invalidateQueries({ queryKey: financeKeys.accounts() }),
         qc.invalidateQueries({ queryKey: financeKeys.pendingProjected() }),
       ]);
