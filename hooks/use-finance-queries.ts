@@ -23,7 +23,7 @@ import { backfillAccountPaymentDueDates } from '@/lib/queries/credit-card-paymen
 import { roundMoney } from '@/lib/money';
 import { financeKeys } from '@/lib/query-keys';
 import { supabase } from '@/lib/supabase';
-import type { Account, Category, Transaction } from '@/lib/types';
+import type { Account, Category, CategoryGroup, Transaction } from '@/lib/types';
 
 const STALE_TIME = 5 * 60 * 1000;
 const GC_TIME = 30 * 60 * 1000;
@@ -187,7 +187,29 @@ export function useProjectedIncomeForMonth(monthStart: string, monthEnd: string)
 export function useInvalidateFinance() {
   const qc = useQueryClient();
 
+  const patchCategories = (updater: (categories: Category[]) => Category[]) => {
+    qc.setQueryData(
+      financeKeys.categories(),
+      (prev: Awaited<ReturnType<typeof fetchCategories>> | undefined) => ({
+        data: updater(prev?.data ?? []),
+        error: prev?.error ?? null,
+      })
+    );
+  };
+
+  const patchCategoryGroups = (updater: (groups: CategoryGroup[]) => CategoryGroup[]) => {
+    qc.setQueryData(
+      financeKeys.categoryGroups(),
+      (prev: Awaited<ReturnType<typeof fetchCategoryGroups>> | undefined) => ({
+        data: updater(prev?.data ?? []),
+        error: prev?.error ?? null,
+      })
+    );
+  };
+
   return {
+    patchCategories,
+    patchCategoryGroups,
     invalidateAll: () => qc.invalidateQueries({ queryKey: financeKeys.all }),
     invalidateAccounts: () => qc.invalidateQueries({ queryKey: financeKeys.accounts() }),
     invalidateCategories: () =>

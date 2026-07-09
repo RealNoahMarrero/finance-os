@@ -53,17 +53,14 @@ function transferErrorMessage(error: { message?: string; hint?: string }) {
 export function BudgetView() {
   const searchParams = useSearchParams();
   const openedFromUrl = useRef(false);
-  const invalidate = useInvalidateFinance();
-  const { data: accountsFromQuery = [], isLoading: accountsLoading } = useAccounts();
-  const { data: categoriesFromQuery = [], isLoading: categoriesLoading } = useCategories();
-  const { data: groupsFromQuery = [], isLoading: groupsLoading } = useCategoryGroups();
-  const { data: pendingProjectedFromQuery = [] } = usePendingProjectedIncome();
-
-  const [groups, setGroups] = useState<CategoryGroup[]>([]);
+  const expandedInitialized = useRef(false);
+  const { patchCategories, patchCategoryGroups, invalidateAfterBudgetChange } =
+    useInvalidateFinance();
+  const { data: accounts = [], isLoading: accountsLoading } = useAccounts();
+  const { data: categories = [], isLoading: categoriesLoading } = useCategories();
+  const { data: groups = [], isLoading: groupsLoading } = useCategoryGroups();
+  const { data: pendingProjected = [] } = usePendingProjectedIncome();
   const [reorderingGroups, setReorderingGroups] = useState(false);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [pendingProjected, setPendingProjected] = useState<ProjectedIncome[]>([]);
   const [isExportOpen, setIsExportOpen] = useState(false);
 
   // UI States (Persistent)
@@ -111,27 +108,15 @@ export function BudgetView() {
   const pageLoading = accountsLoading || categoriesLoading || groupsLoading;
 
   useEffect(() => {
-    setAccounts(accountsFromQuery);
-  }, [accountsFromQuery]);
-
-  useEffect(() => {
-    setCategories(categoriesFromQuery);
-  }, [categoriesFromQuery]);
-
-  useEffect(() => {
-    setPendingProjected(pendingProjectedFromQuery);
-  }, [pendingProjectedFromQuery]);
-
-  useEffect(() => {
-    if (groupsFromQuery.length === 0) return;
-    setGroups(groupsFromQuery);
+    if (groups.length === 0 || expandedInitialized.current) return;
+    expandedInitialized.current = true;
     const savedExpanded = localStorage.getItem('finance_os_expanded');
     if (savedExpanded) {
       setExpandedGroups(new Set(JSON.parse(savedExpanded)));
     } else {
-      setExpandedGroups(new Set(groupsFromQuery.map((group) => group.id)));
+      setExpandedGroups(new Set(groups.map((group) => group.id)));
     }
-  }, [groupsFromQuery]);
+  }, [groups]);
 
   useEffect(() => { 
       // Load persistent filters and sorts
@@ -190,7 +175,7 @@ export function BudgetView() {
   };
 
   async function refreshBudgetData() {
-    await invalidate.invalidateAfterBudgetChange();
+    await invalidateAfterBudgetChange();
   }
 
   // --- FUNDING & INLINE MATH LOGIC ---
@@ -232,7 +217,9 @@ export function BudgetView() {
         .eq('id', fundingCatId);
 
       if (!error) {
-          setCategories(categories.map(c => c.id === fundingCatId ? { ...c, assigned_amount: newAmount } : c));
+          patchCategories((cats) =>
+            cats.map((c) => (c.id === fundingCatId ? { ...c, assigned_amount: newAmount } : c))
+          );
       }
       setFundingCatId(null);
   }
@@ -337,7 +324,7 @@ export function BudgetView() {
               }
           }
 
-          setCategories(updatedCategories);
+          patchCategories(() => updatedCategories);
           setIsTransferModalOpen(false);
       } finally {
           setTransferring(false);
@@ -366,7 +353,9 @@ export function BudgetView() {
 
       const { error } = await supabase.from('categories').update(payload).eq('id', cat.id);
       if (!error) {
-          setCategories(categories.map(c => c.id === cat.id ? { ...c, ...payload } : c));
+          patchCategories((cats) =>
+            cats.map((c) => (c.id === cat.id ? { ...c, ...payload } : c))
+          );
       }
   }
 
@@ -381,7 +370,7 @@ export function BudgetView() {
       e.preventDefault();
       if (editingGroupId) {
           const { error } = await supabase.from('category_groups').update({ name: groupFormName }).eq('id', editingGroupId);
-          if (!error) setGroups(groups.map(g => g.id === editingGroupId ? { ...g, name: groupFormName } : g));
+          if (!error) patchCategoryGroups((gs) => gs.map((g) => (g.id === editingGroupId ? { ...g, name: groupFormName } : g)));
       } else {
           const nextOrder =
             groups.reduce((max, g) => Math.max(max, g.sort_order), -1) + 1;
@@ -391,8 +380,8 @@ export function BudgetView() {
             .select()
             .single();
           if (data) {
-            setGroups(
-              [...groups, data as CategoryGroup].sort(
+            patchCategoryGroups((gs) =>
+              [...gs, data as CategoryGroup].sort(
                 (a, b) => a.sort_order - b.sort_order || a.id - b.id
               )
             );
@@ -406,8 +395,8 @@ export function BudgetView() {
       if (!editingGroupId) return;
       if (!confirm("Delete this group? All categories inside will be deleted.")) return;
       await supabase.from('category_groups').delete().eq('id', editingGroupId);
-      setGroups(groups.filter(g => g.id !== editingGroupId));
-      setCategories(categories.filter(c => c.group_id !== editingGroupId));
+      patchCategoryGroups((gs) => gs.filter((g) => g.id !== editingGroupId));
+      patchCategories((cats) => cats.filter((c) => c.group_id !== editingGroupId));
       setIsGroupModalOpen(false);
   }
 
@@ -435,7 +424,7 @@ export function BudgetView() {
             .eq('id', g.id)
         )
       );
-      setGroups(withOrder);
+      patchCategoryGroups(() => withOrder);
       setReorderingGroups(false);
   }
 
@@ -477,10 +466,14 @@ export function BudgetView() {
       
       if (editingCatId) {
           const { error } = await supabase.from('categories').update(payload).eq('id', editingCatId);
-          if (!error) setCategories(categories.map(c => c.id === editingCatId ? { ...c, ...payload } : c));
+          if (!error) {
+            patchCategories((cats) =>
+              cats.map((c) => (c.id === editingCatId ? { ...c, ...payload } : c))
+            );
+          }
       } else {
           const { data } = await supabase.from('categories').insert([payload]).select().single();
-          if (data) setCategories([...categories, data]);
+          if (data) patchCategories((cats) => [...cats, data]);
       }
       setIsCategoryModalOpen(false);
   }
@@ -489,13 +482,17 @@ export function BudgetView() {
       if (!editingCatId) return;
       if (!confirm("Delete this category?")) return;
       await supabase.from('categories').delete().eq('id', editingCatId);
-      setCategories(categories.filter(c => c.id !== editingCatId));
+      patchCategories((cats) => cats.filter((c) => c.id !== editingCatId));
       setIsCategoryModalOpen(false);
   }
 
   async function restoreCategory(id: number) {
       const { error } = await supabase.from('categories').update({ is_hidden: false }).eq('id', id);
-      if (!error) setCategories(categories.map(c => c.id === id ? { ...c, is_hidden: false } : c));
+      if (!error) {
+        patchCategories((cats) =>
+          cats.map((c) => (c.id === id ? { ...c, is_hidden: false } : c))
+        );
+      }
   }
 
   // Math (Only count visible categories for totals)

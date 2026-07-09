@@ -154,7 +154,7 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 * `hooks/use-ready-to-assign.ts`, `hooks/use-balance-adjustment.ts`, `hooks/use-ledger-filters.ts` — ledger filter state + `localStorage` persistence
 
-* `hooks/use-finance-queries.ts`, `lib/query-keys.ts` — shared Supabase data cache (accounts, categories, transactions, projected income); `useInvalidateFinance()` for post-mutation refresh; Ledger + Insights share one `transactions` query
+* `hooks/use-finance-queries.ts`, `lib/query-keys.ts` — shared Supabase data cache (accounts, categories, transactions, projected income); `useInvalidateFinance()` for post-mutation refresh; `patchCategories` / `patchCategoryGroups` for immediate Budget UI updates after Move Money and envelope edits; Ledger + Insights share one `transactions` query
 
 * `scripts/google-sheets-sync.gs` — Apps Script for Google Sheets ↔ Supabase REST sync (placeholders for URL/key; do not commit secrets)
 
@@ -369,4 +369,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 23. **Calendar day overview** — Tap a day for net cashflow, money in/out lists, and projected liquid/RTA for **that day's income only**; optional cumulative planning card when earlier pending income applies; `lib/calendar/day-snapshot.ts`, `features/calendar/day-overview-sheet.tsx`.
 24. **Expected income list sort** — View-all modal pending tab uses `sortPendingByDate` (soonest first) to match the Dashboard preview; history tab sorts newest-first (`features/projected-income/projected-income-modals.tsx`).
 25. **Performance / responsiveness** — TanStack Query shared cache (`hooks/use-finance-queries.ts`) so revisiting tabs shows cached data instantly; removed AppShell page fade; nav prefetch; lazy-loaded Export modal + Insights charts; all feature views refactored off per-mount `useEffect` fetches.
+26. **Budget cache mutation fix** — Budget reads categories/groups directly from the query cache (no duplicate local state); Move Money and envelope edits use `patchCategories` / `patchCategoryGroups` so changes show immediately instead of being overwritten by stale cache.
 
