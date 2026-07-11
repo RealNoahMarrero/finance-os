@@ -42,8 +42,8 @@ export const DEFAULT_LEDGER_FILTERS: LedgerFiltersState = {
   filterAccount: 'All',
   accountTypeFilter: 'all',
   transferDirection: 'all',
-  dateMode: 'all',
-  period: '30d',
+  dateMode: 'preset',
+  period: '90d',
   selectedMonth: format(new Date(), 'yyyy-MM'),
   customDateStart: null,
   customDateEnd: null,
@@ -54,6 +54,9 @@ export const DEFAULT_LEDGER_FILTERS: LedgerFiltersState = {
   filterPayee: '',
   specialFilter: 'none',
 };
+
+/** Initial rows rendered in the ledger list; "Show more" loads this many at a time. */
+export const LEDGER_VISIBLE_BATCH = 50;
 
 export const LEDGER_PERIODS: { id: ReportPeriod; label: string; shortLabel?: string }[] = [
   { id: '30d', label: '30D', shortLabel: '30D' },

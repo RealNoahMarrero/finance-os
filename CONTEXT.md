@@ -228,7 +228,7 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 
 
 
-* **Date** — All time (default), Insights-aligned presets (30D / 90D / YTD / 12M / Month + picker), or custom start/end range. Reuses `getPeriodRange` from `lib/reports/aggregations.ts`.
+* **Date** — 90D (default), All time, Insights-aligned presets (30D / 90D / YTD / 12M / Month + picker), or custom start/end range. Reuses `getPeriodRange` from `lib/reports/aggregations.ts`.
 
 * **Core** — text search (payee, notes, parent + split categories), type, account, category (split-aware via `transactionMatchesCategory`).
 
@@ -239,6 +239,8 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 * **Persistence** — `localStorage` (`finance_os_ledger_filters`). URL params for deep links: `account`, `category`, `type`, `from`, `to`, `period`, `month`, `payee`, `group`, `special`, `q`. Insights category drill-down links to ledger with category + period pre-applied.
 
 * **Mobile** — edge-to-edge horizontal scroll for date pills and summary cards; short pill labels (“All”, “Mo”); 44px touch targets; full-width stacked selects; compact header balance chip.
+
+* **List performance** — renders `LEDGER_VISIBLE_BATCH` (50) rows initially; **Show more** loads 50 at a time. Resets when filters change. Summary strip and totals use the full filtered set, not just visible rows.
 
 
 
@@ -371,4 +373,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 25. **Performance / responsiveness** — TanStack Query shared cache (`hooks/use-finance-queries.ts`) so revisiting tabs shows cached data instantly; removed AppShell page fade; nav prefetch; lazy-loaded Export modal + Insights charts; all feature views refactored off per-mount `useEffect` fetches.
 26. **Budget cache mutation fix** — Budget reads categories/groups directly from the query cache (no duplicate local state); Move Money and envelope edits use `patchCategories` / `patchCategoryGroups` so changes show immediately instead of being overwritten by stale cache.
 27. **Dashboard RTA cache fix** — Removed separate `useDashboardCategories` cache; Dashboard uses the same `useCategories()` query as Budget so Ready to Assign updates when switching tabs after Move Money or ledger changes.
+28. **Ledger list performance** — Default date filter is 90D (was All time). Transaction list shows 50 rows initially with **Show more** (+50 per tap); header reflects visible vs filtered count; totals still cover the full filtered set (`LEDGER_VISIBLE_BATCH` in `lib/ledger/filters.ts`).
 

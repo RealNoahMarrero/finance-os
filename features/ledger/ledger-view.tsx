@@ -38,6 +38,7 @@ import {
   computeLedgerTotals,
   filterLedgerTransactions,
   hasActiveLedgerFilters,
+  LEDGER_VISIBLE_BATCH,
 } from '@/lib/ledger/filters';
 import { useLedgerFilters } from '@/hooks/use-ledger-filters';
 import {
@@ -315,6 +316,21 @@ export function LedgerView() {
     [transactions, filters, accounts, categories]
   );
 
+  const [visibleCount, setVisibleCount] = useState(LEDGER_VISIBLE_BATCH);
+
+  const filterKey = useMemo(() => JSON.stringify(filters), [filters]);
+
+  useEffect(() => {
+    setVisibleCount(LEDGER_VISIBLE_BATCH);
+  }, [filterKey]);
+
+  const visibleTxns = useMemo(
+    () => processedTxns.slice(0, visibleCount),
+    [processedTxns, visibleCount]
+  );
+
+  const remainingCount = processedTxns.length - visibleTxns.length;
+
   const ledgerTotals = useMemo(
     () => computeLedgerTotals(processedTxns),
     [processedTxns]
@@ -334,9 +350,11 @@ export function LedgerView() {
           </h1>
           <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
             <p className="text-sm font-bold text-[var(--text-muted)]">
-              {filtersActive || processedTxns.length !== transactions.length
-                ? `${processedTxns.length} of ${transactions.length} entries`
-                : `${transactions.length} total entries`}
+              {visibleTxns.length < processedTxns.length
+                ? `Showing ${visibleTxns.length} of ${processedTxns.length} entries`
+                : filtersActive || processedTxns.length !== transactions.length
+                  ? `${processedTxns.length} of ${transactions.length} entries`
+                  : `${transactions.length} total entries`}
             </p>
             {(() => {
               const filteredAccount =
@@ -381,8 +399,9 @@ export function LedgerView() {
       {/* TRANSACTIONS LIST */}
       <div className="app-card rounded-3xl shadow-sm border border-[var(--border)] overflow-hidden">
           {processedTxns.length > 0 ? (
+              <>
               <div className="divide-y divide-[var(--border)]">
-                  {processedTxns.map(txn => (
+                  {visibleTxns.map(txn => (
                       <div key={txn.id} className="p-4 md:p-5 flex flex-col md:flex-row md:items-center gap-4 hover:bg-[var(--surface-hover)] transition-colors group">
                           <div className="flex items-center gap-4 w-full md:w-2/5">
                               {getTxnIcon(txn.type)}
@@ -446,6 +465,25 @@ export function LedgerView() {
                       </div>
                   ))}
               </div>
+              {remainingCount > 0 && (
+                <div className="border-t border-[var(--border)] p-4 md:p-5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setVisibleCount((count) =>
+                        Math.min(count + LEDGER_VISIBLE_BATCH, processedTxns.length)
+                      )
+                    }
+                    className="flex min-h-11 w-full items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] px-6 py-3 text-sm font-bold text-[var(--text-primary)] transition-colors touch-manipulation hover:bg-[var(--surface-hover)]"
+                  >
+                    Show {Math.min(LEDGER_VISIBLE_BATCH, remainingCount)} more
+                    {remainingCount > LEDGER_VISIBLE_BATCH
+                      ? ` (${remainingCount} remaining)`
+                      : ''}
+                  </button>
+                </div>
+              )}
+              </>
           ) : (
               <div className="text-center py-24">
                   <div className="w-16 h-16 bg-[var(--surface-subtle)] text-[var(--text-muted)] rounded-full flex items-center justify-center mx-auto mb-4">
