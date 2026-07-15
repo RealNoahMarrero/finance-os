@@ -148,7 +148,9 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 * `lib/export/build-finance-export.ts` — full `.txt` report builder + `downloadTextFile`
 
-* `lib/ledger/filters.ts` — ledger filter logic, split-aware category matching, URL helpers (`buildLedgerHref`, `parseLedgerSearchParams`)
+* `lib/ledger/filters.ts` — ledger filter logic, multi-category + split-aware matching, URL helpers (`buildLedgerHref`, `parseLedgerSearchParams`)
+
+* `lib/transaction-defaults.ts` — last payee category/account recall, last transfer pair, last used account (`localStorage`)
 
 * `lib/reports/` — aggregations (spending respects split lines; `listCategoryExpenses` for per-category txn drill-down) + debt simulator
 
@@ -168,7 +170,7 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 * `features/ledger/ledger-view.tsx` — master ledger list, add/edit modal, advanced filters
 
-* `features/ledger/ledger-filters-bar.tsx` — date presets, type/account/category filters, “More” panel, filtered summary strip
+* `features/ledger/ledger-filters-bar.tsx` — date presets, type/account/multi-category filters, “More” panel, filtered summary strip
 
 * `features/ledger/split-transaction-fields.tsx` — split line UI in ledger modal
 
@@ -230,17 +232,29 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 
 * **Date** — 90D (default), All time, Insights-aligned presets (30D / 90D / YTD / 12M / Month + picker), or custom start/end range. Reuses `getPeriodRange` from `lib/reports/aggregations.ts`.
 
-* **Core** — text search (payee, notes, parent + split categories), type, account, category (split-aware via `transactionMatchesCategory`).
+* **Core** — text search (payee, notes, parent + split categories), type, account, **multi-category** (OR match; split-aware via `transactionMatchesAnyCategory`). Category control is a searchable checkbox dropdown; removable chips when more than one is selected.
 
 * **More** — category group, account type (liquid / credit cards), transfer direction (when account selected), exact payee, special (splits / uncategorized / has notes), min/max amount. On mobile, **More** opens a bottom sheet (`ResponsiveModal`); on desktop, inline expand.
 
 * **Summary strip** — filtered income, expenses, net, and showing count when any filter is active.
 
-* **Persistence** — `localStorage` (`finance_os_ledger_filters`). URL params for deep links: `account`, `category`, `type`, `from`, `to`, `period`, `month`, `payee`, `group`, `special`, `q`. Insights category drill-down links to ledger with category + period pre-applied.
+* **Persistence** — `localStorage` (`finance_os_ledger_filters`; migrates legacy single `filterCategory`). URL params for deep links: `account`, `category` (comma-separated ids), `type`, `from`, `to`, `period`, `month`, `payee`, `group`, `special`, `q`. Insights category drill-down links to ledger with category + period pre-applied.
 
 * **Mobile** — edge-to-edge horizontal scroll for date pills and summary cards; short pill labels (“All”, “Mo”); 44px touch targets; full-width stacked selects; compact header balance chip.
 
 * **List performance** — renders `LEDGER_VISIBLE_BATCH` (50) rows initially; **Show more** loads 50 at a time. Resets when filters change. Summary strip and totals use the full filtered set, not just visible rows.
+
+
+
+### Transaction defaults (Ledger + Dashboard quick entry)
+
+
+
+* **Payee memory** — on payee change (new txns only), `fetchLastDefaultsForPayee` loads the latest same-type txn for that payee (`date` then `created_at`). Prefills **category** (including null = Ready to Assign / uncategorized) and **account**. Shared by Ledger modal and Dashboard FAB.
+
+* **Transfer pair** — switching type to Transfer prefills last from → to accounts (`lib/transaction-defaults.ts` / `localStorage`). Successful transfer saves the pair for next time.
+
+* **Last account** — new expense/income forms prefer the last account used when no filter/account override applies.
 
 
 
@@ -374,4 +388,6 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 26. **Budget cache mutation fix** — Budget reads categories/groups directly from the query cache (no duplicate local state); Move Money and envelope edits use `patchCategories` / `patchCategoryGroups` so changes show immediately instead of being overwritten by stale cache.
 27. **Dashboard RTA cache fix** — Removed separate `useDashboardCategories` cache; Dashboard uses the same `useCategories()` query as Budget so Ready to Assign updates when switching tabs after Move Money or ledger changes.
 28. **Ledger list performance** — Default date filter is 90D (was All time). Transaction list shows 50 rows initially with **Show more** (+50 per tap); header reflects visible vs filtered count; totals still cover the full filtered set (`LEDGER_VISIBLE_BATCH` in `lib/ledger/filters.ts`).
+29. **Transaction defaults** — Payee recall fills category (including Ready to Assign / null) + account by latest same-type txn; Transfer remembers last from→to pair; last used account for new forms (`lib/transaction-defaults.ts`, `fetchLastDefaultsForPayee`).
+30. **Multi-category ledger filter** — Select multiple envelopes (OR); searchable checkbox UI + chips; URL `category=1,2,3`; migrates legacy single-category `localStorage`.
 

@@ -62,12 +62,35 @@ export async function deleteTransaction(id: number) {
   return supabase.from('transactions').delete().eq('id', id);
 }
 
-export async function fetchLastCategoryForPayee(payee: string) {
-  const { data } = await supabase
+/** Last txn for this payee (same type when provided). Includes null category (RTA / uncategorized). */
+export async function fetchLastDefaultsForPayee(
+  payee: string,
+  type?: 'Income' | 'Expense'
+): Promise<{ categoryId: string; accountId: string } | null> {
+  if (!payee.trim()) return null;
+
+  let query = supabase
     .from('transactions')
-    .select('category_id')
+    .select('category_id, account_id')
     .eq('payee', payee)
     .order('date', { ascending: false })
+    .order('created_at', { ascending: false })
     .limit(1);
-  return data?.[0]?.category_id ?? null;
+
+  if (type) query = query.eq('type', type);
+
+  const { data } = await query;
+  const row = data?.[0];
+  if (!row?.account_id) return null;
+
+  return {
+    categoryId: row.category_id != null ? String(row.category_id) : '',
+    accountId: String(row.account_id),
+  };
+}
+
+/** @deprecated Prefer fetchLastDefaultsForPayee */
+export async function fetchLastCategoryForPayee(payee: string) {
+  const defaults = await fetchLastDefaultsForPayee(payee);
+  return defaults?.categoryId ? parseInt(defaults.categoryId, 10) : null;
 }

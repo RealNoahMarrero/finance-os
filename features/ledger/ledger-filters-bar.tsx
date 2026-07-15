@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { format, addMonths, parseISO } from 'date-fns';
 import {
+  Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Search,
@@ -35,11 +37,142 @@ function useIsMobileLayout() {
   return isMobile;
 }
 
+function CategoryMultiFilter({
+  selected,
+  categories,
+  onChange,
+}: {
+  selected: string[];
+  categories: { id: number; name: string; emoji: string | null }[];
+  onChange: (ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSearch('');
+      }
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const filtered = categories.filter((c) =>
+    c.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const label =
+    selected.length === 0
+      ? 'All Categories'
+      : selected.length === 1
+        ? (() => {
+            const c = categories.find((x) => String(x.id) === selected[0]);
+            return c ? `${c.emoji ? `${c.emoji} ` : ''}${c.name}` : '1 category';
+          })()
+        : `${selected.length} categories`;
+
+  function toggle(id: string) {
+    if (selected.includes(id)) {
+      onChange(selected.filter((x) => x !== id));
+    } else {
+      onChange([...selected, id]);
+    }
+  }
+
+  return (
+    <div className="relative w-full lg:min-w-[180px] lg:flex-none" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          'flex min-h-11 w-full items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-left text-sm font-bold text-[var(--text-primary)] touch-manipulation',
+          selected.length > 0 && 'border-emerald-500/40'
+        )}
+      >
+        <span className="truncate">{label}</span>
+        <ChevronDown
+          size={16}
+          className={cn(
+            'shrink-0 text-[var(--text-muted)] transition-transform',
+            open && 'rotate-180'
+          )}
+        />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 right-0 z-40 mt-2 max-h-72 overflow-hidden rounded-2xl border border-[var(--border)] app-card shadow-xl sm:min-w-[260px]">
+          <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-subtle)] p-2">
+            <Search size={14} className="text-[var(--text-muted)]" />
+            <input
+              autoFocus
+              type="text"
+              placeholder="Filter categories..."
+              className="w-full bg-transparent text-sm font-bold outline-none text-[var(--text-primary)] placeholder-[var(--text-muted)]"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {selected.length > 0 && (
+              <button
+                type="button"
+                className="shrink-0 text-[10px] font-black uppercase tracking-wide text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                onClick={() => onChange([])}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="max-h-56 overflow-y-auto hide-scrollbar py-1">
+            {filtered.length === 0 ? (
+              <p className="px-3 py-4 text-sm font-bold text-[var(--text-muted)]">
+                No matches
+              </p>
+            ) : (
+              filtered.map((c) => {
+                const id = String(c.id);
+                const on = selected.includes(id);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => toggle(id)}
+                    className={cn(
+                      'flex w-full min-h-11 items-center gap-2 px-3 text-left text-sm font-bold touch-manipulation',
+                      on
+                        ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                        : 'text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]'
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'flex h-5 w-5 shrink-0 items-center justify-center rounded border',
+                        on
+                          ? 'border-emerald-500 bg-emerald-500 text-white'
+                          : 'border-[var(--border)]'
+                      )}
+                    >
+                      {on && <Check size={12} strokeWidth={3} />}
+                    </span>
+                    {c.emoji && <span>{c.emoji}</span>}
+                    <span className="truncate">{c.name}</span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LedgerMoreFiltersFields({
   filters,
   onPatch,
-  accounts,
-  categories,
   categoryGroups,
   payeeSuggestions,
   showTransferDirection,
@@ -387,19 +520,11 @@ export function LedgerFiltersBar({
               </option>
             ))}
           </Select>
-          <Select
-            className="min-h-11 w-full lg:min-w-[160px] lg:flex-none"
-            value={filters.filterCategory}
-            onChange={(e) => onPatch({ filterCategory: e.target.value })}
-          >
-            <option value="All">All Categories</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.emoji ? `${c.emoji} ` : ''}
-                {c.name}
-              </option>
-            ))}
-          </Select>
+          <CategoryMultiFilter
+            selected={filters.filterCategories}
+            categories={categories}
+            onChange={(filterCategories) => onPatch({ filterCategories })}
+          />
           <div className="flex gap-2 sm:col-span-2 lg:col-span-1 lg:contents">
             <button
               type="button"
@@ -432,6 +557,31 @@ export function LedgerFiltersBar({
             )}
           </div>
         </div>
+
+        {filters.filterCategories.length > 1 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {filters.filterCategories.map((id) => {
+              const c = categories.find((x) => String(x.id) === id);
+              if (!c) return null;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() =>
+                    onPatch({
+                      filterCategories: filters.filterCategories.filter((x) => x !== id),
+                    })
+                  }
+                  className="inline-flex min-h-8 items-center gap-1 rounded-lg bg-emerald-500/15 px-2 text-xs font-bold text-emerald-700 touch-manipulation dark:text-emerald-400"
+                >
+                  {c.emoji ? `${c.emoji} ` : ''}
+                  {c.name}
+                  <X size={12} />
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {moreOpen && !isMobile && (
           <div className="mt-3 border-t border-[var(--border)] pt-3">{moreFields}</div>

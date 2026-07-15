@@ -20,7 +20,17 @@ import {
   categorySupportsSmartBillPay,
 } from '@/lib/smart-bill-pay';
 import { applyTransactionBalances } from '@/lib/transaction-balance';
+import {
+  attachSplitsToTransactions,
+  fetchLastDefaultsForPayee,
+} from '@/lib/queries/transactions';
 import { replaceTransactionSplits } from '@/lib/queries/transaction-splits';
+import {
+  resolveOpeningAccountId,
+  resolveTransferDefaults,
+  saveLastTransferPair,
+  saveLastTxnAccountId,
+} from '@/lib/transaction-defaults';
 import {
   emptySplitLine,
   parseSplitLines,
@@ -49,7 +59,6 @@ import { sortPendingByDate } from '@/lib/projected-income';
 import {
   cancelProjectedIncome,
 } from '@/lib/queries/projected-income';
-import { attachSplitsToTransactions } from '@/lib/queries/transactions';
 import { PROJECTED_INCOME_CERTAINTY_LABELS } from '@/lib/projected-income';
 import {
   ProjectedIncomeFormModal,
@@ -261,9 +270,12 @@ export function DashboardView() {
 
   // --- QUICK ENTRY LOGIC ---
   function openQuickEntry(accId?: number) {
+      const accountIds = accounts.map((a) => String(a.id));
       setQuickForm({
         type: 'Expense', date: format(new Date(), 'yyyy-MM-dd'), amount: '', 
-        payee: '', category_id: '', account_id: (accId ?? accounts[0]?.id)?.toString() || '', to_account_id: '', notes: ''
+        payee: '', category_id: '',
+        account_id: resolveOpeningAccountId(accountIds, accId != null ? String(accId) : null),
+        to_account_id: '', notes: ''
       });
       setIsSplitMode(false);
       setSplitLines([emptySplitLine(), emptySplitLine()]);
@@ -271,24 +283,47 @@ export function DashboardView() {
       setIsQuickEntryOpen(true);
   }
 
-  // Feature 1: Payee Memory
-  const handlePayeeChange = async (val: string) => {
-      setQuickForm(prev => ({ ...prev, payee: val }));
-      
-      if (val) {
-          const { data } = await supabase
-              .from('transactions')
-              .select('category_id')
-              .eq('payee', val)
-              .order('date', { ascending: false })
-              .limit(1);
-          
-          if (data && data[0]?.category_id) {
-              const catId = data[0].category_id.toString();
-              setQuickForm(prev => ({ ...prev, category_id: catId }));
-              checkSmartBillPay(catId);
-          }
+  const setQuickType = (type: 'Expense' | 'Income' | 'Transfer') => {
+      if (type === 'Transfer') {
+          const accountIds = accounts.map((a) => String(a.id));
+          const pair = resolveTransferDefaults(accountIds, quickForm.account_id);
+          setQuickForm((prev) => ({
+              ...prev,
+              type,
+              payee: '',
+              category_id: '',
+              account_id: pair.fromAccountId || prev.account_id,
+              to_account_id: pair.toAccountId,
+          }));
+          setIsSplitMode(false);
+          setSmartBillPay({ showToggle: false, advanceCycle: true, deductDebt: true, category: null });
+          return;
       }
+      setQuickForm((prev) => ({
+          ...prev,
+          type,
+          to_account_id: '',
+      }));
+  };
+
+  const handlePayeeChange = async (val: string) => {
+      setQuickForm((prev) => ({ ...prev, payee: val }));
+
+      if (!val) return;
+      if (quickForm.type !== 'Income' && quickForm.type !== 'Expense') return;
+
+      const defaults = await fetchLastDefaultsForPayee(val, quickForm.type);
+      if (!defaults) return;
+
+      setQuickForm((prev) => ({
+          ...prev,
+          category_id: defaults.categoryId,
+          account_id:
+              accounts.some((a) => String(a.id) === defaults.accountId)
+                  ? defaults.accountId
+                  : prev.account_id,
+      }));
+      checkSmartBillPay(defaults.categoryId);
   };
 
   const checkSmartBillPay = (catId: string) => {
@@ -313,13 +348,14 @@ export function DashboardView() {
   const handleBalanceAdjustment = (txn: any) => applyBalanceAdjustment(txn, 'apply');
 
   function resetQuickEntryForm() {
+      const accountIds = accounts.map((a) => String(a.id));
       setQuickForm({
           type: 'Expense',
           date: format(new Date(), 'yyyy-MM-dd'),
           amount: '',
           payee: '',
           category_id: '',
-          account_id: accounts[0]?.id?.toString() || '',
+          account_id: resolveOpeningAccountId(accountIds),
           to_account_id: '',
           notes: '',
       });
@@ -386,6 +422,12 @@ export function DashboardView() {
           setIsQuickEntryOpen(false);
           resetQuickEntryForm();
           await refreshFinanceData();
+
+          if (payload.type === 'Transfer' && payload.to_account_id) {
+            saveLastTransferPair(String(payload.account_id), String(payload.to_account_id));
+          } else {
+            saveLastTxnAccountId(String(payload.account_id));
+          }
       }
       setIsSubmittingTxn(false);
   }
@@ -729,9 +771,9 @@ export function DashboardView() {
 
             <div className="space-y-5">
               <div className="flex app-segment-track p-1 rounded-xl">
-                  <button type="button" onClick={() => setQuickForm({...quickForm, type: 'Expense'})} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${quickForm.type === 'Expense' ? 'app-segment-active shadow-sm' : 'text-[var(--text-muted)]'}`}>Expense</button>
-                  <button type="button" onClick={() => setQuickForm({...quickForm, type: 'Income'})} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${quickForm.type === 'Income' ? 'app-segment-active shadow-sm text-emerald-500' : 'text-[var(--text-muted)]'}`}>Income</button>
-                  <button type="button" onClick={() => setQuickForm({...quickForm, type: 'Transfer'})} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${quickForm.type === 'Transfer' ? 'app-segment-active shadow-sm text-blue-500' : 'text-[var(--text-muted)]'}`}>Transfer</button>
+                  <button type="button" onClick={() => setQuickType('Expense')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${quickForm.type === 'Expense' ? 'app-segment-active shadow-sm' : 'text-[var(--text-muted)]'}`}>Expense</button>
+                  <button type="button" onClick={() => setQuickType('Income')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${quickForm.type === 'Income' ? 'app-segment-active shadow-sm text-emerald-500' : 'text-[var(--text-muted)]'}`}>Income</button>
+                  <button type="button" onClick={() => setQuickType('Transfer')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${quickForm.type === 'Transfer' ? 'app-segment-active shadow-sm text-blue-500' : 'text-[var(--text-muted)]'}`}>Transfer</button>
               </div>
 
               <div className="flex gap-4">

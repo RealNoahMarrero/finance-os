@@ -26,7 +26,8 @@ export interface LedgerFiltersState {
   selectedMonth: string;
   customDateStart: string | null;
   customDateEnd: string | null;
-  filterCategory: string;
+  /** Selected category ids as strings; empty = all categories */
+  filterCategories: string[];
   filterCategoryGroup: string;
   amountMin: string;
   amountMax: string;
@@ -47,7 +48,7 @@ export const DEFAULT_LEDGER_FILTERS: LedgerFiltersState = {
   selectedMonth: format(new Date(), 'yyyy-MM'),
   customDateStart: null,
   customDateEnd: null,
-  filterCategory: 'All',
+  filterCategories: [],
   filterCategoryGroup: 'All',
   amountMin: '',
   amountMax: '',
@@ -80,6 +81,15 @@ export function transactionMatchesCategory(txn: Transaction, categoryId: number)
     return splits.some((s) => s.category_id === categoryId);
   }
   return txn.category_id === categoryId;
+}
+
+/** Match if the txn hits any of the given category ids (OR). */
+export function transactionMatchesAnyCategory(
+  txn: Transaction,
+  categoryIds: number[]
+): boolean {
+  if (categoryIds.length === 0) return true;
+  return categoryIds.some((id) => transactionMatchesCategory(txn, id));
 }
 
 export function transactionMatchesCategoryGroup(
@@ -140,8 +150,9 @@ export function filterLedgerTransactions(
   const dateRange = resolveLedgerDateRange(filters);
   const minAmount = filters.amountMin ? parseFloat(filters.amountMin) : null;
   const maxAmount = filters.amountMax ? parseFloat(filters.amountMax) : null;
-  const categoryId =
-    filters.filterCategory !== 'All' ? parseInt(filters.filterCategory, 10) : null;
+  const categoryIds = (filters.filterCategories ?? [])
+    .map((id) => parseInt(id, 10))
+    .filter((id) => !Number.isNaN(id));
   const groupId =
     filters.filterCategoryGroup !== 'All'
       ? parseInt(filters.filterCategoryGroup, 10)
@@ -173,7 +184,9 @@ export function filterLedgerTransactions(
       if (!matchesSource && !matchesDest) return false;
     }
 
-    if (categoryId != null && !transactionMatchesCategory(t, categoryId)) return false;
+    if (categoryIds.length > 0 && !transactionMatchesAnyCategory(t, categoryIds)) {
+      return false;
+    }
 
     if (groupId != null && !transactionMatchesCategoryGroup(t, groupId, categories)) {
       return false;
@@ -233,6 +246,7 @@ export function hasActiveLedgerFilters(
   filters: LedgerFiltersState,
   defaults: LedgerFiltersState = DEFAULT_LEDGER_FILTERS
 ): boolean {
+  const categories = filters.filterCategories ?? [];
   return (
     filters.searchQuery !== defaults.searchQuery ||
     filters.filterType !== defaults.filterType ||
@@ -240,7 +254,7 @@ export function hasActiveLedgerFilters(
     filters.accountTypeFilter !== defaults.accountTypeFilter ||
     filters.transferDirection !== defaults.transferDirection ||
     filters.dateMode !== defaults.dateMode ||
-    filters.filterCategory !== defaults.filterCategory ||
+    categories.length > 0 ||
     filters.filterCategoryGroup !== defaults.filterCategoryGroup ||
     filters.amountMin !== defaults.amountMin ||
     filters.amountMax !== defaults.amountMax ||
@@ -271,8 +285,14 @@ export function parseLedgerSearchParams(
 
   const category = params.get('category');
   if (category) {
-    partial.filterCategory = category;
-    if (!type) partial.filterType = 'Expense';
+    const ids = category
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (ids.length > 0) {
+      partial.filterCategories = ids;
+      if (!type) partial.filterType = 'Expense';
+    }
   }
 
   const group = params.get('group');
@@ -323,8 +343,8 @@ export function buildLedgerHref(
 
   if (options?.categoryId != null) {
     params.set('category', String(options.categoryId));
-  } else if (filters.filterCategory && filters.filterCategory !== 'All') {
-    params.set('category', filters.filterCategory);
+  } else if (filters.filterCategories && filters.filterCategories.length > 0) {
+    params.set('category', filters.filterCategories.join(','));
   }
 
   if (filters.filterAccount && filters.filterAccount !== 'All') {
@@ -365,13 +385,34 @@ export function buildLedgerHref(
   return qs ? `/ledger?${qs}` : '/ledger';
 }
 
+function normalizeStoredFilters(
+  parsed: Partial<LedgerFiltersState> & { filterCategory?: string }
+): LedgerFiltersState {
+  const { filterCategory, filterCategories, ...rest } = parsed;
+  let categories = filterCategories;
+  if (!Array.isArray(categories)) {
+    if (filterCategory && filterCategory !== 'All') {
+      categories = [String(filterCategory)];
+    } else {
+      categories = [];
+    }
+  }
+  return {
+    ...DEFAULT_LEDGER_FILTERS,
+    ...rest,
+    filterCategories: categories.map(String).filter(Boolean),
+  };
+}
+
 export function loadLedgerFiltersFromStorage(): LedgerFiltersState {
   if (typeof window === 'undefined') return { ...DEFAULT_LEDGER_FILTERS };
   try {
     const raw = localStorage.getItem(LEDGER_FILTER_STORAGE_KEY);
     if (!raw) return { ...DEFAULT_LEDGER_FILTERS };
-    const parsed = JSON.parse(raw) as Partial<LedgerFiltersState>;
-    return { ...DEFAULT_LEDGER_FILTERS, ...parsed };
+    const parsed = JSON.parse(raw) as Partial<LedgerFiltersState> & {
+      filterCategory?: string;
+    };
+    return normalizeStoredFilters(parsed);
   } catch {
     return { ...DEFAULT_LEDGER_FILTERS };
   }

@@ -17,11 +17,20 @@ import {
   categorySupportsSmartBillPay,
 } from '@/lib/smart-bill-pay';
 import { applyTransactionBalances, reverseTransactionBalances } from '@/lib/transaction-balance';
-import { attachSplitsToTransactions } from '@/lib/queries/transactions';
+import {
+  attachSplitsToTransactions,
+  fetchLastDefaultsForPayee,
+} from '@/lib/queries/transactions';
 import {
   deleteSplitsForTransaction,
   replaceTransactionSplits,
 } from '@/lib/queries/transaction-splits';
+import {
+  resolveOpeningAccountId,
+  resolveTransferDefaults,
+  saveLastTransferPair,
+  saveLastTxnAccountId,
+} from '@/lib/transaction-defaults';
 import {
   emptySplitLine,
   isSplitTransaction,
@@ -196,6 +205,12 @@ export function LedgerView() {
           }
       }
 
+      if (payload.type === 'Transfer' && payload.to_account_id) {
+        saveLastTransferPair(String(payload.account_id), String(payload.to_account_id));
+      } else {
+        saveLastTxnAccountId(String(payload.account_id));
+      }
+
       closeModal();
       await refreshLedger(); 
       setIsSubmitting(false);
@@ -212,17 +227,43 @@ export function LedgerView() {
       setEditingTxn(null);
       setIsSplitMode(false);
       setSplitLines([emptySplitLine(), emptySplitLine()]);
+      const accountIds = accounts.map((a) => String(a.id));
+      const preferred =
+        filters.filterAccount !== 'All' ? filters.filterAccount : null;
       setTxnForm({
           type: 'Expense',
           date: format(new Date(), 'yyyy-MM-dd'),
           amount: '',
           payee: '',
           category_id: '',
-          account_id: filters.filterAccount !== 'All' ? filters.filterAccount : (accounts.length > 0 ? accounts[0].id.toString() : ''),
+          account_id: resolveOpeningAccountId(accountIds, preferred),
           to_account_id: '',
           notes: ''
       });
       setIsModalOpen(true);
+  };
+
+  const setTxnType = (type: 'Expense' | 'Income' | 'Transfer') => {
+      if (type === 'Transfer') {
+          const accountIds = accounts.map((a) => String(a.id));
+          const pair = resolveTransferDefaults(accountIds, txnForm.account_id);
+          setTxnForm((prev) => ({
+              ...prev,
+              type,
+              payee: '',
+              category_id: '',
+              account_id: pair.fromAccountId || prev.account_id,
+              to_account_id: pair.toAccountId,
+          }));
+          setIsSplitMode(false);
+          setSmartBillPay({ showToggle: false, advanceCycle: true, deductDebt: true, category: null });
+          return;
+      }
+      setTxnForm((prev) => ({
+          ...prev,
+          type,
+          to_account_id: '',
+      }));
   };
 
   const openEdit = (txn: Transaction) => {
@@ -263,24 +304,24 @@ export function LedgerView() {
       setTxnForm({ ...txnForm, amount: '', payee: '', notes: '' });
   };
 
-  // Feature 1: Payee Memory
   const handlePayeeChange = async (val: string) => {
-      setTxnForm(prev => ({ ...prev, payee: val }));
-      
-      if (val && !editingTxn) {
-          const { data } = await supabase
-              .from('transactions')
-              .select('category_id')
-              .eq('payee', val)
-              .order('date', { ascending: false })
-              .limit(1);
-          
-          if (data && data[0]?.category_id) {
-              const catId = data[0].category_id.toString();
-              setTxnForm(prev => ({ ...prev, category_id: catId }));
-              checkSmartBillPay(catId);
-          }
-      }
+      setTxnForm((prev) => ({ ...prev, payee: val }));
+
+      if (!val || editingTxn) return;
+      if (txnForm.type !== 'Income' && txnForm.type !== 'Expense') return;
+
+      const defaults = await fetchLastDefaultsForPayee(val, txnForm.type);
+      if (!defaults) return;
+
+      setTxnForm((prev) => ({
+          ...prev,
+          category_id: defaults.categoryId,
+          account_id:
+              accounts.some((a) => String(a.id) === defaults.accountId)
+                  ? defaults.accountId
+                  : prev.account_id,
+      }));
+      checkSmartBillPay(defaults.categoryId);
   };
 
   const checkSmartBillPay = (catId: string) => {
@@ -515,9 +556,9 @@ export function LedgerView() {
 
             <div className="space-y-5">
               <div className="flex app-segment-track p-1 rounded-xl">
-                  <button type="button" onClick={() => setTxnForm({...txnForm, type: 'Expense'})} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${txnForm.type === 'Expense' ? 'app-segment-active shadow-sm' : 'text-[var(--text-muted)]'}`}>Expense</button>
-                  <button type="button" onClick={() => setTxnForm({...txnForm, type: 'Income'})} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${txnForm.type === 'Income' ? 'app-segment-active shadow-sm text-emerald-500' : 'text-[var(--text-muted)]'}`}>Income</button>
-                  <button type="button" onClick={() => setTxnForm({...txnForm, type: 'Transfer'})} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${txnForm.type === 'Transfer' ? 'app-segment-active shadow-sm text-blue-500' : 'text-[var(--text-muted)]'}`}>Transfer</button>
+                  <button type="button" onClick={() => setTxnType('Expense')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${txnForm.type === 'Expense' ? 'app-segment-active shadow-sm' : 'text-[var(--text-muted)]'}`}>Expense</button>
+                  <button type="button" onClick={() => setTxnType('Income')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${txnForm.type === 'Income' ? 'app-segment-active shadow-sm text-emerald-500' : 'text-[var(--text-muted)]'}`}>Income</button>
+                  <button type="button" onClick={() => setTxnType('Transfer')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${txnForm.type === 'Transfer' ? 'app-segment-active shadow-sm text-blue-500' : 'text-[var(--text-muted)]'}`}>Transfer</button>
               </div>
 
               <div className="flex gap-4">
