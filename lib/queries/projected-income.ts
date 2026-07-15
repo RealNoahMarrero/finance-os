@@ -9,7 +9,7 @@ import {
   todayDateString,
 } from '@/lib/projected-income';
 import type { ProjectedIncome, ProjectedIncomePayload } from '@/lib/types';
-import { insertTransaction } from '@/lib/queries/transactions';
+import { fetchLastDefaultsForPayee, insertTransaction } from '@/lib/queries/transactions';
 
 const SELECT_WITH_RELATIONS =
   '*, accounts!account_id(id, name, type), categories!category_id(name, emoji)';
@@ -233,4 +233,29 @@ export async function receiveProjectedIncome(
     data: { projection: fullProjection as ProjectedIncome, transaction: txn },
     error: null,
   };
+}
+
+/** Last expected-income (or Income txn) defaults for a label. Null category = Ready to Assign. */
+export async function fetchLastDefaultsForProjectedLabel(
+  label: string
+): Promise<{ categoryId: string; accountId: string } | null> {
+  if (!label.trim()) return null;
+
+  const { data } = await supabase
+    .from('projected_income')
+    .select('category_id, account_id')
+    .eq('label', label)
+    .order('expected_date', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  const row = data?.[0];
+  if (row?.account_id) {
+    return {
+      categoryId: row.category_id != null ? String(row.category_id) : '',
+      accountId: String(row.account_id),
+    };
+  }
+
+  return fetchLastDefaultsForPayee(label, 'Income');
 }

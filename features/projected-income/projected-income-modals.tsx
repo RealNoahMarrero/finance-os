@@ -20,7 +20,12 @@ import {
   projectedIncomeErrorMessage,
   receiveProjectedIncome,
   updateProjectedIncome,
+  fetchLastDefaultsForProjectedLabel,
 } from '@/lib/queries/projected-income';
+import {
+  resolveOpeningAccountId,
+  saveLastTxnAccountId,
+} from '@/lib/transaction-defaults';
 import type {
   Account,
   Category,
@@ -77,7 +82,8 @@ export function ProjectedIncomeFormModal({
   const liquidAccounts = accounts.filter((a) =>
     ['Checking', 'Savings', 'Cash'].includes(a.type)
   );
-  const defaultAccId = liquidAccounts[0] ? String(liquidAccounts[0].id) : '';
+  const liquidIds = liquidAccounts.map((a) => String(a.id));
+  const defaultAccId = resolveOpeningAccountId(liquidIds);
 
   const [form, setForm] = useState<FormState>(() => makeDefaultForm(defaultAccId));
   const [saving, setSaving] = useState(false);
@@ -105,6 +111,22 @@ export function ProjectedIncomeFormModal({
     }
   }, [open, editing, defaultAccId]);
 
+  const handleLabelChange = async (val: string) => {
+    setForm((prev) => ({ ...prev, label: val }));
+    if (!val || editing) return;
+
+    const defaults = await fetchLastDefaultsForProjectedLabel(val);
+    if (!defaults) return;
+
+    setForm((prev) => ({
+      ...prev,
+      category_id: defaults.categoryId,
+      account_id: liquidIds.includes(defaults.accountId)
+        ? defaults.accountId
+        : prev.account_id,
+    }));
+  };
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -127,6 +149,7 @@ export function ProjectedIncomeFormModal({
 
     setSaving(false);
     if (!error) {
+      saveLastTxnAccountId(String(payload.account_id));
       onSaved();
       onOpenChange(false);
     } else {
@@ -150,7 +173,7 @@ export function ProjectedIncomeFormModal({
             placeholder="e.g. Paycheck, Invoice #12"
             className="w-full p-3 app-input rounded-xl font-bold border border-[var(--border)]"
             value={form.label}
-            onChange={(e) => setForm({ ...form, label: e.target.value })}
+            onChange={(e) => handleLabelChange(e.target.value)}
           />
         </div>
 

@@ -166,7 +166,7 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 
 
-* `features/projected-income/projected-income-modals.tsx` — add/edit/receive/list expected income
+* `features/projected-income/projected-income-modals.tsx` — add/edit/receive/list expected income; label recall for account + category
 
 * `features/ledger/ledger-view.tsx` — master ledger list, add/edit modal, advanced filters
 
@@ -246,15 +246,15 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 
 
 
-### Transaction defaults (Ledger + Dashboard quick entry)
+### Transaction defaults (Ledger + Dashboard quick entry + Expected income)
 
 
 
-* **Payee memory** — on payee change (new txns only), `fetchLastDefaultsForPayee` loads the latest same-type txn for that payee (`date` then `created_at`). Prefills **category** (including null = Ready to Assign / uncategorized) and **account**. Shared by Ledger modal and Dashboard FAB.
+* **Payee / label memory** — on payee change (new txns only), `fetchLastDefaultsForPayee` loads the latest same-type txn for that payee (`date` then `created_at`). Prefills **category** (including null = Ready to Assign / uncategorized) and **account**. Shared by Ledger modal and Dashboard FAB. Expected income uses the same pattern on **label** change via `fetchLastDefaultsForProjectedLabel` (latest `projected_income` row for that label, else matching Income txn payee).
 
 * **Transfer pair** — switching type to Transfer prefills last from → to accounts (`lib/transaction-defaults.ts` / `localStorage`). Successful transfer saves the pair for next time.
 
-* **Last account** — new expense/income forms prefer the last account used when no filter/account override applies.
+* **Last account** — new expense/income and expected-income forms prefer the last account used when no filter/account override applies.
 
 
 
@@ -390,4 +390,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 28. **Ledger list performance** — Default date filter is 90D (was All time). Transaction list shows 50 rows initially with **Show more** (+50 per tap); header reflects visible vs filtered count; totals still cover the full filtered set (`LEDGER_VISIBLE_BATCH` in `lib/ledger/filters.ts`).
 29. **Transaction defaults** — Payee recall fills category (including Ready to Assign / null) + account by latest same-type txn; Transfer remembers last from→to pair; last used account for new forms (`lib/transaction-defaults.ts`, `fetchLastDefaultsForPayee`).
 30. **Multi-category ledger filter** — Select multiple envelopes (OR); searchable checkbox UI + chips; URL `category=1,2,3`; migrates legacy single-category `localStorage`.
+31. **Expected income defaults** — Label recall prefills deposit account + category (including Ready to Assign) from last expected-income row, falling back to Income txn with the same payee; new forms use last deposit account (`fetchLastDefaultsForProjectedLabel`).
 
