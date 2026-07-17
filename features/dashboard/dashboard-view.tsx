@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { 
   Wallet, Landmark, CreditCard, Banknote, Plus, 
-  ArrowUpRight, ArrowDownRight, ArrowRightLeft, Activity, X, 
+  ArrowUpRight, ArrowDownRight, ArrowRightLeft, ArrowUpDown, Activity, X, 
   AlertCircle, Trash2, LayoutGrid, PieChart, ListOrdered, 
   Calendar, FileText, Download, Zap, Edit2, Tag, AlignLeft, Save, Loader2,
   TrendingUp, Split
@@ -304,6 +304,17 @@ export function DashboardView() {
           type,
           to_account_id: '',
       }));
+  };
+
+  const swapQuickTransferAccounts = () => {
+      setQuickForm((prev) => {
+          if (!prev.to_account_id) return prev;
+          return {
+              ...prev,
+              account_id: prev.to_account_id,
+              to_account_id: prev.account_id,
+          };
+      });
   };
 
   const handlePayeeChange = async (val: string) => {
@@ -807,24 +818,43 @@ export function DashboardView() {
                   </div>
               )}
 
-              <div className="flex gap-4 app-card-subtle p-4 rounded-2xl border border-[var(--border)]">
-                  <div className={quickForm.type === 'Transfer' ? 'w-1/2' : 'w-full'}>
-                      <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-2 block">{quickForm.type === 'Income' ? 'Deposit Into' : 'Pay From Account'}</label>
-                      <select required className="w-full p-3 app-card rounded-xl font-bold text-sm text-[var(--text-primary)] border border-[var(--border)] outline-none focus:border-blue-300 cursor-pointer" value={quickForm.account_id} onChange={e => setQuickForm({...quickForm, account_id: e.target.value})}>
-                          {accounts.map(a => <option key={a.id} value={a.id}>{a.name} ({snapMoney(a.balance) < 0 ? '-' : ''}${formatMoney(Math.abs(a.balance))})</option>)}
-                      </select>
+              {quickForm.type === 'Transfer' ? (
+                <div className="flex flex-col gap-2 app-card-subtle p-4 rounded-2xl border border-[var(--border)]">
+                  <div>
+                    <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-2 block">Pay From Account</label>
+                    <select required className="w-full p-3 app-card rounded-xl font-bold text-sm text-[var(--text-primary)] border border-[var(--border)] outline-none focus:border-blue-300 cursor-pointer" value={quickForm.account_id} onChange={e => setQuickForm({...quickForm, account_id: e.target.value})}>
+                      {accounts.map(a => <option key={a.id} value={a.id}>{a.name} ({snapMoney(a.balance) < 0 ? '-' : ''}${formatMoney(Math.abs(a.balance))})</option>)}
+                    </select>
                   </div>
-                  
-                  {quickForm.type === 'Transfer' && (
-                      <div className="w-1/2">
-                          <label className="text-[10px] font-bold text-blue-400 uppercase tracking-wider mb-2 block">Transfer To</label>
-                          <select required className="w-full p-3 app-card rounded-xl font-bold text-sm text-blue-900 border border-blue-500/30 outline-none focus:border-blue-400 cursor-pointer" value={quickForm.to_account_id} onChange={e => setQuickForm({...quickForm, to_account_id: e.target.value})}>
-                              <option value="" disabled>Select Destination...</option>
-                              {accounts.filter(a => a.id.toString() !== quickForm.account_id).map(a => <option key={a.id} value={a.id}>{a.name} ({snapMoney(a.balance) < 0 ? '-' : ''}${formatMoney(Math.abs(a.balance))})</option>)}
-                          </select>
-                      </div>
-                  )}
-              </div>
+
+                  <div className="flex justify-center -my-1 relative z-10">
+                    <button
+                      type="button"
+                      onClick={swapQuickTransferAccounts}
+                      disabled={!quickForm.to_account_id}
+                      className="app-card p-2 rounded-full border border-[var(--border)] shadow-sm text-[var(--text-muted)] hover:text-blue-500 hover:border-blue-500/30 transition-all hover:bg-blue-500/10 disabled:opacity-40 disabled:pointer-events-none"
+                      title="Swap transfer direction"
+                    >
+                      <ArrowUpDown size={16} />
+                    </button>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-blue-400 uppercase tracking-wider mb-2 block">Transfer To</label>
+                    <select required className="w-full p-3 app-card rounded-xl font-bold text-sm text-blue-900 border border-blue-500/30 outline-none focus:border-blue-400 cursor-pointer" value={quickForm.to_account_id} onChange={e => setQuickForm({...quickForm, to_account_id: e.target.value})}>
+                      <option value="" disabled>Select Destination...</option>
+                      {accounts.filter(a => a.id.toString() !== quickForm.account_id).map(a => <option key={a.id} value={a.id}>{a.name} ({snapMoney(a.balance) < 0 ? '-' : ''}${formatMoney(Math.abs(a.balance))})</option>)}
+                    </select>
+                  </div>
+                </div>
+              ) : (
+                <div className="app-card-subtle p-4 rounded-2xl border border-[var(--border)]">
+                  <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-2 block">{quickForm.type === 'Income' ? 'Deposit Into' : 'Pay From Account'}</label>
+                  <select required className="w-full p-3 app-card rounded-xl font-bold text-sm text-[var(--text-primary)] border border-[var(--border)] outline-none focus:border-blue-300 cursor-pointer" value={quickForm.account_id} onChange={e => setQuickForm({...quickForm, account_id: e.target.value})}>
+                    {accounts.map(a => <option key={a.id} value={a.id}>{a.name} ({snapMoney(a.balance) < 0 ? '-' : ''}${formatMoney(Math.abs(a.balance))})</option>)}
+                  </select>
+                </div>
+              )}
 
               {quickForm.type !== 'Transfer' && (
                   <>

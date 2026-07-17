@@ -252,7 +252,7 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 
 * **Payee / label memory** — on payee change (new txns only), `fetchLastDefaultsForPayee` loads the latest same-type txn for that payee (`date` then `created_at`). Prefills **category** (including null = Ready to Assign / uncategorized) and **account**. Shared by Ledger modal and Dashboard FAB. Expected income uses the same pattern on **label** change via `fetchLastDefaultsForProjectedLabel` (latest `projected_income` row for that label, else matching Income txn payee).
 
-* **Transfer pair** — switching type to Transfer prefills last from → to accounts (`lib/transaction-defaults.ts` / `localStorage`). Successful transfer saves the pair for next time.
+* **Transfer pair** — switching type to Transfer keeps the current/clicked account as **Pay From**; only the destination is filled from the last transfer pair (`lib/transaction-defaults.ts` / `localStorage`). Successful transfer saves the pair for next time. Swap button (like Move Money) flips from ↔ to.
 
 * **Last account** — new expense/income and expected-income forms prefer the last account used when no filter/account override applies.
 
@@ -388,7 +388,8 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 26. **Budget cache mutation fix** — Budget reads categories/groups directly from the query cache (no duplicate local state); Move Money and envelope edits use `patchCategories` / `patchCategoryGroups` so changes show immediately instead of being overwritten by stale cache.
 27. **Dashboard RTA cache fix** — Removed separate `useDashboardCategories` cache; Dashboard uses the same `useCategories()` query as Budget so Ready to Assign updates when switching tabs after Move Money or ledger changes.
 28. **Ledger list performance** — Default date filter is 90D (was All time). Transaction list shows 50 rows initially with **Show more** (+50 per tap); header reflects visible vs filtered count; totals still cover the full filtered set (`LEDGER_VISIBLE_BATCH` in `lib/ledger/filters.ts`).
-29. **Transaction defaults** — Payee recall fills category (including Ready to Assign / null) + account by latest same-type txn; Transfer remembers last from→to pair; last used account for new forms (`lib/transaction-defaults.ts`, `fetchLastDefaultsForPayee`).
+29. **Transaction defaults** — Payee recall fills category (including Ready to Assign / null) + account by latest same-type txn; Transfer keeps clicked/current account as Pay From and recalls destination only; swap button flips from↔to; last used account for new forms (`lib/transaction-defaults.ts`, `fetchLastDefaultsForPayee`).
 30. **Multi-category ledger filter** — Select multiple envelopes (OR); searchable checkbox UI + chips; URL `category=1,2,3`; migrates legacy single-category `localStorage`.
 31. **Expected income defaults** — Label recall prefills deposit account + category (including Ready to Assign) from last expected-income row, falling back to Income txn with the same payee; new forms use last deposit account (`fetchLastDefaultsForProjectedLabel`).
+32. **Transfer Pay From fix** — Quick entry / ledger Transfer no longer overwrites the account you opened with; destination still remembers last transfer target; stacked from/to UI with swap.
 

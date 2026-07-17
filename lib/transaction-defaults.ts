@@ -49,25 +49,36 @@ export function saveLastTxnAccountId(accountId: string) {
   }
 }
 
-/** Apply last transfer pair if both accounts still exist. */
+/**
+ * Prefer the current/clicked account as Pay From.
+ * Only reuse the last transfer pair for destination (and as from if none preferred).
+ */
 export function resolveTransferDefaults(
   accountIds: string[],
-  fallbackFrom?: string
+  preferredFrom?: string
 ): TransferPair {
   const pair = loadLastTransferPair();
   const valid = new Set(accountIds);
 
-  if (
-    pair &&
-    valid.has(pair.fromAccountId) &&
-    valid.has(pair.toAccountId) &&
-    pair.fromAccountId !== pair.toAccountId
-  ) {
-    return pair;
+  const from =
+    preferredFrom && valid.has(preferredFrom)
+      ? preferredFrom
+      : pair && valid.has(pair.fromAccountId)
+        ? pair.fromAccountId
+        : accountIds[0] || '';
+
+  let to = '';
+  if (pair) {
+    if (pair.toAccountId !== from && valid.has(pair.toAccountId)) {
+      to = pair.toAccountId;
+    } else if (pair.fromAccountId !== from && valid.has(pair.fromAccountId)) {
+      to = pair.fromAccountId;
+    }
+  }
+  if (!to) {
+    to = accountIds.find((id) => id !== from) || '';
   }
 
-  const from = fallbackFrom && valid.has(fallbackFrom) ? fallbackFrom : accountIds[0] || '';
-  const to = accountIds.find((id) => id !== from) || '';
   return { fromAccountId: from, toAccountId: to };
 }
 
