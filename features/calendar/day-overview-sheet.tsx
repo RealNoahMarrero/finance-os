@@ -7,7 +7,6 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   CalendarDays,
-  CreditCard,
   TrendingUp,
   Wallet,
 } from 'lucide-react';
@@ -16,10 +15,9 @@ import {
   billCalendarChipClass,
   type DaySnapshot,
 } from '@/lib/calendar/day-snapshot';
-import { creditCardCalendarChipClass } from '@/lib/credit-cards';
 import { formatMoney, MONEY_EPSILON } from '@/lib/money';
 import { projectedIncomeChipClass } from '@/lib/projected-income';
-import type { Account, ProjectedIncome } from '@/lib/types';
+import type { ProjectedIncome } from '@/lib/types';
 import { cn } from '@/lib/cn';
 
 type DayOverviewSheetProps = {
@@ -28,12 +26,7 @@ type DayOverviewSheetProps = {
   day: Date | null;
   today: Date;
   snapshot: DaySnapshot | null;
-  categoryOptions: Pick<
-    import('@/lib/types').Category,
-    'id' | 'name' | 'emoji' | 'assigned_amount'
-  >[];
   onIncomeClick: (item: ProjectedIncome) => void;
-  onCardClick: (card: Account) => void;
 };
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -50,9 +43,7 @@ export function DayOverviewSheet({
   day,
   today,
   snapshot,
-  categoryOptions,
   onIncomeClick,
-  onCardClick,
 }: DayOverviewSheetProps) {
   if (!day || !snapshot) return null;
 
@@ -60,9 +51,7 @@ export function DayOverviewSheet({
     format(day, 'yyyy-MM-dd') === format(today, 'yyyy-MM-dd');
   const isPast = !snapshot.showProjection;
   const hasEvents =
-    snapshot.income.length > 0 ||
-    snapshot.bills.length > 0 ||
-    snapshot.creditCards.length > 0;
+    snapshot.income.length > 0 || snapshot.bills.length > 0;
 
   const netPositive = snapshot.netForDay >= 0;
   const position = snapshot.position;
@@ -160,7 +149,7 @@ export function DayOverviewSheet({
           </section>
         )}
 
-        {(snapshot.bills.length > 0 || snapshot.creditCards.length > 0) && (
+        {snapshot.bills.length > 0 && (
           <section>
             <SectionLabel>Money out</SectionLabel>
             <div className="space-y-2">
@@ -183,25 +172,6 @@ export function DayOverviewSheet({
                   </span>
                 </Link>
               ))}
-              {snapshot.creditCards.map((card) => (
-                <button
-                  key={card.id}
-                  type="button"
-                  onClick={() => onCardClick(card)}
-                  className={cn(
-                    'w-full flex min-h-11 items-center justify-between gap-2 rounded-xl border px-3 py-2.5 touch-manipulation transition-all hover:brightness-95 active:scale-[0.99]',
-                    creditCardCalendarChipClass(card, today, categoryOptions)
-                  )}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <CreditCard size={14} className="shrink-0" />
-                    <span className="font-bold text-sm truncate">{card.name}</span>
-                  </div>
-                  <span className="font-black text-sm tabular-nums shrink-0">
-                    ${formatMoney(Number(card.minimum_payment) || 0)}
-                  </span>
-                </button>
-              ))}
             </div>
             <div className="mt-3 grid grid-cols-3 gap-2 text-center">
               <div className="rounded-xl bg-[var(--surface-subtle)] px-2 py-2">
@@ -218,13 +188,6 @@ export function DayOverviewSheet({
                 </p>
                 <p className="text-sm font-black tabular-nums text-[var(--text-primary)]">
                   ${formatMoney(snapshot.billFunded)}
-                  {snapshot.creditCards.length > 0 && (
-                    <span className="text-[10px] font-bold text-[var(--text-muted)]">
-                      {' '}
-                      · {snapshot.ccFundedCount}/{snapshot.creditCards.length}{' '}
-                      cards
-                    </span>
-                  )}
                 </p>
               </div>
               <div className="rounded-xl bg-[var(--surface-subtle)] px-2 py-2">

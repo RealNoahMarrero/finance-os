@@ -25,7 +25,7 @@ import {
   useInvalidateFinance,
   usePendingProjectedIncome,
 } from '@/hooks/use-finance-queries';
-import { CreditCardPaymentsPanel } from '@/features/credit-cards/credit-card-payments-panel';
+
 import {
   displayReadyToAssign,
   RtaBannerExtras,
@@ -640,11 +640,7 @@ export function BudgetView() {
         </div>
       </div>
 
-      <CreditCardPaymentsPanel
-        accounts={accounts}
-        categories={categories.filter((c) => !c.is_hidden)}
-        onUpdated={refreshBudgetData}
-      />
+
 
       {/* OVERSPENDING WARNING BANNER */}
       {hasNegativeCategories && (

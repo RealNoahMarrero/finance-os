@@ -212,8 +212,7 @@ function syncSummary() {
 
 function syncAccounts() {
   var data = supabaseGet_(
-    'accounts?select=name,type,balance,credit_limit,minimum_payment,payment_due_day,next_payment_due_date,' +
-      'payment_category:categories!payment_category_id(name)&order=type,name'
+    'accounts?select=name,type,balance,credit_limit&order=type,name'
   );
 
   var sheet = getOrCreateSheet_('Accounts', [
@@ -221,10 +220,6 @@ function syncAccounts() {
     'Type',
     'Balance',
     'Credit Limit',
-    'Minimum Payment',
-    'Payment Due Day',
-    'Next Payment Due',
-    'Budget Envelope',
   ]);
 
   var rows = data.map(function (acc) {
@@ -233,10 +228,6 @@ function syncAccounts() {
       acc.type,
       acc.balance,
       acc.credit_limit || 0,
-      acc.minimum_payment || 0,
-      acc.payment_due_day || '',
-      acc.next_payment_due_date || '',
-      acc.payment_category ? acc.payment_category.name : '',
     ];
   });
 

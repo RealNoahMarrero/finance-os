@@ -19,7 +19,6 @@ import {
   fetchMonthTransactions,
   fetchTransactions,
 } from '@/lib/queries/transactions';
-import { backfillAccountPaymentDueDates } from '@/lib/queries/credit-card-payments';
 import { roundMoney } from '@/lib/money';
 import { financeKeys } from '@/lib/query-keys';
 import { supabase } from '@/lib/supabase';
@@ -32,13 +31,6 @@ export const financeQueryDefaults = {
   staleTime: STALE_TIME,
   gcTime: GC_TIME,
 };
-
-async function loadAccountsWithBackfill() {
-  const { data, error } = await fetchAccounts();
-  if (error || !data) return { data: [] as Account[], error };
-  const filled = await backfillAccountPaymentDueDates(data);
-  return { data: filled, error: null };
-}
 
 async function loadTransactionsWithSplits() {
   const { data, error } = await fetchTransactions();
@@ -61,7 +53,7 @@ async function loadRecentTransactions(limit: number) {
 export function useAccounts() {
   return useQuery({
     queryKey: financeKeys.accounts(),
-    queryFn: loadAccountsWithBackfill,
+    queryFn: fetchAccounts,
     select: (result) => result.data ?? [],
     ...financeQueryDefaults,
   });
@@ -226,7 +218,7 @@ export function useInvalidateFinance() {
 export function prefetchCoreFinanceData(qc: ReturnType<typeof useQueryClient>) {
   void qc.prefetchQuery({
     queryKey: financeKeys.accounts(),
-    queryFn: loadAccountsWithBackfill,
+    queryFn: fetchAccounts,
     ...financeQueryDefaults,
   });
   void qc.prefetchQuery({

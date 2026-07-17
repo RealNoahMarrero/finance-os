@@ -131,15 +131,13 @@ function buildCsvExport(
     sections.push(
       csvSection(
         'ACCOUNTS',
-        ['Name', 'Type', 'Balance', 'Credit Limit', 'Min Payment', 'Due Day'].map(String),
+        ['Name', 'Type', 'Balance', 'Credit Limit'].map(String),
         data.accounts.map((a) =>
           csvRow([
             a.name,
             a.type,
             a.balance,
             a.type === 'Credit Card' ? a.credit_limit : '',
-            a.type === 'Credit Card' ? a.minimum_payment : '',
-            a.payment_due_day ?? '',
           ]).split(',')
         )
       )

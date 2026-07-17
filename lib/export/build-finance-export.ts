@@ -63,9 +63,6 @@ export function buildFinanceOsExportText(input: FinanceExportInput): string {
     text += `${a.name} (${a.type}): ${bal < 0 ? '-' : ''}$${formatMoney(Math.abs(bal))}`;
     if (a.type === 'Credit Card') {
       if (a.credit_limit > 0) text += ` | Limit: $${formatMoney(a.credit_limit)}`;
-      const minPay = Number(a.minimum_payment) || 0;
-      if (minPay > 0) text += ` | Min pay: $${formatMoney(minPay)}`;
-      if (a.payment_due_day != null) text += ` | Due day: ${a.payment_due_day}`;
     }
     text += '\n';
   });

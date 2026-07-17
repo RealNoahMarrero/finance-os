@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { 
   ChevronLeft, ChevronRight, Calendar as CalendarIcon, 
-  CheckCircle2, TrendingUp, CreditCard
+  CheckCircle2, TrendingUp
 } from 'lucide-react';
 import { 
   format, addMonths, subMonths, startOfMonth, endOfMonth, 
@@ -27,27 +27,15 @@ import {
   ProjectedIncomeFormModal,
   ProjectedIncomeReceiveModal,
 } from '@/features/projected-income/projected-income-modals';
-import {
-  creditCardCalendarChipClass,
-  creditCardsDueOnDay,
-  getCreditCardPaymentFundingStatus,
-  isCreditCardPaymentDueInMonth,
-  totalCreditMinimumsDueInMonth,
-} from '@/lib/credit-cards';
 import { cn } from '@/lib/cn';
-import {
-  advanceCreditCardPaymentCycle,
-} from '@/lib/queries/credit-card-payments';
-import { CreditCardPaymentDetail } from '@/features/credit-cards/credit-card-payment-detail';
 import { projectedIncomeChipClass } from '@/lib/projected-income';
-import type { Account, ProjectedIncome } from '@/lib/types';
+import type { ProjectedIncome } from '@/lib/types';
 
-type CalendarEventFilter = 'all' | 'bills' | 'credit-cards' | 'income';
+type CalendarEventFilter = 'all' | 'bills' | 'income';
 
 const CALENDAR_FILTERS: { id: CalendarEventFilter; label: string; shortLabel?: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'bills', label: 'Bills' },
-  { id: 'credit-cards', label: 'Credit cards', shortLabel: 'Cards' },
   { id: 'income', label: 'Income' },
 ];
 
@@ -70,22 +58,10 @@ export function CalendarView() {
     () => allCategoriesData.filter((c) => !c.is_hidden),
     [allCategoriesData]
   );
-  const categoryOptions = useMemo(
-    () =>
-      allCategories.map((c) => ({
-        id: c.id,
-        name: c.name,
-        emoji: c.emoji,
-        assigned_amount: c.assigned_amount,
-      })),
-    [allCategories]
-  );
 
   const loading = billsLoading || accountsLoading || allCatsLoading;
 
   const [detailItem, setDetailItem] = useState<ProjectedIncome | null>(null);
-  const [detailCard, setDetailCard] = useState<Account | null>(null);
-  const [markingCardPaid, setMarkingCardPaid] = useState(false);
   const [editingProjected, setEditingProjected] = useState<ProjectedIncome | null>(null);
   const [receiveProjected, setReceiveProjected] = useState<ProjectedIncome | null>(null);
   const [isProjectedFormOpen, setIsProjectedFormOpen] = useState(false);
@@ -98,19 +74,6 @@ export function CalendarView() {
       setEventFilter(saved as CalendarEventFilter);
     }
   }, []);
-
-  async function refreshAccounts() {
-    await invalidate.invalidateAccounts();
-  }
-
-  async function handleMarkCardPaid() {
-    if (!detailCard) return;
-    setMarkingCardPaid(true);
-    await advanceCreditCardPaymentCycle(detailCard);
-    setMarkingCardPaid(false);
-    setDetailCard(null);
-    await refreshAccounts();
-  }
 
   async function refreshProjected() {
     await invalidate.invalidateProjected();
@@ -134,7 +97,6 @@ export function CalendarView() {
 
   const showIncome = eventFilter === 'all' || eventFilter === 'income';
   const showBills = eventFilter === 'all' || eventFilter === 'bills';
-  const showCreditCards = eventFilter === 'all' || eventFilter === 'credit-cards';
 
   // Calendar Grid Generation
   const monthStart = startOfMonth(currentMonth);
@@ -160,8 +122,7 @@ export function CalendarView() {
       projectedIncome,
       pendingProjected,
       accounts,
-      allCategories,
-      categoryOptions
+      allCategories
     );
   }, [
     selectedDay,
@@ -171,21 +132,14 @@ export function CalendarView() {
     pendingProjected,
     accounts,
     allCategories,
-    categoryOptions,
   ]);
 
   // Math for the header stats
   const currentMonthBills = categories.filter(c => c.due_date && isSameMonth(parseISO(c.due_date), currentMonth));
-  const ccDueThisMonth = accounts.filter((a) => isCreditCardPaymentDueInMonth(a, currentMonth));
-  const ccMinimumsThisMonth = totalCreditMinimumsDueInMonth(accounts, currentMonth);
   const billTargetsThisMonth = snapMoney(
     currentMonthBills.reduce((sum, c) => sum + Number(c.target_amount), 0)
   );
-  const totalDueThisMonth = snapMoney(billTargetsThisMonth + ccMinimumsThisMonth);
   const totalFundedThisMonth = snapMoney(currentMonthBills.reduce((sum, c) => sum + Number(c.assigned_amount), 0));
-  const ccFundedThisMonth = ccDueThisMonth.filter(
-    (a) => getCreditCardPaymentFundingStatus(a, categoryOptions) === 'funded'
-  ).length;
   const totalExpectedIncome = snapMoney(
     projectedIncome.reduce((sum, p) => sum + Number(p.amount), 0)
   );
@@ -252,31 +206,20 @@ export function CalendarView() {
           'mb-6 gap-3 md:gap-4',
           eventFilter === 'income'
             ? 'grid grid-cols-1 md:max-w-sm'
-            : cn(
-                'flex overflow-x-auto hide-scrollbar snap-x snap-mandatory pb-1 -mx-4 px-4 md:mx-0 md:px-0 md:grid md:overflow-visible md:pb-0',
-                eventFilter === 'credit-cards' ? 'md:grid-cols-2' : 'md:grid-cols-3'
-              )
+            : 'flex overflow-x-auto hide-scrollbar snap-x snap-mandatory pb-1 -mx-4 px-4 md:mx-0 md:px-0 md:grid md:grid-cols-3 md:overflow-visible md:pb-0'
         )}
       >
-          {(eventFilter === 'all' || eventFilter === 'bills' || eventFilter === 'credit-cards') && (
+          {(eventFilter === 'all' || eventFilter === 'bills') && (
           <div className="app-card p-3 sm:p-4 rounded-2xl shadow-sm border border-[var(--border)] flex items-center gap-3 sm:gap-4 shrink-0 min-w-[min(100%,17.5rem)] snap-start md:min-w-0">
               <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center shrink-0"><CalendarIcon size={22}/></div>
               <div className="min-w-0">
                   <p className="text-[10px] sm:text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider truncate">
-                    {eventFilter === 'credit-cards'
-                      ? `Card minimums · ${format(currentMonth, 'MMM')}`
-                      : eventFilter === 'bills'
-                        ? `Bills due · ${format(currentMonth, 'MMM')}`
-                        : `Due · ${format(currentMonth, 'MMM')}`}
+                    {eventFilter === 'bills'
+                      ? `Bills due · ${format(currentMonth, 'MMM')}`
+                      : `Due · ${format(currentMonth, 'MMM')}`}
                   </p>
                   <p className="text-xl sm:text-2xl font-black text-[var(--text-primary)] tabular-nums">
-                    ${formatMoney(
-                      eventFilter === 'credit-cards'
-                        ? ccMinimumsThisMonth
-                        : eventFilter === 'bills'
-                          ? billTargetsThisMonth
-                          : totalDueThisMonth
-                    )}
+                    ${formatMoney(billTargetsThisMonth)}
                   </p>
               </div>
           </div>
@@ -287,20 +230,6 @@ export function CalendarView() {
               <div className="min-w-0">
                   <p className="text-[10px] sm:text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Funded</p>
                   <p className="text-xl sm:text-2xl font-black text-[var(--text-primary)] tabular-nums">${formatMoney(totalFundedThisMonth)}</p>
-              </div>
-          </div>
-          )}
-          {eventFilter === 'credit-cards' && (
-          <div className="app-card p-3 sm:p-4 rounded-2xl shadow-sm border border-[var(--border)] flex items-center gap-3 sm:gap-4 shrink-0 min-w-[min(100%,17.5rem)] snap-start md:min-w-0">
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0"><CreditCard size={22}/></div>
-              <div className="min-w-0">
-                  <p className="text-[10px] sm:text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Funded payments</p>
-                  <p className="text-xl sm:text-2xl font-black text-[var(--text-primary)] tabular-nums">
-                    {ccFundedThisMonth}
-                    <span className="text-sm sm:text-base font-bold text-[var(--text-muted)]">
-                      {' '}/ {ccDueThisMonth.length}
-                    </span>
-                  </p>
               </div>
           </div>
           )}
@@ -351,14 +280,9 @@ export function CalendarView() {
             const dayIncome = projectedIncome.filter(
               (p) => p.expected_date === format(day, 'yyyy-MM-dd')
             );
-            const dayCcPayments = creditCardsDueOnDay(
-              accounts,
-              format(day, 'yyyy-MM-dd')
-            );
 
             const hasDayEvents =
               (showIncome && dayIncome.length > 0) ||
-              (showCreditCards && dayCcPayments.length > 0) ||
               (showBills && dayBills.length > 0);
 
             return (
@@ -395,25 +319,6 @@ export function CalendarView() {
                       <span className="font-black xl:ml-auto">+${formatMoney(inc.amount)}</span>
                     </button>
                   ))}
-                  {showCreditCards && dayCcPayments.map((card) => (
-                    <button
-                      key={`cc-${card.id}`}
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDetailCard(card);
-                      }}
-                      className={`px-1.5 py-1 md:p-1.5 rounded border text-[9px] md:text-xs font-bold flex flex-col xl:flex-row xl:items-center justify-between gap-0.5 xl:gap-2 truncate touch-manipulation hover:brightness-95 active:scale-[0.98] transition-all ${creditCardCalendarChipClass(card, today, categoryOptions)}`}
-                    >
-                      <div className="flex items-center gap-1 truncate">
-                        <CreditCard size={10} className="shrink-0" />
-                        <span className="truncate max-w-[4rem] sm:max-w-none">{card.name}</span>
-                      </div>
-                      <span className="font-black xl:ml-auto">
-                        ${formatMoney(Number(card.minimum_payment) || 0)}
-                      </span>
-                    </button>
-                  ))}
                   {showBills && dayBills.map(bill => {
                       return (
                           <Link
@@ -445,31 +350,11 @@ export function CalendarView() {
         day={selectedDay}
         today={today}
         snapshot={daySnapshot}
-        categoryOptions={categoryOptions}
         onIncomeClick={(inc) => {
           setSelectedDay(null);
           setDetailItem(inc);
         }}
-        onCardClick={(card) => {
-          setSelectedDay(null);
-          setDetailCard(card);
-        }}
       />
-
-      <ResponsiveModal
-        open={!!detailCard}
-        onOpenChange={(open) => !open && setDetailCard(null)}
-        title={detailCard?.name ?? 'Credit card payment'}
-      >
-        {detailCard && (
-          <CreditCardPaymentDetail
-            card={detailCard}
-            categories={categoryOptions}
-            onMarkPaid={handleMarkCardPaid}
-            markingPaid={markingCardPaid}
-          />
-        )}
-      </ResponsiveModal>
 
       <ResponsiveModal
         open={!!detailItem}
@@ -518,7 +403,7 @@ export function CalendarView() {
         onOpenChange={setIsProjectedFormOpen}
         editing={editingProjected}
         accounts={accounts}
-        categories={categoryOptions}
+        categories={allCategories}
         onSaved={refreshProjected}
       />
       <ProjectedIncomeReceiveModal

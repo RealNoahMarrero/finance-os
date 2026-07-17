@@ -1,10 +1,6 @@
 import { format, isBefore, parseISO, startOfDay } from 'date-fns';
 import { snapMoney, MONEY_EPSILON } from '@/lib/money';
 import {
-  creditCardsDueOnDay,
-  getCreditCardPaymentFundingStatus,
-} from '@/lib/credit-cards';
-import {
   computePendingInflowBreakdown,
   computeProjectedPlanning,
 } from '@/lib/projected-income';
@@ -97,15 +93,12 @@ export interface DaySnapshot {
   dayIso: string;
   bills: BillCategory[];
   income: ProjectedIncome[];
-  creditCards: Account[];
   inflowTotal: number;
   guaranteedInflow: number;
   anticipatedInflow: number;
   outflowTotal: number;
   billOutflow: number;
-  ccOutflow: number;
   billFunded: number;
-  ccFundedCount: number;
   netForDay: number;
   showProjection: boolean;
   position: DayPosition | null;
@@ -175,13 +168,11 @@ export function computeDaySnapshot(
   monthIncome: ProjectedIncome[],
   allPendingIncome: ProjectedIncome[],
   accounts: Account[],
-  allCategories: Category[],
-  categoryOptions: Pick<Category, 'id' | 'assigned_amount'>[]
+  allCategories: Category[]
 ): DaySnapshot {
   const dayIso = format(day, 'yyyy-MM-dd');
   const bills = billsDueOnDay(categories, dayIso);
   const income = incomeDueOnDay(monthIncome, dayIso);
-  const creditCards = creditCardsDueOnDay(accounts, dayIso);
 
   const guaranteedInflow = snapMoney(
     income
@@ -198,17 +189,10 @@ export function computeDaySnapshot(
   const billOutflow = snapMoney(
     bills.reduce((sum, b) => sum + Number(b.target_amount), 0)
   );
-  const ccOutflow = snapMoney(
-    creditCards.reduce((sum, c) => sum + (Number(c.minimum_payment) || 0), 0)
-  );
-  const outflowTotal = snapMoney(billOutflow + ccOutflow);
 
   const billFunded = snapMoney(
     bills.reduce((sum, b) => sum + Number(b.assigned_amount), 0)
   );
-  const ccFundedCount = creditCards.filter(
-    (c) => getCreditCardPaymentFundingStatus(c, categoryOptions) === 'funded'
-  ).length;
 
   const showProjection = !isBefore(startOfDay(day), startOfDay(today));
   const incomeOnDay = pendingIncomeOnDay(allPendingIncome, dayIso);
@@ -232,16 +216,13 @@ export function computeDaySnapshot(
     dayIso,
     bills,
     income,
-    creditCards,
     inflowTotal,
     guaranteedInflow,
     anticipatedInflow,
-    outflowTotal,
+    outflowTotal: billOutflow,
     billOutflow,
-    ccOutflow,
     billFunded,
-    ccFundedCount,
-    netForDay: snapMoney(inflowTotal - outflowTotal),
+    netForDay: snapMoney(inflowTotal - billOutflow),
     showProjection,
     position,
     cumulativePosition,

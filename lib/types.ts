@@ -8,10 +8,6 @@ export interface Account {
   type: AccountType;
   balance: number;
   credit_limit: number;
-  minimum_payment: number;
-  payment_due_day: number | null;
-  next_payment_due_date: string | null;
-  payment_category_id: number | null;
 }
 
 export interface CategoryGroup {

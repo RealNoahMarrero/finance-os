@@ -531,20 +531,6 @@ export function ReportsView() {
                         </p>
                       </>
                     )}
-                    {(card.minimum_payment > 0 ||
-                      card.next_payment_due_date ||
-                      card.payment_due_day != null) && (
-                      <p className="mt-2 text-xs font-bold text-orange-600">
-                        {card.minimum_payment > 0 &&
-                          `Min payment $${formatMoney(card.minimum_payment)}`}
-                        {card.next_payment_due_date && (
-                          <>
-                            {card.minimum_payment > 0 && ' · '}
-                            Next due {card.next_payment_due_date}
-                          </>
-                        )}
-                      </p>
-                    )}
                   </div>
                 ))}
               </div>

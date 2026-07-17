@@ -39,11 +39,11 @@ Core tables: `accounts`, `category_groups`, `categories`, `transactions`, **`pro
 | [`supabase/migrations/002_transaction_splits.sql`](supabase/migrations/002_transaction_splits.sql) | Multi-category lines for one expense/income |
 
 | [`supabase/migrations/003_projected_income_rls.sql`](supabase/migrations/003_projected_income_rls.sql) | RLS policies for `projected_income` and `transaction_splits` (required if saves fail with permission errors) |
-| [`supabase/migrations/004_credit_card_payments.sql`](supabase/migrations/004_credit_card_payments.sql) | `accounts.minimum_payment`, `accounts.payment_due_day` for CC calendar + insights |
-| [`supabase/migrations/005_credit_card_payment_cycle.sql`](supabase/migrations/005_credit_card_payment_cycle.sql) | `next_payment_due_date`, `payment_category_id` — mark paid advances cycle; budget funding colors |
+| [`supabase/migrations/004_credit_card_payments.sql`](supabase/migrations/004_credit_card_payments.sql) | Legacy: added `minimum_payment` / `payment_due_day` (removed in 008) |
+| [`supabase/migrations/005_credit_card_payment_cycle.sql`](supabase/migrations/005_credit_card_payment_cycle.sql) | Legacy: payment cycle columns (removed in 008) |
 | [`supabase/migrations/006_projected_income_certainty.sql`](supabase/migrations/006_projected_income_certainty.sql) | `certainty` (`guaranteed` \| `anticipated`) on expected income for conservative vs full projected RTA |
 | [`supabase/migrations/007_budgeted_amount.sql`](supabase/migrations/007_budgeted_amount.sql) | Optional `budgeted_amount` column (legacy; **RTA does not use it**) |
-
+| [`supabase/migrations/008_drop_credit_card_payment_cycle.sql`](supabase/migrations/008_drop_credit_card_payment_cycle.sql) | Drop account-level CC payment cycle; due dates/funding live on categories |
 
 
 ### `projected_income`
@@ -74,8 +74,7 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 * **Expected income certainty** — `guaranteed` = reliable (paycheck, salary); counts toward conservative projected RTA. `anticipated` = uncertain (invoice, gig, other); optimistic projected RTA only.
 
-* **Credit cards** — `minimum_payment`, `payment_due_day`, active `next_payment_due_date`, optional `payment_category_id` for envelope funding; **Mark paid** advances due date +1 month; calendar gold when funded (`lib/credit-cards.ts`, `features/credit-cards/`).
-
+* **Credit cards** — account stores balance + `credit_limit` for utilization on Insights (`lib/credit-cards.ts`). Payment due dates and funding live on **budget categories** (bills/debt + Smart Bill Pay), not on the account.
 * **Expected income dates** — pending rows cannot stay before today; auto-bumped on fetch and clamped on save (`lib/queries/projected-income.ts`).
 
 
@@ -198,15 +197,15 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 
 
 
-* Month grid of bill due dates (funding colors), **credit card chips on `next_payment_due_date`** (gold when linked category is funded; tap → mark paid), and emerald chips for expected income (`projected_income`).
+* Month grid of bill due dates (funding colors) and emerald chips for expected income (`projected_income`).
 
-* **Event filters** — pill bar: All / Bills / Credit cards / Income. Filters grid chips and adapts header stats (due, funded, expected income, or CC funded count). Preference persists in `localStorage` (`finance_os_calendar_filter`). Mobile: horizontal scroll strip with short labels (“Cards”), 44px touch targets, edge-to-edge scroll for filters and stat cards.
+* **Event filters** — pill bar: All / Bills / Income. Filters grid chips and adapts header stats (due, funded, expected income). Preference persists in `localStorage` (`finance_os_calendar_filter`). Mobile: horizontal scroll strip, 44px touch targets, edge-to-edge scroll for filters and stat cards.
 
 * Header stats: bills due, funded, expected income this month (scoped to active filter).
 
 * Bill chips deep-link to `/budget?category={id}`.
 
-* **Day overview** — tap any day cell to open a `ResponsiveModal` sheet (bottom sheet on mobile, dialog on desktop). Shows **net for the day** (income minus bills/CC minimums), **Money in** / **Money out** lists with due · funded · shortfall, and **If this day's income arrives** for today and future dates: projected liquid + projected RTA/Assignable using **only** pending income on that calendar day (not later deposits). Optional **Planning · by end of [date]** sub-card when earlier pending income exists through that day (cumulative runway, clearly labeled as not money today). Past days show events only. Individual chips still work (`stopPropagation`) for budget, mark paid, receive/edit. Logic in `lib/calendar/day-snapshot.ts`; UI in `features/calendar/day-overview-sheet.tsx`.
+* **Day overview** — tap any day cell to open a `ResponsiveModal` sheet (bottom sheet on mobile, dialog on desktop). Shows **net for the day** (income minus bills), **Money in** / **Money out** lists with due · funded · shortfall, and **If this day's income arrives** for today and future dates: projected liquid + projected RTA/Assignable using **only** pending income on that calendar day (not later deposits). Optional **Planning · by end of [date]** sub-card when earlier pending income exists through that day (cumulative runway, clearly labeled as not money today). Past days show events only. Individual chips still work (`stopPropagation`) for budget and receive/edit. Logic in `lib/calendar/day-snapshot.ts`; UI in `features/calendar/day-overview-sheet.tsx`.
 
 
 
@@ -218,7 +217,7 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 
 * **Budget** — RTA banner matches Dashboard (**Assignable** when overspent; labeled overspent vs expected-income cards). **Assign Money** opens Move Money with **no balance caps** — any amount, any source (RTA or category), envelopes and displayed RTA may go negative for planning. Move Money: network-error guidance, submit guard, partial rollback on failure.
 
-* **Calendar** — Income chips + month stat; tap day for overview sheet or tap chip for receive/edit / mark paid / budget. Event filter bar (All / Bills / Credit cards / Income) with filter-aware stats.
+* **Calendar** — Income chips + month stat; tap day for overview sheet or tap chip for receive/edit / budget. Event filter bar (All / Bills / Income) with filter-aware stats.
 
 
 
@@ -318,7 +317,7 @@ Paste into **Extensions → Apps Script**, set `SUPABASE_URL` and `SUPABASE_KEY`
 
 | **Summary** | Computed from accounts, categories, pending `projected_income` | Net worth, liquid, net envelopes, overspent total, RTA before coverage, **Assignable**, pending guaranteed/anticipated, projected RTA + projected Assignable, plain-language definitions |
 
-| Accounts | `accounts` | Includes CC min payment, due day, next due date, linked budget envelope |
+| Accounts | `accounts` | Includes credit limit; CC payment due dates live on categories |
 
 | Categories | `categories` (non-hidden) | `Available` = envelope balance; `Overspent?` when negative |
 
@@ -365,17 +364,17 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 4. **Split transactions** — `transaction_splits` table, ledger split UI, reports category aggregation from splits.
 
 5. **Exports** — Dashboard “Export Full Report” (`lib/export/build-finance-export.ts`): summary, accounts, expected income, transactions (split-aware), split detail, categories. Google Sheets sync: `scripts/google-sheets-sync.gs` (Accounts, Categories, Transactions, ExpectedIncome, TransactionSplits).
-6. **Credit cards & stale income** — payment cycle with mark-paid advance; budget envelope link; utilization on Insights (true %, including over limit); pending expected income auto-advances to today when overdue.
+6. **Credit cards & stale income** — CC accounts keep balance + credit limit (utilization on Insights); payment due dates/funding use budget categories. Pending expected income auto-advances to today when overdue.
 7. **Unified export modal** — presets (full, insights, budget, transactions), TXT/CSV, expected-income certainty in exports; Insights page export restored with live period binding.
 8. **RTA formula fix** — RTA = liquid minus positive envelopes only; overspent categories no longer inflate RTA.
-9. **Google Sheets sync audit** — Summary sheet with app-matching RTA/projected RTA math, income certainty column, CC payment fields, overspent flag; pending-only expected income; inline definitions for AI.
+9. **Google Sheets sync audit** — Summary sheet with app-matching RTA/projected RTA math, income certainty column, credit limit, overspent flag; pending-only expected income; inline definitions for AI.
 10. **Budget RTA assign** — Assign Money button on the RTA banner opens envelope transfers from RTA (mobile + dark-mode friendly); duplicate actionable RTA card removed.
 11. **Move Money fix** — Removed HTML `max`/`min` that silently blocked submit; `formatMoneyInput` for transfer amounts; clearer validation alerts and Supabase error surfacing.
 12. **Overspent transfer prefill** — Clicking negative Available prefills the full deficit amount and defaults source to another funded envelope (not RTA-capped).
 13. **Move Money resilience** — Network-error messaging for failed Supabase fetches, submit guard while transferring, rollback on partial category-to-category failure.
 14. **Insights category drill-down** — Tap a spending category to view all transactions in that envelope for the current period (`listCategoryExpenses`, split-line aware); `category-spending-detail` modal.
 15. **Mobile sheet scroll fix** — Vaul bottom sheets only dismiss from the top handle (`handleOnly`); scrollable content marked `data-vaul-no-drag` so add/edit expected income and other `ResponsiveModal` popups stay open while scrolling with the keyboard up.
-16. **Calendar event filters** — All / Bills / Credit cards / Income filter bar on `/calendar`; grid chips and header stats adapt to selection; preference in `localStorage`; mobile-optimized horizontal scroll and compact stat labels.
+16. **Calendar event filters** — All / Bills / Income filter bar on `/calendar`; grid chips and header stats adapt to selection; preference in `localStorage`; mobile-optimized horizontal scroll and compact stat labels.
 17. **Dashboard header cleanup** — Removed duplicate Finance OS title on home; branding stays in desktop top bar only.
 18. **RTA formula (YNAB-style)** — Ready to Assign uses net envelope Available (overspent negatives count); Move Money and covering overspent categories behave intuitively vs liquid cash.
 19. **Move Money (negative envelopes)** — Category-to-category transfers no longer require positive source Available; envelopes may go negative when reallocating. RTA-from transfers uncapped — assign any amount for planning.
@@ -392,4 +391,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 30. **Multi-category ledger filter** — Select multiple envelopes (OR); searchable checkbox UI + chips; URL `category=1,2,3`; migrates legacy single-category `localStorage`.
 31. **Expected income defaults** — Label recall prefills deposit account + category (including Ready to Assign) from last expected-income row, falling back to Income txn with the same payee; new forms use last deposit account (`fetchLastDefaultsForProjectedLabel`).
 32. **Transfer Pay From fix** — Quick entry / ledger Transfer no longer overwrites the account you opened with; destination still remembers last transfer target; stacked from/to UI with swap.
+33. **Remove CC payment cycle** — Dropped account-level min payment / due day / mark paid / calendar CC chips; categories own due dates and funding. Kept credit limit + utilization. Migration `008_drop_credit_card_payment_cycle.sql`.
 
