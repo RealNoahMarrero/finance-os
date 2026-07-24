@@ -16,9 +16,17 @@
 
 Finance OS is a custom, manual-entry financial platform designed to replace YNAB. Zero-Based Budgeting ("Ready to Assign") with future forecasting and dynamic subscription/debt tracking.
 
-**Scope today:** Personal finances only — all accounts, categories, transactions, and reports represent personal money.
+**Scope:** Two separate books via a global **Personal / Business** toggle (`EntityProvider`, `data-entity` on `html`). Business uses a blue `--entity-accent`; income/expense greens/reds stay semantic. All queries, RTA, exports, and Sheets sync are scoped by `entity_id`. Existing data was migrated as Personal.
 
-**Next major initiative:** **Business toggle** — a global switch (personal ↔ business) that re-scopes the entire app (accounts, budget, ledger, calendar, insights, exports) to business finances. Not implemented yet; schema and UI will need entity separation or tagging when built.
+**Business (Marrero LLC):** Historical Chase ledger imported via [`scripts/import-marrero-business-history.sql`](scripts/import-marrero-business-history.sql) (one-shot Supabase SQL). Closed checking stays in-app at **$0** as `Chase Business Checking` for history — rename to “(Closed)” if desired. No account-hide yet (categories can archive; accounts cannot). New money goes on Relay accounts when ready. Do not delete the closed account if you want Ledger/Insights/Sheets history.
+
+**Ventures (Business only):** Marrero LLC umbrella classes (Trading, YouTube channels, SOUR, Ora, etc.) in `ventures`. Optional `venture_id` on categories / transactions / expected income. Null = general overhead. Budget/ledger filters = mini-budget views; shared Business RTA (one LLC treasury).
+
+**Owner flows:** Pay yourself / Fund business create linked Expense + Income across entities (`owner_flow`, `linked_transaction_id`). Historical owner contribution/draw rows from the Chase import are tagged on the business side only.
+
+**Receipts:** `transaction_attachments` + Supabase Storage bucket `receipts` (photos + files on ledger edit).
+
+**Deferred:** Clients / invoicing (external client ops closed per growth strategy). Account archive/hide UI.
 
 
 
@@ -26,7 +34,7 @@ Finance OS is a custom, manual-entry financial platform designed to replace YNAB
 
 
 
-Core tables: `accounts`, `category_groups`, `categories`, `transactions`, **`projected_income`**, **`transaction_splits`**.
+Core tables: `accounts`, `category_groups`, `categories`, `transactions`, **`projected_income`**, **`transaction_splits`**, **`entities`**, **`ventures`**, **`transaction_attachments`**.
 
 
 
@@ -44,6 +52,7 @@ Core tables: `accounts`, `category_groups`, `categories`, `transactions`, **`pro
 | [`supabase/migrations/006_projected_income_certainty.sql`](supabase/migrations/006_projected_income_certainty.sql) | `certainty` (`guaranteed` \| `anticipated`) on expected income for conservative vs full projected RTA |
 | [`supabase/migrations/007_budgeted_amount.sql`](supabase/migrations/007_budgeted_amount.sql) | Optional `budgeted_amount` column (legacy; **RTA does not use it**) |
 | [`supabase/migrations/008_drop_credit_card_payment_cycle.sql`](supabase/migrations/008_drop_credit_card_payment_cycle.sql) | Drop account-level CC payment cycle; due dates/funding live on categories |
+| [`supabase/migrations/009_entities_and_ventures.sql`](supabase/migrations/009_entities_and_ventures.sql) | `entities`, `ventures`, `entity_id` on core tables, owner-flow link fields, `transaction_attachments` + receipts storage |
 
 
 ### `projected_income`
@@ -111,7 +120,7 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 
 
-* `app/layout.tsx` — fonts, ThemeProvider, QueryProvider, AppShell
+* `app/layout.tsx` — fonts, ThemeProvider, QueryProvider, EntityProvider, AppShell (`suppressHydrationWarning` on `body` for browser extensions)
 
 * `app/providers/query-provider.tsx` — TanStack Query client (5 min stale time, shared cache across tabs)
 
@@ -157,7 +166,11 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 * `hooks/use-finance-queries.ts`, `lib/query-keys.ts` — shared Supabase data cache (accounts, categories, transactions, projected income); one `categories` query shared by Dashboard, Budget, Ledger, and Insights; `useInvalidateFinance()` for post-mutation refresh; `patchCategories` / `patchCategoryGroups` update all category caches immediately after Move Money and envelope edits; Ledger + Insights share one `transactions` query
 
-* `scripts/google-sheets-sync.gs` — Apps Script for Google Sheets ↔ Supabase REST sync (placeholders for URL/key; do not commit secrets)
+* `scripts/google-sheets-sync.gs` — Personal Sheets sync (`ENTITY_ID = personal`)
+* `scripts/google-sheets-sync-business.gs` — Business / Marrero LLC Sheets sync (`ENTITY_ID = business` + Ventures sheet)
+* `scripts/import-marrero-business-history.sql` — One-shot SQL import of closed Chase business ledger (run in Supabase SQL editor after 009)
+* `app/providers/entity-provider.tsx`, `components/layout/entity-toggle.tsx` — Personal/Business mode
+* `features/ventures/`, `features/owner-flow/`, `features/receipts/` — ventures, owner draws, attachments
 
 
 
@@ -303,11 +316,11 @@ Dashboard export fetches live data via `fetchTransactions()` (with splits), `fet
 
 
 
-### Google Sheets (`scripts/google-sheets-sync.gs`)
+### Google Sheets (`scripts/google-sheets-sync.gs` + `google-sheets-sync-business.gs`)
 
 
 
-Paste into **Extensions → Apps Script**, set `SUPABASE_URL` and `SUPABASE_KEY`, reload spreadsheet. Menu: **Finance OS → Sync Latest Data**. Designed compact for AI: read **Summary** first (headline metrics + definitions), then detail sheets as needed.
+Paste into **Extensions → Apps Script**, set `SUPABASE_URL` and `SUPABASE_KEY`, reload spreadsheet. Menu: **Finance OS → Sync Latest Data**. Use **separate spreadsheets** for Personal vs Business. Each script filters by `ENTITY_ID`. Business script also syncs a **Ventures** sheet.
 
 
 
@@ -319,17 +332,19 @@ Paste into **Extensions → Apps Script**, set `SUPABASE_URL` and `SUPABASE_KEY`
 
 | Accounts | `accounts` | Includes credit limit; CC payment due dates live on categories |
 
-| Categories | `categories` (non-hidden) | `Available` = envelope balance; `Overspent?` when negative |
+| Categories | `categories` (non-hidden) | `Available` = envelope balance; `Overspent?` when negative; **Venture** column when joined |
 
-| Transactions | `transactions` + nested splits | `Is Split` / `Split Detail` columns |
+| Transactions | `transactions` + nested splits | `Is Split` / `Split Detail`; **Venture** / **Owner Flow** columns |
 
-| ExpectedIncome | `projected_income` **pending only** | `Certainty` (Guaranteed / Anticipated); received → Transactions |
+| ExpectedIncome | `projected_income` **pending only** | `Certainty` (Guaranteed / Anticipated); **Venture**; received → Transactions |
 
 | TransactionSplits | `transaction_splits` | Optional detail; Transactions already has split summary |
 
+| Ventures | `ventures` (business sheet only) | Name, Notes, Active?, Sort |
 
 
-Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use publishable/anon key only in Sheets — never commit real keys to git.
+
+Requires RLS read access on new tables (`003_projected_income_rls.sql`, `009_entities_and_ventures.sql`). Use publishable/anon key only in Sheets — never commit real keys to git.
 
 
 
@@ -392,4 +407,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`). Use pub
 31. **Expected income defaults** — Label recall prefills deposit account + category (including Ready to Assign) from last expected-income row, falling back to Income txn with the same payee; new forms use last deposit account (`fetchLastDefaultsForProjectedLabel`).
 32. **Transfer Pay From fix** — Quick entry / ledger Transfer no longer overwrites the account you opened with; destination still remembers last transfer target; stacked from/to UI with swap.
 33. **Remove CC payment cycle** — Dropped account-level min payment / due day / mark paid / calendar CC chips; categories own due dates and funding. Kept credit limit + utilization. Migration `008_drop_credit_card_payment_cycle.sql`.
+34. **Personal / Business books** — Entity toggle, `entity_id` scoping, blue Business accent, ventures under Marrero LLC, owner draw/fund flows, receipt attachments, separate Personal/Business Sheets scripts (`ENTITY_ID` filter). Migration `009_entities_and_ventures.sql`. Historical Marrero Chase ledger import: `scripts/import-marrero-business-history.sql`. Closed Chase account kept at $0 for history (no account-hide UI yet). `body` `suppressHydrationWarning` for Grammarly extension attrs.
 

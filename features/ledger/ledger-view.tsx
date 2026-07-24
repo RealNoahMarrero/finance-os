@@ -56,18 +56,28 @@ import {
   useCategoryGroups,
   useInvalidateFinance,
   useTransactions,
+  useVentures,
 } from '@/hooks/use-finance-queries';
 import { PageSkeleton } from '@/components/ui/skeleton';
 import type { Transaction } from '@/lib/types';
+import { useEntity } from '@/app/providers/entity-provider';
+import { VentureSelect } from '@/features/ventures/venture-select';
+import { VentureFilterPills } from '@/features/ventures/venture-filter-pills';
+import { OwnerFlowModal } from '@/features/owner-flow/owner-flow-modal';
+import { ReceiptAttachments } from '@/features/receipts/receipt-attachments';
 
 export function LedgerView() {
   const searchParams = useSearchParams();
+  const { entityId, isBusiness } = useEntity();
   const { filters, patch, reset, initialized } = useLedgerFilters();
   const invalidate = useInvalidateFinance();
   const { data: transactions = [], isLoading: transactionsLoading } = useTransactions();
   const { data: accounts = [], isLoading: accountsLoading } = useAccounts();
   const { data: categories = [], isLoading: categoriesLoading } = useCategories();
   const { data: categoryGroups = [], isLoading: groupsLoading } = useCategoryGroups();
+  const { data: ventures = [] } = useVentures();
+  const [ventureFilter, setVentureFilter] = useState<'all' | 'overhead' | number>('all');
+  const [ownerFlowOpen, setOwnerFlowOpen] = useState(false);
 
   const payeeSuggestions = useMemo(
     () =>
@@ -100,7 +110,8 @@ export function LedgerView() {
     category_id: '',
     account_id: '',
     to_account_id: '',
-    notes: ''
+    notes: '',
+    venture_id: '',
   });
 
   const [isSplitMode, setIsSplitMode] = useState(false);
@@ -170,7 +181,14 @@ export function LedgerView() {
           account_id: parseInt(txnForm.account_id),
           to_account_id: txnForm.type === 'Transfer' ? parseInt(txnForm.to_account_id) : null,
           type: txnForm.type,
-          notes: txnForm.notes || null
+          notes: txnForm.notes || null,
+          entity_id: entityId,
+          venture_id:
+            txnForm.type === 'Transfer' || !isBusiness
+              ? null
+              : txnForm.venture_id
+                ? parseInt(txnForm.venture_id)
+                : null,
       };
 
       if (editingTxn) {
@@ -238,7 +256,8 @@ export function LedgerView() {
           category_id: '',
           account_id: resolveOpeningAccountId(accountIds, preferred),
           to_account_id: '',
-          notes: ''
+          notes: '',
+          venture_id: '',
       });
       setIsModalOpen(true);
   };
@@ -300,7 +319,8 @@ export function LedgerView() {
           category_id: txn.category_id?.toString() || '',
           account_id: txn.account_id.toString(),
           to_account_id: txn.to_account_id?.toString() || '',
-          notes: txn.notes || ''
+          notes: txn.notes || '',
+          venture_id: txn.venture_id?.toString() || '',
       });
       setIsModalOpen(true);
   };
@@ -321,7 +341,7 @@ export function LedgerView() {
       if (!val || editingTxn) return;
       if (txnForm.type !== 'Income' && txnForm.type !== 'Expense') return;
 
-      const defaults = await fetchLastDefaultsForPayee(val, txnForm.type);
+      const defaults = await fetchLastDefaultsForPayee(entityId, val, txnForm.type);
       if (!defaults) return;
 
       setTxnForm((prev) => ({
@@ -331,6 +351,7 @@ export function LedgerView() {
               accounts.some((a) => String(a.id) === defaults.accountId)
                   ? defaults.accountId
                   : prev.account_id,
+          venture_id: defaults.ventureId || prev.venture_id,
       }));
       checkSmartBillPay(defaults.categoryId);
   };
@@ -363,10 +384,16 @@ export function LedgerView() {
     }
   };
 
-  const processedTxns = useMemo(
-    () => filterLedgerTransactions(transactions, filters, accounts, categories),
-    [transactions, filters, accounts, categories]
-  );
+  const processedTxns = useMemo(() => {
+    let list = filterLedgerTransactions(transactions, filters, accounts, categories);
+    if (isBusiness && ventureFilter !== 'all') {
+      list = list.filter((t) => {
+        if (ventureFilter === 'overhead') return t.venture_id == null;
+        return t.venture_id === ventureFilter;
+      });
+    }
+    return list;
+  }, [transactions, filters, accounts, categories, isBusiness, ventureFilter]);
 
   const [visibleCount, setVisibleCount] = useState(LEDGER_VISIBLE_BATCH);
 
@@ -426,10 +453,30 @@ export function LedgerView() {
             })()}
           </div>
         </div>
-        <button onClick={openNewTransactionModal} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-6 py-3 font-bold text-white shadow-lg shadow-emerald-200 transition-colors touch-manipulation hover:bg-emerald-600 md:w-auto">
-            <Plus size={18}/> Log Transaction
-        </button>
+        <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
+          <button
+            type="button"
+            onClick={() => setOwnerFlowOpen(true)}
+            className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[var(--border)] px-4 py-3 text-sm font-bold text-[var(--entity-accent)] touch-manipulation md:w-auto"
+          >
+            <ArrowRightLeft size={16} />
+            {entityId === 'business' ? 'Pay yourself' : 'Fund business'}
+          </button>
+          <button onClick={openNewTransactionModal} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-6 py-3 font-bold text-white shadow-lg shadow-emerald-200 transition-colors touch-manipulation hover:bg-emerald-600 md:w-auto">
+              <Plus size={18}/> Log Transaction
+          </button>
+        </div>
       </div>
+
+      {isBusiness && (
+        <div className="mb-4">
+          <VentureFilterPills
+            ventures={ventures}
+            value={ventureFilter}
+            onChange={setVentureFilter}
+          />
+        </div>
+      )}
 
       <LedgerFiltersBar
         filters={filters}
@@ -699,13 +746,34 @@ export function LedgerView() {
                           ]}
                           value={txnForm.category_id}
                           onChange={(val) => {
-                            setTxnForm({ ...txnForm, category_id: val });
+                            const cat = categories.find((c) => String(c.id) === val);
+                            setTxnForm({
+                              ...txnForm,
+                              category_id: val,
+                              venture_id:
+                                cat?.venture_id != null
+                                  ? String(cat.venture_id)
+                                  : txnForm.venture_id,
+                            });
                             checkSmartBillPay(val);
                           }}
                         />
                       </div>
                     )}
+                    {isBusiness && txnForm.type !== 'Transfer' && (
+                      <VentureSelect
+                        ventures={ventures}
+                        value={txnForm.venture_id}
+                        onChange={(val) =>
+                          setTxnForm({ ...txnForm, venture_id: val })
+                        }
+                      />
+                    )}
                   </>
+              )}
+
+              {editingTxn && (
+                <ReceiptAttachments transactionId={editingTxn.id} />
               )}
 
               {/* Feature 6: Smart Bill Pay UI */}
@@ -752,6 +820,7 @@ export function LedgerView() {
         </div>
       )}
 
+      <OwnerFlowModal open={ownerFlowOpen} onOpenChange={setOwnerFlowOpen} />
     </>
   );
 }

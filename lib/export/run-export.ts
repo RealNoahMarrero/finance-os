@@ -25,7 +25,7 @@ import { loadInsightsExportContext } from '@/lib/reports/insights-export-context
 import { csvRow, csvSection } from '@/lib/export/csv';
 import { downloadTextFile } from '@/lib/export/build-finance-export';
 import type { ExportOptions, InsightsExportContext } from '@/lib/export/types';
-import type { Category, ProjectedIncome, Transaction } from '@/lib/types';
+import type { Category, EntityId, ProjectedIncome, Transaction } from '@/lib/types';
 
 function filterProjected(
   rows: ProjectedIncome[],
@@ -63,13 +63,13 @@ function formatCategoryLabel(txn: Transaction): string {
   return '';
 }
 
-async function loadExportData() {
+async function loadExportData(entityId: EntityId) {
   const [accs, cats, groups, txns, proj] = await Promise.all([
-    fetchAccounts(),
-    fetchCategories(),
-    fetchCategoryGroups(),
-    fetchTransactions(),
-    fetchAllProjectedIncome(500),
+    fetchAccounts(entityId),
+    fetchCategories(entityId),
+    fetchCategoryGroups(entityId),
+    fetchTransactions(entityId),
+    fetchAllProjectedIncome(entityId, 500),
   ]);
   return {
     accounts: accs.data || [],
@@ -289,9 +289,10 @@ function buildBudgetCsv(
 
 export async function runFinanceExport(
   options: ExportOptions,
-  insights?: InsightsExportContext
+  insights?: InsightsExportContext,
+  entityId: EntityId = 'personal'
 ): Promise<{ filename: string; mime: string; content: string }> {
-  const data = await loadExportData();
+  const data = await loadExportData(entityId);
   const liquidCash = computeLiquidCash(data.accounts);
   const netWorth = computeNetWorth(data.accounts);
   const readyToAssign = computeReadyToAssign(liquidCash, data.categories);
@@ -315,7 +316,7 @@ export async function runFinanceExport(
   const dateSlug = format(new Date(), 'yyyy-MM-dd');
 
   if (options.preset === 'insights') {
-    const ctx = insights ?? (await loadInsightsExportContext());
+    const ctx = insights ?? (await loadInsightsExportContext(undefined, undefined, entityId));
     if (options.format === 'csv') {
       return {
         filename: `finance-os-insights-${dateSlug}.csv`,
@@ -420,8 +421,13 @@ export async function runFinanceExport(
 
 export async function downloadFinanceExport(
   options: ExportOptions,
-  insights?: InsightsExportContext
+  insights?: InsightsExportContext,
+  entityId: EntityId = 'personal'
 ) {
-  const { filename, content, mime } = await runFinanceExport(options, insights);
+  const { filename, content, mime } = await runFinanceExport(
+    options,
+    insights,
+    entityId
+  );
   downloadTextFile(content, filename, mime);
 }

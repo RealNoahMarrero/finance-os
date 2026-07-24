@@ -16,6 +16,7 @@ import {
 import { loadInsightsPreferences } from '@/hooks/use-insights-preferences';
 import { loadInsightsExportContext } from '@/lib/reports/insights-export-context';
 import type { ReportPeriod } from '@/lib/reports/aggregations';
+import { useEntity } from '@/app/providers/entity-provider';
 
 export function ExportModal({
   open,
@@ -34,6 +35,7 @@ export function ExportModal({
   /** Insights page: Insights report preset only. */
   insightsPage?: boolean;
 }) {
+  const { entityId } = useEntity();
   const insightsPrefs = loadInsightsPreferences();
   const resolvedPeriod = insightsPeriod ?? {
     period: insightsPrefs.period,
@@ -69,7 +71,7 @@ export function ExportModal({
     let cancelled = false;
     setInsightsLoading(true);
     const prefs = loadInsightsPreferences();
-    loadInsightsExportContext(prefs.period, prefs.selectedMonth)
+    loadInsightsExportContext(prefs.period, prefs.selectedMonth, entityId)
       .then((ctx) => {
         if (!cancelled) setInsightsContext(ctx);
       })
@@ -83,7 +85,7 @@ export function ExportModal({
     return () => {
       cancelled = true;
     };
-  }, [open, options.preset, options.filters.dateStart, options.filters.dateEnd, insightsContextProp]);
+  }, [open, options.preset, options.filters.dateStart, options.filters.dateEnd, insightsContextProp, entityId]);
 
   function setPreset(preset: ExportPreset) {
     const period =
@@ -107,7 +109,8 @@ export function ExportModal({
     try {
       await downloadFinanceExport(
         options,
-        options.preset === 'insights' ? effectiveInsightsContext ?? undefined : undefined
+        options.preset === 'insights' ? effectiveInsightsContext ?? undefined : undefined,
+        entityId
       );
       onOpenChange(false);
     } catch (e) {

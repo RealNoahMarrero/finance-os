@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
+import { EntityToggle } from '@/components/layout/entity-toggle';
+import { useEntity } from '@/app/providers/entity-provider';
 
 const navItems = [
   { name: 'Home', path: '/', icon: PieChart },
@@ -30,15 +32,23 @@ export function TopBar() {
   const pathname = usePathname();
   const queryClient = useQueryClient();
   const { theme, setTheme } = useTheme();
+  const { entityLabel, isBusiness, entityId } = useEntity();
   const [mounted, setMounted] = React.useState(false);
   React.useEffect(() => setMounted(true), []);
 
   return (
-    <header className="mb-8 hidden lg:block">
+    <header className="mb-6 hidden lg:block">
       <div className="flex items-center justify-between gap-4">
-        <Link href="/" className="text-2xl font-extrabold tracking-tight">
-          Finance<span className="text-[var(--accent-positive)]">OS</span>
-        </Link>
+        <div className="flex min-w-0 flex-col">
+          <Link href="/" className="text-2xl font-extrabold tracking-tight">
+            Finance
+            <span className="text-[var(--entity-accent)]">OS</span>
+          </Link>
+          <span className="text-xs font-bold text-[var(--text-muted)]">
+            {isBusiness ? 'Marrero LLC · ' : ''}
+            {entityLabel}
+          </span>
+        </div>
         <nav className="flex items-center gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface-glass)] p-1 backdrop-blur-xl">
           {navItems.map((item) => {
             const isActive =
@@ -50,8 +60,8 @@ export function TopBar() {
               <Link
                 key={item.path}
                 href={item.path}
-                onMouseEnter={() => prefetchRouteData(queryClient, item.path)}
-                onFocus={() => prefetchRouteData(queryClient, item.path)}
+                onMouseEnter={() => prefetchRouteData(queryClient, item.path, entityId)}
+                onFocus={() => prefetchRouteData(queryClient, item.path, entityId)}
                 className={cn(
                   'flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-colors',
                   isActive
@@ -65,14 +75,17 @@ export function TopBar() {
             );
           })}
         </nav>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          aria-label="Toggle theme"
-        >
-          {mounted && theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
-        </Button>
+        <div className="flex items-center gap-2">
+          <EntityToggle />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            aria-label="Toggle theme"
+          >
+            {mounted && theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+          </Button>
+        </div>
       </div>
     </header>
   );

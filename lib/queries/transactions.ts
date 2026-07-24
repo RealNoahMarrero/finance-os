@@ -1,9 +1,12 @@
 import { supabase } from '@/lib/supabase';
-import type { Transaction, TransactionPayload } from '@/lib/types';
+import type { EntityId, Transaction, TransactionPayload } from '@/lib/types';
 import {
   fetchSplitsForTransactions,
   groupSplitsByTransaction,
 } from '@/lib/queries/transaction-splits';
+
+const TXN_SELECT =
+  '*, categories(name, emoji), accounts!account_id(name, type), ventures(id, name)';
 
 export async function attachSplitsToTransactions<T extends { id: number }>(
   transactions: T[]
@@ -18,10 +21,11 @@ export async function attachSplitsToTransactions<T extends { id: number }>(
   }));
 }
 
-export async function fetchTransactions(limit?: number) {
+export async function fetchTransactions(entityId: EntityId, limit?: number) {
   let query = supabase
     .from('transactions')
-    .select('*, categories(name, emoji), accounts!account_id(name, type)')
+    .select(TXN_SELECT)
+    .eq('entity_id', entityId)
     .order('date', { ascending: false })
     .order('created_at', { ascending: false });
 
@@ -33,10 +37,11 @@ export async function fetchTransactions(limit?: number) {
   return { data: withSplits as Transaction[], error };
 }
 
-export async function fetchMonthTransactions(startDate: string) {
+export async function fetchMonthTransactions(entityId: EntityId, startDate: string) {
   const { data, error } = await supabase
     .from('transactions')
-    .select('amount, type, date, category_id, payee')
+    .select('amount, type, date, category_id, payee, venture_id')
+    .eq('entity_id', entityId)
     .gte('date', startDate);
   return { data: data || [], error };
 }
@@ -45,16 +50,16 @@ export async function insertTransaction(payload: TransactionPayload) {
   return supabase
     .from('transactions')
     .insert([payload])
-    .select('*, categories(name, emoji), accounts!account_id(name, type)')
+    .select(TXN_SELECT)
     .single();
 }
 
-export async function updateTransaction(id: number, payload: TransactionPayload) {
+export async function updateTransaction(id: number, payload: Partial<TransactionPayload>) {
   return supabase
     .from('transactions')
     .update(payload)
     .eq('id', id)
-    .select('*, categories(name, emoji), accounts!account_id(name, type)')
+    .select(TXN_SELECT)
     .single();
 }
 
@@ -62,16 +67,18 @@ export async function deleteTransaction(id: number) {
   return supabase.from('transactions').delete().eq('id', id);
 }
 
-/** Last txn for this payee (same type when provided). Includes null category (RTA / uncategorized). */
+/** Last txn for this payee within the active entity. */
 export async function fetchLastDefaultsForPayee(
+  entityId: EntityId,
   payee: string,
   type?: 'Income' | 'Expense'
-): Promise<{ categoryId: string; accountId: string } | null> {
+): Promise<{ categoryId: string; accountId: string; ventureId: string } | null> {
   if (!payee.trim()) return null;
 
   let query = supabase
     .from('transactions')
-    .select('category_id, account_id')
+    .select('category_id, account_id, venture_id')
+    .eq('entity_id', entityId)
     .eq('payee', payee)
     .order('date', { ascending: false })
     .order('created_at', { ascending: false })
@@ -86,11 +93,12 @@ export async function fetchLastDefaultsForPayee(
   return {
     categoryId: row.category_id != null ? String(row.category_id) : '',
     accountId: String(row.account_id),
+    ventureId: row.venture_id != null ? String(row.venture_id) : '',
   };
 }
 
 /** @deprecated Prefer fetchLastDefaultsForPayee */
-export async function fetchLastCategoryForPayee(payee: string) {
-  const defaults = await fetchLastDefaultsForPayee(payee);
+export async function fetchLastCategoryForPayee(entityId: EntityId, payee: string) {
+  const defaults = await fetchLastDefaultsForPayee(entityId, payee);
   return defaults?.categoryId ? parseInt(defaults.categoryId, 10) : null;
 }

@@ -8,16 +8,23 @@ import {
   isProjectedExpectedDateStale,
   todayDateString,
 } from '@/lib/projected-income';
-import type { ProjectedIncome, ProjectedIncomePayload } from '@/lib/types';
+import type { EntityId, ProjectedIncome, ProjectedIncomePayload } from '@/lib/types';
 import { fetchLastDefaultsForPayee, insertTransaction } from '@/lib/queries/transactions';
 
 const SELECT_WITH_RELATIONS =
-  '*, accounts!account_id(id, name, type), categories!category_id(name, emoji)';
+  '*, accounts!account_id(id, name, type), categories!category_id(name, emoji), ventures(id, name)';
 
 function projectedIncomeErrorMessage(error: { message?: string; code?: string } | null) {
   if (!error) return 'Unknown error';
   if (error.code === '42501' || error.message?.toLowerCase().includes('row-level security')) {
     return 'Permission denied. Run supabase/migrations/003_projected_income_rls.sql in the Supabase SQL editor.';
+  }
+  if (
+    error.message?.includes('entity_id') ||
+    error.message?.includes('ventures') ||
+    error.code === '42703'
+  ) {
+    return 'Schema outdated. Run supabase/migrations/009_entities_and_ventures.sql in the Supabase SQL editor.';
   }
   if (error.code === '42P01' || error.message?.includes('projected_income')) {
     return 'Table missing. Run supabase/migrations/001_projected_income.sql in the Supabase SQL editor.';
@@ -48,11 +55,12 @@ async function fetchProjectedRows(
   return applyFilters(base.select('*'));
 }
 
-async function bumpStalePendingProjectedDates() {
+async function bumpStalePendingProjectedDates(entityId: EntityId) {
   const today = todayDateString();
   await supabase
     .from('projected_income')
     .update({ expected_date: today })
+    .eq('entity_id', entityId)
     .eq('status', 'pending')
     .lt('expected_date', today);
 }
@@ -76,19 +84,27 @@ function normalizeProjectedPayload(
   };
 }
 
-export async function fetchPendingProjectedIncome() {
-  await bumpStalePendingProjectedDates();
+export async function fetchPendingProjectedIncome(entityId: EntityId) {
+  await bumpStalePendingProjectedDates(entityId);
   const { data, error } = await fetchProjectedRows((q) =>
-    q.eq('status', 'pending').order('expected_date', { ascending: true })
+    q
+      .eq('entity_id', entityId)
+      .eq('status', 'pending')
+      .order('expected_date', { ascending: true })
   );
   const rows = (data || []) as ProjectedIncome[];
   return { data: error ? rows : applyStaleDateBump(rows), error };
 }
 
-export async function fetchProjectedIncomeForMonth(monthStart: string, monthEnd: string) {
-  await bumpStalePendingProjectedDates();
+export async function fetchProjectedIncomeForMonth(
+  entityId: EntityId,
+  monthStart: string,
+  monthEnd: string
+) {
+  await bumpStalePendingProjectedDates(entityId);
   const { data, error } = await fetchProjectedRows((q) =>
     q
+      .eq('entity_id', entityId)
       .eq('status', 'pending')
       .gte('expected_date', monthStart)
       .lte('expected_date', monthEnd)
@@ -98,9 +114,12 @@ export async function fetchProjectedIncomeForMonth(monthStart: string, monthEnd:
   return { data: error ? rows : applyStaleDateBump(rows), error };
 }
 
-export async function fetchAllProjectedIncome(limit = 100) {
+export async function fetchAllProjectedIncome(entityId: EntityId, limit = 100) {
   const { data, error } = await fetchProjectedRows((q) =>
-    q.order('expected_date', { ascending: false }).limit(limit)
+    q
+      .eq('entity_id', entityId)
+      .order('expected_date', { ascending: false })
+      .limit(limit)
   );
   return { data: (data || []) as ProjectedIncome[], error };
 }
@@ -167,6 +186,8 @@ export async function receiveProjectedIncome(
     to_account_id: null as number | null,
     type: 'Income' as const,
     notes: projection.notes,
+    entity_id: projection.entity_id,
+    venture_id: projection.venture_id ?? null,
   };
 
   const { data: txn, error: txnError } = await insertTransaction(txnPayload);
@@ -225,6 +246,8 @@ export async function receiveProjectedIncome(
       is_repeating: projection.is_repeating,
       repeat_period: projection.repeat_period,
       notes: projection.notes,
+      entity_id: projection.entity_id,
+      venture_id: projection.venture_id ?? null,
     };
     await insertProjectedIncome(nextPayload);
   }
@@ -235,15 +258,17 @@ export async function receiveProjectedIncome(
   };
 }
 
-/** Last expected-income (or Income txn) defaults for a label. Null category = Ready to Assign. */
+/** Last expected-income (or Income txn) defaults for a label within entity. */
 export async function fetchLastDefaultsForProjectedLabel(
+  entityId: EntityId,
   label: string
-): Promise<{ categoryId: string; accountId: string } | null> {
+): Promise<{ categoryId: string; accountId: string; ventureId: string } | null> {
   if (!label.trim()) return null;
 
   const { data } = await supabase
     .from('projected_income')
-    .select('category_id, account_id')
+    .select('category_id, account_id, venture_id')
+    .eq('entity_id', entityId)
     .eq('label', label)
     .order('expected_date', { ascending: false })
     .order('created_at', { ascending: false })
@@ -254,8 +279,9 @@ export async function fetchLastDefaultsForProjectedLabel(
     return {
       categoryId: row.category_id != null ? String(row.category_id) : '',
       accountId: String(row.account_id),
+      ventureId: row.venture_id != null ? String(row.venture_id) : '',
     };
   }
 
-  return fetchLastDefaultsForPayee(label, 'Income');
+  return fetchLastDefaultsForPayee(entityId, label, 'Income');
 }

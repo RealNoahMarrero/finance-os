@@ -13,8 +13,8 @@
 const SUPABASE_URL = 'https://YOUR_PROJECT.supabase.co';
 const SUPABASE_KEY = 'YOUR_SUPABASE_ANON_OR_PUBLISHABLE_KEY';
 
-/** Personal household books — use google-sheets-sync-business.gs for Marrero LLC */
-const ENTITY_ID = 'personal';
+/** Marrero LLC business books — use google-sheets-sync.gs for Personal */
+const ENTITY_ID = 'business';
 
 const LIQUID_TYPES = ['Checking', 'Savings', 'Cash'];
 
@@ -33,6 +33,7 @@ function syncFinanceOS() {
   syncTransactions();
   syncTransactionSplits();
   syncProjectedIncome();
+  syncVentures();
   SpreadsheetApp.getActiveSpreadsheet().toast(
     'Finance OS (' + ENTITY_ID + ') sync complete.',
     'Finance OS',
@@ -436,6 +437,29 @@ function syncProjectedIncome() {
       p.ventures ? p.ventures.name : '',
       p.notes || '',
     ];
+  });
+
+  if (rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+  }
+}
+
+function syncVentures() {
+  var data = supabaseGet_(
+    'ventures?select=name,notes,is_active,sort_order&' +
+      entityFilter_() +
+      '&order=sort_order,name'
+  );
+
+  var sheet = getOrCreateSheet_('Ventures', [
+    'Name',
+    'Notes',
+    'Active?',
+    'Sort',
+  ]);
+
+  var rows = data.map(function (v) {
+    return [v.name, v.notes || '', v.is_active ? 'Yes' : 'No', v.sort_order || 0];
   });
 
   if (rows.length > 0) {

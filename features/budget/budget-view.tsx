@@ -10,7 +10,7 @@ import {
   Wallet, Calendar, FileText, Repeat, AlignLeft, PieChart,
   ArrowUpDown, AlertCircle, AlertTriangle, ArrowRightLeft,
   FastForward, ListOrdered, Filter, Download, Activity, Archive, RotateCcw,
-  ChevronUp
+  ChevronUp, Building2
 } from 'lucide-react';
 import { format, parseISO, addWeeks, addMonths, addYears, isAfter } from 'date-fns';
 import { formatMoney, formatMoneyInput, roundMoney, snapMoney, MONEY_EPSILON } from '@/lib/money';
@@ -24,14 +24,17 @@ import {
   useCategoryGroups,
   useInvalidateFinance,
   usePendingProjectedIncome,
+  useVentures,
 } from '@/hooks/use-finance-queries';
-
 import {
   displayReadyToAssign,
   RtaBannerExtras,
   rtaIsNegative,
 } from '@/components/budget/rta-banner-extras';
 import type { Account, Category, CategoryGroup, ProjectedIncome } from '@/lib/types';
+import { useEntity } from '@/app/providers/entity-provider';
+import { VentureManagerModal } from '@/features/ventures/venture-manager-modal';
+import { VentureFilterPills } from '@/features/ventures/venture-filter-pills';
 
 const ExportModal = dynamic(
   () => import('@/features/export/export-modal').then((m) => m.ExportModal),
@@ -54,14 +57,18 @@ export function BudgetView() {
   const searchParams = useSearchParams();
   const openedFromUrl = useRef(false);
   const expandedInitialized = useRef(false);
-  const { patchCategories, patchCategoryGroups, invalidateAfterBudgetChange } =
+  const { entityId, isBusiness } = useEntity();
+  const { patchCategories, patchCategoryGroups, invalidateAfterBudgetChange, invalidateVentures } =
     useInvalidateFinance();
   const { data: accounts = [], isLoading: accountsLoading } = useAccounts();
   const { data: categories = [], isLoading: categoriesLoading } = useCategories();
   const { data: groups = [], isLoading: groupsLoading } = useCategoryGroups();
   const { data: pendingProjected = [] } = usePendingProjectedIncome();
+  const { data: ventures = [] } = useVentures();
   const [reorderingGroups, setReorderingGroups] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [isVentureManagerOpen, setIsVentureManagerOpen] = useState(false);
+  const [ventureFilter, setVentureFilter] = useState<'all' | 'overhead' | number>('all');
 
   // UI States (Persistent)
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
@@ -82,7 +89,7 @@ export function BudgetView() {
     group_id: '', name: '', emoji: '', 
     target_type: 'Set Aside', target_amount: '', 
     due_date: '', is_repeating: false, target_period: 'Monthly', end_date: '', notes: '',
-    is_debt: false, balance: '', is_asap: false, is_hidden: false
+    is_debt: false, balance: '', is_asap: false, is_hidden: false, venture_id: ''
   });
 
   // Funding Mode States
@@ -151,6 +158,7 @@ export function BudgetView() {
           balance: cat.balance ? cat.balance.toString() : '',
           is_asap: cat.is_asap || false,
           is_hidden: !!cat.is_hidden,
+          venture_id: cat.venture_id ? String(cat.venture_id) : '',
       });
       setIsCategoryModalOpen(true);
   }, [pageLoading, categories, searchParams]);
@@ -224,7 +232,12 @@ export function BudgetView() {
       setFundingCatId(null);
   }
 
-  const visibleCategories = categories.filter((c) => !c.is_hidden);
+  const visibleCategories = categories.filter((c) => {
+    if (c.is_hidden) return false;
+    if (!isBusiness || ventureFilter === 'all') return true;
+    if (ventureFilter === 'overhead') return c.venture_id == null;
+    return c.venture_id === ventureFilter;
+  });
 
   const {
     readyToAssign,
@@ -376,7 +389,7 @@ export function BudgetView() {
             groups.reduce((max, g) => Math.max(max, g.sort_order), -1) + 1;
           const { data } = await supabase
             .from('category_groups')
-            .insert([{ name: groupFormName, sort_order: nextOrder }])
+            .insert([{ name: groupFormName, sort_order: nextOrder, entity_id: entityId }])
             .select()
             .single();
           if (data) {
@@ -438,7 +451,8 @@ export function BudgetView() {
               due_date: cat.due_date || '', is_repeating: cat.is_repeating || false, target_period: cat.target_period || 'Monthly', 
               end_date: cat.end_date || '', notes: cat.notes || '',
               is_debt: cat.is_debt || false, balance: cat.balance ? cat.balance.toString() : '',
-              is_asap: cat.is_asap || false, is_hidden: !!cat.is_hidden
+              is_asap: cat.is_asap || false, is_hidden: !!cat.is_hidden,
+              venture_id: cat.venture_id ? String(cat.venture_id) : '',
           });
       } else {
           setEditingCatId(null);
@@ -446,7 +460,8 @@ export function BudgetView() {
               group_id: defaultGroupId ? defaultGroupId.toString() : (groups[0]?.id.toString() || ''), 
               name: '', emoji: '', target_type: 'Set Aside', target_amount: '', due_date: '', 
               is_repeating: false, target_period: 'Monthly', end_date: '', notes: '',
-              is_debt: false, balance: '', is_asap: false, is_hidden: false
+              is_debt: false, balance: '', is_asap: false, is_hidden: false,
+              venture_id: '',
           });
       }
       setIsCategoryModalOpen(true);
@@ -461,7 +476,12 @@ export function BudgetView() {
           end_date: catForm.end_date || null, notes: catForm.notes || null,
           is_debt: catForm.is_debt, balance: roundMoney(parseFloat(catForm.balance) || 0),
           is_asap: catForm.is_asap,
-          is_hidden: catForm.is_hidden
+          is_hidden: catForm.is_hidden,
+          entity_id: entityId,
+          venture_id:
+            isBusiness && catForm.venture_id
+              ? parseInt(catForm.venture_id, 10)
+              : null,
       };
       
       if (editingCatId) {
@@ -662,8 +682,19 @@ export function BudgetView() {
             <button type="button" onClick={() => setIsExportOpen(true)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors" title="Export budget">
                 <Download size={18}/>
             </button>
+            {isBusiness && (
+              <button
+                type="button"
+                onClick={() => setIsVentureManagerOpen(true)}
+                className="flex items-center gap-1.5 rounded-xl border border-[var(--border)] px-3 py-1.5 text-xs font-bold text-[var(--entity-accent)]"
+                title="Manage ventures"
+              >
+                <Building2 size={14} />
+                Ventures
+              </button>
+            )}
         </div>
-        
+
         <div className="flex flex-wrap gap-2 w-full xl:w-auto">
             <div className="flex flex-wrap gap-2 flex-grow md:flex-grow-0">
                 <div className="flex items-center gap-2 app-card-subtle px-3 py-1.5 rounded-xl flex-1 min-w-[140px]">
@@ -695,6 +726,16 @@ export function BudgetView() {
             </button>
         </div>
       </div>
+
+      {isBusiness && (
+        <div className="mb-6">
+          <VentureFilterPills
+            ventures={ventures}
+            value={ventureFilter}
+            onChange={setVentureFilter}
+          />
+        </div>
+      )}
 
       {categorySort !== 'default' && orderedGroups.length > 1 && (
         <p className="text-xs font-bold text-[var(--text-muted)] mb-4 -mt-2">
@@ -1049,6 +1090,21 @@ export function BudgetView() {
                           {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                       </select>
                   </div>
+                  {isBusiness && (
+                    <div>
+                      <label className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-2 block">Venture</label>
+                      <select
+                        className="w-full p-3 app-input rounded-xl font-bold text-[var(--text-primary)] border border-[var(--border)] outline-none focus:border-[var(--entity-accent)] cursor-pointer"
+                        value={catForm.venture_id}
+                        onChange={(e) => setCatForm({ ...catForm, venture_id: e.target.value })}
+                      >
+                        <option value="">General / Overhead</option>
+                        {ventures.map((v) => (
+                          <option key={v.id} value={v.id}>{v.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
               </div>
 
               {/* DEBT TRACKING */}
@@ -1294,6 +1350,10 @@ export function BudgetView() {
         open={isExportOpen}
         onOpenChange={setIsExportOpen}
         initialPreset="budget"
+      />
+      <VentureManagerModal
+        open={isVentureManagerOpen}
+        onOpenChange={setIsVentureManagerOpen}
       />
     </>
   );

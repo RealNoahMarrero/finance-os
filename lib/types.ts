@@ -1,5 +1,25 @@
+export type EntityId = 'personal' | 'business';
 export type AccountType = 'Checking' | 'Savings' | 'Credit Card' | 'Cash';
 export type TransactionType = 'Income' | 'Expense' | 'Transfer';
+export type OwnerFlow = 'owner_draw' | 'owner_contribution';
+
+export interface Entity {
+  id: EntityId;
+  name: string;
+  sort_order: number;
+  created_at?: string;
+}
+
+export interface Venture {
+  id: number;
+  entity_id: EntityId;
+  name: string;
+  notes: string | null;
+  color: string | null;
+  is_active: boolean;
+  sort_order: number;
+  created_at?: string;
+}
 
 export interface Account {
   id: number;
@@ -8,12 +28,14 @@ export interface Account {
   type: AccountType;
   balance: number;
   credit_limit: number;
+  entity_id: EntityId;
 }
 
 export interface CategoryGroup {
   id: number;
   name: string;
   sort_order: number;
+  entity_id: EntityId;
 }
 
 export interface Category {
@@ -37,6 +59,8 @@ export interface Category {
   budgeted_amount: number;
   sort_order: number;
   is_hidden: boolean;
+  entity_id: EntityId;
+  venture_id: number | null;
 }
 
 export interface TransactionSplit {
@@ -59,8 +83,13 @@ export interface Transaction {
   to_account_id: number | null;
   type: TransactionType;
   notes: string | null;
+  entity_id: EntityId;
+  venture_id: number | null;
+  linked_transaction_id: number | null;
+  owner_flow: OwnerFlow | null;
   categories?: { name: string; emoji: string | null } | null;
   accounts?: { name: string; type: AccountType } | null;
+  ventures?: { id: number; name: string } | null;
   transaction_splits?: TransactionSplit[];
 }
 
@@ -73,6 +102,10 @@ export interface TransactionPayload {
   to_account_id: number | null;
   type: TransactionType;
   notes: string | null;
+  entity_id: EntityId;
+  venture_id?: number | null;
+  linked_transaction_id?: number | null;
+  owner_flow?: OwnerFlow | null;
 }
 
 export type ProjectedIncomeStatus = 'pending' | 'received' | 'cancelled';
@@ -101,8 +134,11 @@ export interface ProjectedIncome {
   notes: string | null;
   transaction_id: number | null;
   received_at: string | null;
+  entity_id: EntityId;
+  venture_id: number | null;
   accounts?: { id: number; name: string; type: string } | null;
   categories?: { name: string; emoji: string | null } | null;
+  ventures?: { id: number; name: string } | null;
 }
 
 export interface ProjectedIncomePayload {
@@ -116,4 +152,17 @@ export interface ProjectedIncomePayload {
   is_repeating: boolean;
   repeat_period: ProjectedIncomeRepeatPeriod;
   notes: string | null;
+  entity_id: EntityId;
+  venture_id?: number | null;
+}
+
+export interface TransactionAttachment {
+  id: number;
+  transaction_id: number;
+  entity_id: EntityId;
+  file_name: string;
+  storage_path: string;
+  mime_type: string | null;
+  file_size: number | null;
+  created_at?: string;
 }

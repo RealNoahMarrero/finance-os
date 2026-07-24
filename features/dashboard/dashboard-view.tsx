@@ -46,6 +46,18 @@ import {
   rtaIsNegative,
 } from '@/components/budget/rta-banner-extras';
 import { useReadyToAssign } from '@/hooks/use-ready-to-assign';
+import { sortPendingByDate } from '@/lib/projected-income';
+import { cancelProjectedIncome } from '@/lib/queries/projected-income';
+import { PROJECTED_INCOME_CERTAINTY_LABELS } from '@/lib/projected-income';
+import {
+  ProjectedIncomeFormModal,
+  ProjectedIncomeListModal,
+  ProjectedIncomeReceiveModal,
+} from '@/features/projected-income/projected-income-modals';
+import type { Account, Category, ProjectedIncome } from '@/lib/types';
+import { useEntity } from '@/app/providers/entity-provider';
+import { VentureSelect } from '@/features/ventures/venture-select';
+import { OwnerFlowModal } from '@/features/owner-flow/owner-flow-modal';
 import {
   useAccounts,
   useAllProjectedIncome,
@@ -54,18 +66,8 @@ import {
   useMonthTransactionStats,
   usePendingProjectedIncome,
   useRecentTransactions,
+  useVentures,
 } from '@/hooks/use-finance-queries';
-import { sortPendingByDate } from '@/lib/projected-income';
-import {
-  cancelProjectedIncome,
-} from '@/lib/queries/projected-income';
-import { PROJECTED_INCOME_CERTAINTY_LABELS } from '@/lib/projected-income';
-import {
-  ProjectedIncomeFormModal,
-  ProjectedIncomeListModal,
-  ProjectedIncomeReceiveModal,
-} from '@/features/projected-income/projected-income-modals';
-import type { Account, Category, ProjectedIncome } from '@/lib/types';
 
 const ExportModal = dynamic(
   () => import('@/features/export/export-modal').then((m) => m.ExportModal),
@@ -74,9 +76,12 @@ const ExportModal = dynamic(
 
 export function DashboardView() {
   const router = useRouter();
+  const { entityId, isBusiness } = useEntity();
   const invalidate = useInvalidateFinance();
+  const [ownerFlowOpen, setOwnerFlowOpen] = useState(false);
   const { data: accounts = [], isLoading: accountsLoading } = useAccounts();
   const { data: categories = [], isLoading: categoriesLoading } = useCategories();
+  const { data: ventures = [] } = useVentures();
   const { data: recentTransactions = [], isPending: recentTxnsPending } = useRecentTransactions(10);
   const { data: monthlyStats = { income: 0, expense: 0 }, isPending: statsPending } =
     useMonthTransactionStats();
@@ -121,7 +126,7 @@ export function DashboardView() {
 
   const [quickForm, setQuickForm] = useState({
     type: 'Expense', date: format(new Date(), 'yyyy-MM-dd'), amount: '', 
-    payee: '', category_id: '', account_id: '', to_account_id: '', notes: ''
+    payee: '', category_id: '', account_id: '', to_account_id: '', notes: '', venture_id: ''
   });
 
   const [isSplitMode, setIsSplitMode] = useState(false);
@@ -191,6 +196,7 @@ export function DashboardView() {
       type: accountForm.type,
       balance: newBalance,
       credit_limit: roundMoney(parseFloat(accountForm.credit_limit) || 0),
+      entity_id: entityId,
     };
 
     if (editingAccountId && adjustmentType === 'transaction' && oldBalance !== newBalance) {
@@ -207,7 +213,10 @@ export function DashboardView() {
             payee: 'Manual Balance Adjustment',
             account_id: editingAccountId,
             type: txnType,
-            notes: 'Auto-generated via account edit.'
+            notes: 'Auto-generated via account edit.',
+            entity_id: entityId,
+            category_id: null,
+            to_account_id: null,
         };
         await supabase.from('transactions').insert([txnPayload]);
     }
@@ -237,7 +246,7 @@ export function DashboardView() {
         type: 'Expense', date: format(new Date(), 'yyyy-MM-dd'), amount: '', 
         payee: '', category_id: '',
         account_id: resolveOpeningAccountId(accountIds, accId != null ? String(accId) : null),
-        to_account_id: '', notes: ''
+        to_account_id: '', notes: '', venture_id: ''
       });
       setIsSplitMode(false);
       setSplitLines([emptySplitLine(), emptySplitLine()]);
@@ -285,7 +294,7 @@ export function DashboardView() {
       if (!val) return;
       if (quickForm.type !== 'Income' && quickForm.type !== 'Expense') return;
 
-      const defaults = await fetchLastDefaultsForPayee(val, quickForm.type);
+      const defaults = await fetchLastDefaultsForPayee(entityId, val, quickForm.type);
       if (!defaults) return;
 
       setQuickForm((prev) => ({
@@ -295,6 +304,7 @@ export function DashboardView() {
               accounts.some((a) => String(a.id) === defaults.accountId)
                   ? defaults.accountId
                   : prev.account_id,
+          venture_id: defaults.ventureId || prev.venture_id,
       }));
       checkSmartBillPay(defaults.categoryId);
   };
@@ -331,6 +341,7 @@ export function DashboardView() {
           account_id: resolveOpeningAccountId(accountIds),
           to_account_id: '',
           notes: '',
+          venture_id: '',
       });
       setIsSplitMode(false);
       setSplitLines([emptySplitLine(), emptySplitLine()]);
@@ -374,6 +385,13 @@ export function DashboardView() {
           to_account_id: quickForm.type === 'Transfer' ? parseInt(quickForm.to_account_id) : null,
           type: quickForm.type,
           notes: quickForm.notes || null,
+          entity_id: entityId,
+          venture_id:
+            quickForm.type === 'Transfer' || !isBusiness
+              ? null
+              : quickForm.venture_id
+                ? parseInt(quickForm.venture_id)
+                : null,
       };
 
       const { data: inserted } = await supabase.from('transactions').insert([payload]).select().single();
@@ -479,6 +497,14 @@ export function DashboardView() {
         <div className="mb-6 flex justify-end">
             <button type="button" onClick={() => setIsExportOpen(true)} className="w-full md:w-auto app-card px-4 py-2 rounded-xl text-[var(--text-muted)] font-bold border border-[var(--border)] shadow-sm flex items-center justify-center gap-2 hover:bg-[var(--surface-hover)] transition-colors">
                 <Download size={16}/> Export
+            </button>
+            <button
+              type="button"
+              onClick={() => setOwnerFlowOpen(true)}
+              className="w-full md:w-auto app-card px-4 py-2 rounded-xl font-bold border border-[var(--border)] shadow-sm flex items-center justify-center gap-2 text-[var(--entity-accent)] hover:bg-[var(--surface-hover)] transition-colors"
+            >
+              <ArrowRightLeft size={16} />
+              {isBusiness ? 'Pay yourself' : 'Fund business'}
             </button>
         </div>
         
@@ -860,7 +886,16 @@ export function DashboardView() {
                           ]}
                           value={quickForm.category_id}
                           onChange={(val) => {
-                            setQuickForm({...quickForm, category_id: val});
+                            setQuickForm({
+                              ...quickForm,
+                              category_id: val,
+                              venture_id: (() => {
+                                const cat = categories.find((c) => String(c.id) === val);
+                                return cat?.venture_id != null
+                                  ? String(cat.venture_id)
+                                  : quickForm.venture_id;
+                              })(),
+                            });
                             checkSmartBillPay(val);
                           }}
                         />
@@ -898,6 +933,14 @@ export function DashboardView() {
                           )}
                       </div>
                   </div>
+              )}
+
+              {isBusiness && quickForm.type !== 'Transfer' && (
+                <VentureSelect
+                  ventures={ventures}
+                  value={quickForm.venture_id}
+                  onChange={(val) => setQuickForm({ ...quickForm, venture_id: val })}
+                />
               )}
 
               <div>
@@ -994,6 +1037,7 @@ export function DashboardView() {
         editing={editingProjected}
         accounts={accounts}
         categories={categories}
+        ventures={ventures}
         onSaved={refreshProjectedIncome}
       />
       <ProjectedIncomeReceiveModal
@@ -1018,6 +1062,7 @@ export function DashboardView() {
         onOpenChange={setIsExportOpen}
         initialPreset="full"
       />
+      <OwnerFlowModal open={ownerFlowOpen} onOpenChange={setOwnerFlowOpen} />
 
       <Fab
         onClick={() => {

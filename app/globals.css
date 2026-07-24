@@ -14,6 +14,7 @@
   --color-accent-positive: var(--accent-positive);
   --color-accent-negative: var(--accent-negative);
   --color-accent-blue: var(--accent-blue);
+  --color-entity-accent: var(--entity-accent);
 
   --radius-card: 1.25rem;
   --shadow-elevated: 0 8px 32px rgb(0 0 0 / 0.08);
@@ -36,6 +37,8 @@
   --accent-positive: #059669;
   --accent-negative: #dc2626;
   --accent-blue: #2563eb;
+  /* Books mode accent (nav / toggle) — Personal emerald, Business blue */
+  --entity-accent: #059669;
   --chart-income: #10b981;
   --chart-expense: #f43f5e;
   --chart-grid: rgb(15 23 42 / 0.06);
@@ -56,10 +59,19 @@
   --accent-positive: #34d399;
   --accent-negative: #fb7185;
   --accent-blue: #60a5fa;
+  --entity-accent: #34d399;
   --chart-income: #34d399;
   --chart-expense: #fb7185;
   --chart-grid: rgb(255 255 255 / 0.08);
   --shadow-elevated: 0 8px 32px rgb(0 0 0 / 0.4);
+}
+
+html[data-entity='business'] {
+  --entity-accent: #2563eb;
+}
+
+html.dark[data-entity='business'] {
+  --entity-accent: #60a5fa;
 }
 
 :root {

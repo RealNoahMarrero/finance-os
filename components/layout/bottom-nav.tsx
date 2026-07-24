@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { prefetchRouteData } from '@/hooks/use-finance-queries';
+import { useEntity } from '@/app/providers/entity-provider';
 import {
   PieChart,
   LayoutGrid,
@@ -24,6 +25,7 @@ const navItems = [
 export function BottomNav() {
   const pathname = usePathname();
   const queryClient = useQueryClient();
+  const { entityId } = useEntity();
 
   return (
     <nav
@@ -41,13 +43,13 @@ export function BottomNav() {
             <Link
               key={item.path}
               href={item.path}
-              onMouseEnter={() => prefetchRouteData(queryClient, item.path)}
-              onFocus={() => prefetchRouteData(queryClient, item.path)}
-              onTouchStart={() => prefetchRouteData(queryClient, item.path)}
+              onMouseEnter={() => prefetchRouteData(queryClient, item.path, entityId)}
+              onFocus={() => prefetchRouteData(queryClient, item.path, entityId)}
+              onTouchStart={() => prefetchRouteData(queryClient, item.path, entityId)}
               className={cn(
                 'flex min-h-[3rem] min-w-[3rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-2 touch-manipulation transition-colors',
                 isActive
-                  ? 'text-[var(--accent-positive)]'
+                  ? 'text-[var(--entity-accent)]'
                   : 'text-[var(--text-muted)]'
               )}
             >

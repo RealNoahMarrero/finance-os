@@ -34,7 +34,10 @@ import type {
   ProjectedIncomeCertainty,
   ProjectedIncomeRepeatPeriod,
   ProjectedIncomeSourceType,
+  Venture,
 } from '@/lib/types';
+import { useEntity } from '@/app/providers/entity-provider';
+import { VentureSelect } from '@/features/ventures/venture-select';
 
 type FormState = {
   label: string;
@@ -47,6 +50,7 @@ type FormState = {
   is_repeating: boolean;
   repeat_period: ProjectedIncomeRepeatPeriod;
   notes: string;
+  venture_id: string;
 };
 
 function makeDefaultForm(accountId: string): FormState {
@@ -61,6 +65,7 @@ function makeDefaultForm(accountId: string): FormState {
     is_repeating: false,
     repeat_period: 'Monthly',
     notes: '',
+    venture_id: '',
   };
 }
 
@@ -70,15 +75,18 @@ export function ProjectedIncomeFormModal({
   editing,
   accounts,
   categories,
+  ventures = [],
   onSaved,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editing: ProjectedIncome | null;
   accounts: Account[];
-  categories: Pick<Category, 'id' | 'name' | 'emoji'>[];
+  categories: Pick<Category, 'id' | 'name' | 'emoji' | 'venture_id'>[];
+  ventures?: Venture[];
   onSaved: () => void;
 }) {
+  const { entityId, isBusiness } = useEntity();
   const liquidAccounts = accounts.filter((a) =>
     ['Checking', 'Savings', 'Cash'].includes(a.type)
   );
@@ -105,6 +113,7 @@ export function ProjectedIncomeFormModal({
             ? editing.repeat_period
             : 'Monthly',
         notes: editing.notes || '',
+        venture_id: editing.venture_id ? String(editing.venture_id) : '',
       });
     } else {
       setForm(makeDefaultForm(defaultAccId));
@@ -115,7 +124,7 @@ export function ProjectedIncomeFormModal({
     setForm((prev) => ({ ...prev, label: val }));
     if (!val || editing) return;
 
-    const defaults = await fetchLastDefaultsForProjectedLabel(val);
+    const defaults = await fetchLastDefaultsForProjectedLabel(entityId, val);
     if (!defaults) return;
 
     setForm((prev) => ({
@@ -124,6 +133,7 @@ export function ProjectedIncomeFormModal({
       account_id: liquidIds.includes(defaults.accountId)
         ? defaults.accountId
         : prev.account_id,
+      venture_id: defaults.ventureId || prev.venture_id,
     }));
   };
 
@@ -141,6 +151,9 @@ export function ProjectedIncomeFormModal({
       is_repeating: form.is_repeating,
       repeat_period: form.is_repeating ? form.repeat_period : 'None',
       notes: form.notes.trim() || null,
+      entity_id: entityId,
+      venture_id:
+        isBusiness && form.venture_id ? Number(form.venture_id) : null,
     };
 
     const { error } = editing
@@ -300,8 +313,24 @@ export function ProjectedIncomeFormModal({
             })),
           ]}
           value={form.category_id}
-          onChange={(val) => setForm({ ...form, category_id: val })}
+          onChange={(val) => {
+            const cat = categories.find((c) => String(c.id) === val);
+            setForm({
+              ...form,
+              category_id: val,
+              venture_id:
+                cat?.venture_id != null ? String(cat.venture_id) : form.venture_id,
+            });
+          }}
         />
+
+        {isBusiness && (
+          <VentureSelect
+            ventures={ventures}
+            value={form.venture_id}
+            onChange={(val) => setForm({ ...form, venture_id: val })}
+          />
+        )}
 
         <label className="flex items-center gap-3 cursor-pointer">
           <input

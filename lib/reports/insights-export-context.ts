@@ -3,6 +3,7 @@ import { fetchCategories, fetchCategoryGroups } from '@/lib/queries/categories';
 import { fetchTransactions } from '@/lib/queries/transactions';
 import type { InsightsExportContext } from '@/lib/export/types';
 import { loadInsightsPreferences } from '@/hooks/use-insights-preferences';
+import type { EntityId } from '@/lib/types';
 import {
   aggregateIncomeByCategory,
   aggregateMonthlyCashflow,
@@ -20,17 +21,18 @@ import {
 
 export async function loadInsightsExportContext(
   period?: ReportPeriod,
-  monthKey?: string
+  monthKey?: string,
+  entityId: EntityId = 'personal'
 ): Promise<InsightsExportContext> {
   const prefs = loadInsightsPreferences();
   const resolvedPeriod = period ?? prefs.period;
   const resolvedMonth = monthKey ?? prefs.selectedMonth;
 
   const [accs, cats, grps, txns] = await Promise.all([
-    fetchAccounts(),
-    fetchCategories(),
-    fetchCategoryGroups(),
-    fetchTransactions(),
+    fetchAccounts(entityId),
+    fetchCategories(entityId),
+    fetchCategoryGroups(entityId),
+    fetchTransactions(entityId),
   ]);
 
   const accounts = accs.data || [];
