@@ -18,7 +18,13 @@ Finance OS is a custom, manual-entry financial platform designed to replace YNAB
 
 **Scope:** Two separate books via a global **Personal / Business** toggle (`EntityProvider`, `data-entity` on `html`). Business uses a blue `--entity-accent`; income/expense greens/reds stay semantic. All queries, RTA, exports, and Sheets sync are scoped by `entity_id`. Existing data was migrated as Personal.
 
+**Budget hierarchy (YNAB-style):** `category_groups` are folders only; `categories` are the envelopes you assign to and spend from. Categories cannot nest under categories — only under groups. Subscriptions/bills are normal categories with optional `due_date` + repeating (no separate subscription type). Add a child envelope via Budget → group **Add Item** / **New Category**.
+
+**Personal budget:** Groups hold related envelopes (e.g. **Subscriptions** → Cursor, Spotify, Gemini Pro; **Bills** → Rent, Spectrum, etc.). Do not flatten Personal into one-group-per-category.
+
 **Business (Marrero LLC):** Historical Chase ledger imported via [`scripts/import-marrero-business-history.sql`](scripts/import-marrero-business-history.sql) (one-shot Supabase SQL). Closed checking stays in-app at **$0** as `Chase Business Checking` for history — rename to “(Closed)” if desired. No account-hide yet (categories can archive; accounts cannot). New money goes on Relay accounts when ready. Do not delete the closed account if you want Ledger/Insights/Sheets history.
+
+**Business budget layout (live DB):** After import, leaf categories under Income / Operating Expenses / Owner were **promoted to their own groups** (envelope kept inside with the same name so history/balances stay). Empty parent groups were deleted. Example: group **Software & Subscriptions** contains category **Software & Subscriptions**; add Adobe (etc.) as sibling categories under that group. The import SQL still seeds the old 3-group layout — re-running it on a fresh DB would need the same promote step (or an updated seed) if that flat group-per-envelope layout is desired.
 
 **Ventures (Business only):** Marrero LLC umbrella classes (Trading, YouTube channels, SOUR, Ora, etc.) in `ventures`. Optional `venture_id` on categories / transactions / expected income. Null = general overhead. Budget/ledger filters = mini-budget views; shared Business RTA (one LLC treasury).
 
@@ -408,4 +414,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`, `009_ent
 32. **Transfer Pay From fix** — Quick entry / ledger Transfer no longer overwrites the account you opened with; destination still remembers last transfer target; stacked from/to UI with swap.
 33. **Remove CC payment cycle** — Dropped account-level min payment / due day / mark paid / calendar CC chips; categories own due dates and funding. Kept credit limit + utilization. Migration `008_drop_credit_card_payment_cycle.sql`.
 34. **Personal / Business books** — Entity toggle, `entity_id` scoping, blue Business accent, ventures under Marrero LLC, owner draw/fund flows, receipt attachments, separate Personal/Business Sheets scripts (`ENTITY_ID` filter). Migration `009_entities_and_ventures.sql`. Historical Marrero Chase ledger import: `scripts/import-marrero-business-history.sql`. Closed Chase account kept at $0 for history (no account-hide UI yet). `body` `suppressHydrationWarning` for Grammarly extension attrs.
+35. **Business budget promote** — Live Business categories promoted to one group per former envelope (Personal left as Bills/Subscriptions/Needs/etc.). Enables nesting e.g. Adobe under Software & Subscriptions without losing existing envelope history.
 
