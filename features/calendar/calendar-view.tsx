@@ -15,11 +15,9 @@ import { PageSkeleton } from '@/components/ui/skeleton';
 import { ResponsiveModal } from '@/components/ui/responsive-modal';
 import {
   useAccounts,
-  useCalendarBillCategories,
   useCategories,
   useInvalidateFinance,
   usePendingProjectedIncome,
-  useProjectedIncomeForMonth,
 } from '@/hooks/use-finance-queries';
 import { computeDaySnapshot, billCalendarChipClass } from '@/lib/calendar/day-snapshot';
 import { DayOverviewSheet } from '@/features/calendar/day-overview-sheet';
@@ -48,18 +46,28 @@ export function CalendarView() {
   const monthStartKey = format(startOfMonth(currentMonth), 'yyyy-MM-dd');
   const monthEndKey = format(endOfMonth(currentMonth), 'yyyy-MM-dd');
 
-  const { data: categories = [], isLoading: billsLoading } = useCalendarBillCategories();
   const { data: accounts = [], isLoading: accountsLoading } = useAccounts();
   const { data: allCategoriesData = [], isLoading: allCatsLoading } = useCategories();
   const { data: pendingProjected = [] } = usePendingProjectedIncome();
-  const { data: projectedIncome = [] } = useProjectedIncomeForMonth(monthStartKey, monthEndKey);
 
+  // Derive from shared caches so Budget/Dashboard mutations show up without a hard refresh.
   const allCategories = useMemo(
     () => allCategoriesData.filter((c) => !c.is_hidden),
     [allCategoriesData]
   );
+  const categories = useMemo(
+    () => allCategories.filter((c) => c.due_date != null),
+    [allCategories]
+  );
+  const projectedIncome = useMemo(
+    () =>
+      pendingProjected.filter(
+        (p) => p.expected_date >= monthStartKey && p.expected_date <= monthEndKey
+      ),
+    [pendingProjected, monthStartKey, monthEndKey]
+  );
 
-  const loading = billsLoading || accountsLoading || allCatsLoading;
+  const loading = accountsLoading || allCatsLoading;
 
   const [detailItem, setDetailItem] = useState<ProjectedIncome | null>(null);
   const [editingProjected, setEditingProjected] = useState<ProjectedIncome | null>(null);

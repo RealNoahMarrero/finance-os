@@ -96,24 +96,6 @@ export async function fetchPendingProjectedIncome(entityId: EntityId) {
   return { data: error ? rows : applyStaleDateBump(rows), error };
 }
 
-export async function fetchProjectedIncomeForMonth(
-  entityId: EntityId,
-  monthStart: string,
-  monthEnd: string
-) {
-  await bumpStalePendingProjectedDates(entityId);
-  const { data, error } = await fetchProjectedRows((q) =>
-    q
-      .eq('entity_id', entityId)
-      .eq('status', 'pending')
-      .gte('expected_date', monthStart)
-      .lte('expected_date', monthEnd)
-      .order('expected_date', { ascending: true })
-  );
-  const rows = (data || []) as ProjectedIncome[];
-  return { data: error ? rows : applyStaleDateBump(rows), error };
-}
-
 export async function fetchAllProjectedIncome(entityId: EntityId, limit = 100) {
   const { data, error } = await fetchProjectedRows((q) =>
     q

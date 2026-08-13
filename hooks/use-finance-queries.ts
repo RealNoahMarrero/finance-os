@@ -6,14 +6,12 @@ import { useEntity } from '@/app/providers/entity-provider';
 import { fetchAccounts } from '@/lib/queries/accounts';
 import {
   fetchCategories,
-  fetchCategoriesForCalendar,
   fetchCategoryGroups,
   fetchDebtCategories,
 } from '@/lib/queries/categories';
 import {
   fetchAllProjectedIncome,
   fetchPendingProjectedIncome,
-  fetchProjectedIncomeForMonth,
 } from '@/lib/queries/projected-income';
 import {
   attachSplitsToTransactions,
@@ -151,16 +149,6 @@ export function useDebtCategories() {
   });
 }
 
-export function useCalendarBillCategories() {
-  const { entityId } = useEntity();
-  return useQuery({
-    queryKey: financeKeys.calendarBills(entityId),
-    queryFn: () => fetchCategoriesForCalendar(entityId),
-    select: (result) => result.data ?? [],
-    ...financeQueryDefaults,
-  });
-}
-
 export function usePendingProjectedIncome() {
   const { entityId } = useEntity();
   return useQuery({
@@ -177,17 +165,6 @@ export function useAllProjectedIncome() {
     queryKey: financeKeys.allProjected(entityId),
     queryFn: () => fetchAllProjectedIncome(entityId),
     select: (result) => result.data ?? [],
-    ...financeQueryDefaults,
-  });
-}
-
-export function useProjectedIncomeForMonth(monthStart: string, monthEnd: string) {
-  const { entityId } = useEntity();
-  return useQuery({
-    queryKey: financeKeys.projectedMonth(entityId, monthStart, monthEnd),
-    queryFn: () => fetchProjectedIncomeForMonth(entityId, monthStart, monthEnd),
-    select: (result) => result.data ?? [],
-    enabled: Boolean(monthStart && monthEnd),
     ...financeQueryDefaults,
   });
 }
@@ -312,13 +289,6 @@ export function prefetchRouteData(
     void qc.prefetchQuery({
       queryKey: financeKeys.debtCategories(entityId),
       queryFn: () => fetchDebtCategories(entityId),
-      ...financeQueryDefaults,
-    });
-  }
-  if (path === '/calendar') {
-    void qc.prefetchQuery({
-      queryKey: financeKeys.calendarBills(entityId),
-      queryFn: () => fetchCategoriesForCalendar(entityId),
       ...financeQueryDefaults,
     });
   }

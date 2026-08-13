@@ -21,16 +21,6 @@ export async function fetchCategories(entityId: EntityId) {
   return { data: (data || []) as Category[], error };
 }
 
-export async function fetchCategoriesForCalendar(entityId: EntityId) {
-  const { data, error } = await supabase
-    .from('categories')
-    .select('*')
-    .eq('entity_id', entityId)
-    .eq('is_hidden', false)
-    .not('due_date', 'is', null);
-  return { data: (data || []) as Category[], error };
-}
-
 export async function fetchDebtCategories(entityId: EntityId) {
   const { data, error } = await supabase
     .from('categories')

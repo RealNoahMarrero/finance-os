@@ -17,20 +17,10 @@ export const financeKeys = {
     [...financeKeys.entity(entityId), 'transactions', 'month', monthStart] as const,
   debtCategories: (entityId: EntityId) =>
     [...financeKeys.entity(entityId), 'debtCategories'] as const,
-  calendarBills: (entityId: EntityId) =>
-    [...financeKeys.entity(entityId), 'calendarBills'] as const,
   pendingProjected: (entityId: EntityId) =>
     [...financeKeys.entity(entityId), 'projected', 'pending'] as const,
   allProjected: (entityId: EntityId) =>
     [...financeKeys.entity(entityId), 'projected', 'all'] as const,
-  projectedMonth: (entityId: EntityId, monthStart: string, monthEnd: string) =>
-    [
-      ...financeKeys.entity(entityId),
-      'projected',
-      'month',
-      monthStart,
-      monthEnd,
-    ] as const,
   projected: (entityId: EntityId) =>
     [...financeKeys.entity(entityId), 'projected'] as const,
   ventures: (entityId: EntityId) =>

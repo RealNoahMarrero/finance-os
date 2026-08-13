@@ -170,7 +170,7 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 * `hooks/use-ready-to-assign.ts`, `hooks/use-balance-adjustment.ts`, `hooks/use-ledger-filters.ts` — ledger filter state + `localStorage` persistence
 
-* `hooks/use-finance-queries.ts`, `lib/query-keys.ts` — shared Supabase data cache (accounts, categories, transactions, projected income); one `categories` query shared by Dashboard, Budget, Ledger, and Insights; `useInvalidateFinance()` for post-mutation refresh; `patchCategories` / `patchCategoryGroups` update all category caches immediately after Move Money and envelope edits; Ledger + Insights share one `transactions` query
+* `hooks/use-finance-queries.ts`, `lib/query-keys.ts` — shared Supabase data cache (accounts, categories, transactions, projected income); one `categories` query shared by Dashboard, Budget, Ledger, Insights, and Calendar; Calendar derives bill chips from categories and month income chips from pending projected income (no separate calendar query keys); `useInvalidateFinance()` for post-mutation refresh; `patchCategories` / `patchCategoryGroups` update all category caches immediately after Move Money and envelope edits; Ledger + Insights share one `transactions` query
 
 * `scripts/google-sheets-sync.gs` — Personal Sheets sync (`ENTITY_ID = personal`)
 * `scripts/google-sheets-sync-business.gs` — Business / Marrero LLC Sheets sync (`ENTITY_ID = business` + Ventures sheet)
@@ -217,6 +217,8 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 
 
 * Month grid of bill due dates (funding colors) and emerald chips for expected income (`projected_income`).
+
+* **Shared cache** — bills = non-hidden categories with `due_date`; month income = pending projected income filtered to the visible month. Uses the same `useCategories()` / `usePendingProjectedIncome()` caches as Budget/Dashboard so tab switches stay fresh after Move Money or expected-income edits (no hard refresh).
 
 * **Event filters** — pill bar: All / Bills / Income. Filters grid chips and adapts header stats (due, funded, expected income). Preference persists in `localStorage` (`finance_os_calendar_filter`). Mobile: horizontal scroll strip, 44px touch targets, edge-to-edge scroll for filters and stat cards.
 
@@ -415,4 +417,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`, `009_ent
 33. **Remove CC payment cycle** — Dropped account-level min payment / due day / mark paid / calendar CC chips; categories own due dates and funding. Kept credit limit + utilization. Migration `008_drop_credit_card_payment_cycle.sql`.
 34. **Personal / Business books** — Entity toggle, `entity_id` scoping, blue Business accent, ventures under Marrero LLC, owner draw/fund flows, receipt attachments, separate Personal/Business Sheets scripts (`ENTITY_ID` filter). Migration `009_entities_and_ventures.sql`. Historical Marrero Chase ledger import: `scripts/import-marrero-business-history.sql`. Closed Chase account kept at $0 for history (no account-hide UI yet). `body` `suppressHydrationWarning` for Grammarly extension attrs.
 35. **Business budget promote** — Live Business categories promoted to one group per former envelope (Personal left as Bills/Subscriptions/Needs/etc.). Enables nesting e.g. Adobe under Software & Subscriptions without losing existing envelope history.
+36. **Calendar cache fix** — Removed separate `calendarBills` / projected-month queries; Calendar derives from shared categories + pending projected income so updates from Budget/Dashboard appear on tab navigation without a hard refresh.
 
