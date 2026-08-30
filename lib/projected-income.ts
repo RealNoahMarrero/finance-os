@@ -31,7 +31,13 @@ export const PROJECTED_INCOME_CERTAINTY_LABELS: Record<
 export function defaultCertaintyForSourceType(
   sourceType: ProjectedIncomeSourceType
 ): ProjectedIncomeCertainty {
-  if (sourceType === 'invoice' || sourceType === 'other') return 'anticipated';
+  if (
+    sourceType === 'invoice' ||
+    sourceType === 'other' ||
+    sourceType === 'gig'
+  ) {
+    return 'anticipated';
+  }
   return 'guaranteed';
 }
 

@@ -87,7 +87,7 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 * **Planning RTA** = assignable (or RTA when none overspent) + pending projected inflows to liquid accounts. **Conservative** subtitle uses **guaranteed** pending only; **optimistic** uses all pending (`lib/projected-income.ts`, `hooks/use-ready-to-assign.ts`). Banner shows overspent and expected-income in separate labeled cards (`components/budget/rta-banner-extras.tsx`).
 
-* **Expected income certainty** — `guaranteed` = reliable (paycheck, salary); counts toward conservative projected RTA. `anticipated` = uncertain (invoice, gig, other); optimistic projected RTA only.
+* **Expected income certainty** — `guaranteed` = reliable (paycheck, salary, transfer in); counts toward conservative projected RTA. `anticipated` = uncertain (invoice, gig / app balance, other); optimistic projected RTA only. Changing Source auto-sets certainty via `defaultCertaintyForSourceType` (`lib/projected-income.ts`); user can override.
 
 * **Credit cards** — account stores balance + `credit_limit` for utilization on Insights (`lib/credit-cards.ts`). Payment due dates and funding live on **budget categories** (bills/debt + Smart Bill Pay), not on the account.
 * **Expected income dates** — pending rows cannot stay before today; auto-bumped on fetch and clamped on save (`lib/queries/projected-income.ts`).
@@ -418,4 +418,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`, `009_ent
 34. **Personal / Business books** — Entity toggle, `entity_id` scoping, blue Business accent, ventures under Marrero LLC, owner draw/fund flows, receipt attachments, separate Personal/Business Sheets scripts (`ENTITY_ID` filter). Migration `009_entities_and_ventures.sql`. Historical Marrero Chase ledger import: `scripts/import-marrero-business-history.sql`. Closed Chase account kept at $0 for history (no account-hide UI yet). `body` `suppressHydrationWarning` for Grammarly extension attrs.
 35. **Business budget promote** — Live Business categories promoted to one group per former envelope (Personal left as Bills/Subscriptions/Needs/etc.). Enables nesting e.g. Adobe under Software & Subscriptions without losing existing envelope history.
 36. **Calendar cache fix** — Removed separate `calendarBills` / projected-month queries; Calendar derives from shared categories + pending projected income so updates from Budget/Dashboard appear on tab navigation without a hard refresh.
+37. **Gig expected income default** — Selecting Source **Gig / app balance** defaults Confidence to **Anticipated** (not Guaranteed); override manually when payout is certain (`defaultCertaintyForSourceType`).
 
