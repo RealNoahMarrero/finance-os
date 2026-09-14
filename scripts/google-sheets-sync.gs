@@ -215,6 +215,10 @@ function syncSummary() {
       'Categories “Available”',
       'Envelope balance after spending. Negative = overspent; fix via Budget transfers.',
     ],
+    [
+      'Categories “Notes”',
+      'Envelope notes from Budget (e.g. disconnect warnings, account numbers).',
+    ],
   ];
 
   sheet.getRange(2, 1, rows.length, 2).setValues(rows);
@@ -252,7 +256,7 @@ function syncAccounts() {
 
 function syncCategories() {
   var data = supabaseGet_(
-    'categories?select=name,target_amount,assigned_amount,is_debt,balance,due_date,is_repeating,target_period,venture_id,ventures(name)&is_hidden=eq.false&' +
+    'categories?select=name,target_amount,assigned_amount,is_debt,balance,due_date,is_repeating,target_period,notes,venture_id,ventures(name)&is_hidden=eq.false&' +
       entityFilter_() +
       '&order=name'
   );
@@ -268,6 +272,7 @@ function syncCategories() {
     'Due Date',
     'Repeating',
     'Period',
+    'Notes',
   ]);
 
   var rows = data.map(function (cat) {
@@ -283,6 +288,7 @@ function syncCategories() {
       cat.due_date || '',
       cat.is_repeating ? 'Yes' : 'No',
       cat.target_period || '',
+      cat.notes || '',
     ];
   });
 

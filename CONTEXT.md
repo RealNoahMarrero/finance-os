@@ -170,7 +170,7 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 * `hooks/use-ready-to-assign.ts`, `hooks/use-balance-adjustment.ts`, `hooks/use-ledger-filters.ts` — ledger filter state + `localStorage` persistence
 
-* `hooks/use-finance-queries.ts`, `lib/query-keys.ts` — shared Supabase data cache (accounts, categories, transactions, projected income); one `categories` query shared by Dashboard, Budget, Ledger, Insights, and Calendar; Calendar derives bill chips from categories and month income chips from pending projected income (no separate calendar query keys); `useInvalidateFinance()` for post-mutation refresh; `patchCategories` / `patchCategoryGroups` update all category caches immediately after Move Money and envelope edits; Ledger + Insights share one `transactions` query
+* `hooks/use-finance-queries.ts`, `lib/query-keys.ts` — shared Supabase data cache (accounts, categories, transactions, projected income); one `categories` query shared by Dashboard, Budget, Ledger, Insights, and Calendar; Calendar derives bill chips from categories and month income chips from pending projected income (no separate calendar query keys); `useInvalidateFinance()` for post-mutation refresh (`invalidateAfterTransaction` cancels in-flight prefetches and refetches inactive transaction caches so Ledger is fresh after quick entry); `patchCategories` / `patchCategoryGroups` update all category caches immediately after Move Money and envelope edits; Ledger + Insights share one `transactions` query
 
 * `scripts/google-sheets-sync.gs` — Personal Sheets sync (`ENTITY_ID = personal`)
 * `scripts/google-sheets-sync-business.gs` — Business / Marrero LLC Sheets sync (`ENTITY_ID = business` + Ventures sheet)
@@ -234,7 +234,7 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 
 
 
-* **Dashboard** — **Finance OS** logo in desktop top bar only (no duplicate page title). Net worth + **Assignable** / Ready to Assign hero tile with separate **Overspent envelopes** and **Expected income** cards when applicable; spaced **Expected income** list card below (soonest date first). **View all expected income** modal matches that order for pending rows; history tab is newest-first. Export top-right above hero.
+* **Dashboard** — **Finance OS** logo in desktop top bar only (no duplicate page title). Net worth + **Assignable** / Ready to Assign hero tile with separate **Overspent envelopes** and **Expected income** cards when applicable; spaced **Expected income** list card below (soonest date first). **View all expected income** modal matches that order for pending rows; history tab is newest-first. Export top-right above hero. **Account row tap** opens Ledger filtered to that account (`buildLedgerHref` → `/ledger?account={id}`).
 
 * **Budget** — RTA banner matches Dashboard (**Assignable** when overspent; labeled overspent vs expected-income cards). **Assign Money** opens Move Money with **no balance caps** — any amount, any source (RTA or category), envelopes and displayed RTA may go negative for planning. Move Money: network-error guidance, submit guard, partial rollback on failure.
 
@@ -258,7 +258,7 @@ Tabs: Overview (cashflow chart + monthly table, account list), Spending (categor
 
 * **Summary strip** — filtered income, expenses, net, and showing count when any filter is active.
 
-* **Persistence** — `localStorage` (`finance_os_ledger_filters`; migrates legacy single `filterCategory`). URL params for deep links: `account`, `category` (comma-separated ids), `type`, `from`, `to`, `period`, `month`, `payee`, `group`, `special`, `q`. Insights category drill-down links to ledger with category + period pre-applied.
+* **Persistence** — `localStorage` (`finance_os_ledger_filters`; migrates legacy single `filterCategory`). URL params for deep links: `account`, `category` (comma-separated ids), `type`, `from`, `to`, `period`, `month`, `payee`, `group`, `special`, `q`. When any URL filter param is present, filters start from defaults + URL (not leftover storage) so Dashboard account taps and Insights category links open a clean filtered view. Plain `/ledger` (bottom nav) still restores saved filters. Insights category drill-down links to ledger with category + period pre-applied. Dashboard account row → `/ledger?account={id}` via `buildLedgerHref`.
 
 * **Mobile** — edge-to-edge horizontal scroll for date pills and summary cards; short pill labels (“All”, “Mo”); 44px touch targets; full-width stacked selects; compact header balance chip.
 
@@ -340,7 +340,7 @@ Paste into **Extensions → Apps Script**, set `SUPABASE_URL` and `SUPABASE_KEY`
 
 | Accounts | `accounts` | Includes credit limit; CC payment due dates live on categories |
 
-| Categories | `categories` (non-hidden) | `Available` = envelope balance; `Overspent?` when negative; **Venture** column when joined |
+| Categories | `categories` (non-hidden) | `Available` = envelope balance; `Overspent?` when negative; **Venture** when joined; **Notes** (envelope notes from Budget, e.g. disconnect warnings) |
 
 | Transactions | `transactions` + nested splits | `Is Split` / `Split Detail`; **Venture** / **Owner Flow** columns |
 
@@ -370,7 +370,7 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`, `009_ent
 
 * **Motion:** Framer Motion on budget group expand, calendar month transitions (page-level route fade removed from AppShell for snappier tab switches)
 
-* **Performance:** TanStack Query caches finance data across tab navigation; Export modal and Insights charts lazy-loaded via `next/dynamic`; nav prefetch on hover/focus
+* **Performance:** TanStack Query caches finance data across tab navigation; Export modal and Insights charts lazy-loaded via `next/dynamic`; nav prefetch on hover/focus; after transaction writes, cancel in-flight prefetches and refetch inactive transaction caches so Ledger/Insights stay current without a hard refresh
 
 
 
@@ -419,4 +419,7 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`, `009_ent
 35. **Business budget promote** — Live Business categories promoted to one group per former envelope (Personal left as Bills/Subscriptions/Needs/etc.). Enables nesting e.g. Adobe under Software & Subscriptions without losing existing envelope history.
 36. **Calendar cache fix** — Removed separate `calendarBills` / projected-month queries; Calendar derives from shared categories + pending projected income so updates from Budget/Dashboard appear on tab navigation without a hard refresh.
 37. **Gig expected income default** — Selecting Source **Gig / app balance** defaults Confidence to **Anticipated** (not Guaranteed); override manually when payout is certain (`defaultCertaintyForSourceType`).
+38. **Dashboard → Ledger account filter** — Tapping an account on Dashboard opens Ledger filtered to that account (`buildLedgerHref`); URL deep links reset to defaults + URL params so leftover localStorage filters no longer hide the intended account/category view.
+39. **Ledger stale-cache fix** — After quick entry / transaction writes, `invalidateAfterTransaction` cancels in-flight nav prefetches and refetches inactive transaction queries (`refetchType: 'all'`) so opening Ledger immediately shows new transactions without a hard refresh.
+40. **Sheets Categories Notes** — Personal + Business Google Sheets sync includes a **Notes** column on Categories (envelope notes from Budget).
 

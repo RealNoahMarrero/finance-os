@@ -58,6 +58,7 @@ import type { Account, Category, ProjectedIncome } from '@/lib/types';
 import { useEntity } from '@/app/providers/entity-provider';
 import { VentureSelect } from '@/features/ventures/venture-select';
 import { OwnerFlowModal } from '@/features/owner-flow/owner-flow-modal';
+import { buildLedgerHref } from '@/lib/ledger/filters';
 import {
   useAccounts,
   useAllProjectedIncome,
@@ -638,7 +639,14 @@ export function DashboardView() {
                 </h4>
                 {liquidAccounts.map(acc => (
                   <div key={acc.id} className="app-card rounded-2xl shadow-sm border border-[var(--border)] flex flex-col hover:border-emerald-500/30 transition-all group overflow-hidden">
-                    <div className="p-4 flex items-center gap-4 cursor-pointer" onClick={() => router.push(`/ledger?account=${acc.id}`)}>
+                    <div
+                      className="p-4 flex items-center gap-4 cursor-pointer"
+                      onClick={() =>
+                        router.push(
+                          buildLedgerHref({ filterAccount: String(acc.id) })
+                        )
+                      }
+                    >
                         <div className="w-12 h-12 bg-[var(--surface-subtle)] rounded-xl flex items-center justify-center shrink-0 border border-[var(--border)]">{getAccountIcon(acc.type)}</div>
                         <div className="flex-grow min-w-0">
                         <h4 className="font-bold text-[var(--text-primary)] truncate">{acc.name}</h4>
@@ -669,7 +677,14 @@ export function DashboardView() {
                 </h4>
                 {creditCards.map(acc => (
                   <div key={acc.id} className="app-card rounded-2xl shadow-sm border border-[var(--border)] flex flex-col hover:border-red-500/30 transition-all group overflow-hidden">
-                    <div className="p-4 flex items-center gap-4 cursor-pointer" onClick={() => router.push(`/ledger?account=${acc.id}`)}>
+                    <div
+                      className="p-4 flex items-center gap-4 cursor-pointer"
+                      onClick={() =>
+                        router.push(
+                          buildLedgerHref({ filterAccount: String(acc.id) })
+                        )
+                      }
+                    >
                         <div className="w-12 h-12 bg-[var(--surface-subtle)] rounded-xl flex items-center justify-center shrink-0 border border-[var(--border)]">{getAccountIcon(acc.type)}</div>
                         <div className="flex-grow min-w-0">
                         <h4 className="font-bold text-[var(--text-primary)] truncate">{acc.name}</h4>

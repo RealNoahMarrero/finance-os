@@ -214,18 +214,37 @@ export function useInvalidateFinance() {
     invalidateVentures: () =>
       qc.invalidateQueries({ queryKey: financeKeys.ventures(entityId) }),
     invalidateAfterTransaction: async () => {
+      // Cancel in-flight prefetches so an older fetch can't finish after this
+      // mutation and re-mark the cache "fresh" with pre-mutation data.
+      await qc.cancelQueries({ queryKey: financeKeys.all });
       await Promise.all([
-        qc.invalidateQueries({ queryKey: financeKeys.transactions(entityId) }),
-        qc.invalidateQueries({ queryKey: financeKeys.accounts(entityId) }),
-        qc.invalidateQueries({ queryKey: financeKeys.categories(entityId) }),
+        // refetchType 'all' warms inactive ledger/insights caches so opening
+        // Ledger right after a quick entry shows the new txn without a hard refresh.
+        qc.invalidateQueries({
+          queryKey: financeKeys.transactions(entityId),
+          refetchType: 'all',
+        }),
+        qc.invalidateQueries({
+          queryKey: financeKeys.accounts(entityId),
+          refetchType: 'all',
+        }),
+        qc.invalidateQueries({
+          queryKey: financeKeys.categories(entityId),
+          refetchType: 'all',
+        }),
         qc.invalidateQueries({
           queryKey: financeKeys.recentTransactions(entityId, 10),
+          refetchType: 'all',
         }),
         qc.invalidateQueries({
           queryKey: [...financeKeys.entity(entityId), 'transactions', 'month'],
+          refetchType: 'all',
         }),
         // Owner flows and cross-entity writes may touch the other books
-        qc.invalidateQueries({ queryKey: financeKeys.all }),
+        qc.invalidateQueries({
+          queryKey: financeKeys.all,
+          refetchType: 'active',
+        }),
       ]);
     },
     invalidateAfterBudgetChange: async () => {

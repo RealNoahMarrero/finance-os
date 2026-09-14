@@ -21,9 +21,11 @@ export function useLedgerFilters() {
     const fromStorage = loadLedgerFiltersFromStorage();
     const fromUrl = parseLedgerSearchParams(searchParams);
     const hasUrlOverrides = Object.keys(fromUrl).length > 0;
+    // Deep links (account from Dashboard, category from Insights, etc.) start from
+    // defaults so leftover localStorage filters don't hide the intended view.
     setFilters(
       hasUrlOverrides
-        ? { ...fromStorage, ...fromUrl }
+        ? { ...DEFAULT_LEDGER_FILTERS, ...fromUrl }
         : fromStorage
     );
     setInitialized(true);
