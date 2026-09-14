@@ -216,6 +216,10 @@ function syncSummary() {
       'Categories “Available”',
       'Envelope balance after spending. Negative = overspent; fix via Budget transfers.',
     ],
+    [
+      'Categories “Notes”',
+      'Envelope notes from Budget (e.g. disconnect warnings, account numbers).',
+    ],
   ];
 
   sheet.getRange(2, 1, rows.length, 2).setValues(rows);
