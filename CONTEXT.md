@@ -158,7 +158,7 @@ Child rows: `transaction_id`, `category_id`, `amount`, `sort_order`. Parent `tra
 
 * `lib/projected-income.ts` — planning RTA math
 
-* `lib/queries/` — `transactions`, `transaction-splits`, `projected-income`, accounts, categories
+* `lib/queries/` — `transactions`, `transaction-splits`, `projected-income`, accounts, categories (`fetchCategories` / debt categories ordered **A–Z by name** for Move Money, Ledger, Dashboard, and other pickers)
 
 * `lib/export/build-finance-export.ts` — full `.txt` report builder + `downloadTextFile`
 
@@ -422,4 +422,5 @@ Requires RLS read access on new tables (`003_projected_income_rls.sql`, `009_ent
 38. **Dashboard → Ledger account filter** — Tapping an account on Dashboard opens Ledger filtered to that account (`buildLedgerHref`); URL deep links reset to defaults + URL params so leftover localStorage filters no longer hide the intended account/category view.
 39. **Ledger stale-cache fix** — After quick entry / transaction writes, `invalidateAfterTransaction` cancels in-flight nav prefetches and refetches inactive transaction queries (`refetchType: 'all'`) so opening Ledger immediately shows new transactions without a hard refresh.
 40. **Sheets Categories Notes** — Personal + Business Google Sheets sync includes a **Notes** column on Categories (envelope notes from Budget).
+41. **Category picker A–Z** — Categories load alphabetically by name (`fetchCategories`) so Move Money, Ledger/Dashboard transaction envelopes, splits, filters, and Budget default list are A–Z instead of creation/`sort_order` order. Category **groups** still use `sort_order` for Budget folder order.
 

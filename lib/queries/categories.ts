@@ -16,7 +16,7 @@ export async function fetchCategories(entityId: EntityId) {
     .from('categories')
     .select('*')
     .eq('entity_id', entityId)
-    .order('sort_order', { ascending: true })
+    .order('name', { ascending: true })
     .order('id');
   return { data: (data || []) as Category[], error };
 }
@@ -27,6 +27,7 @@ export async function fetchDebtCategories(entityId: EntityId) {
     .select('*')
     .eq('entity_id', entityId)
     .eq('is_debt', true)
-    .gt('balance', 0);
+    .gt('balance', 0)
+    .order('name', { ascending: true });
   return { data: (data || []) as Category[], error };
 }

@@ -232,12 +232,14 @@ export function BudgetView() {
       setFundingCatId(null);
   }
 
-  const visibleCategories = categories.filter((c) => {
-    if (c.is_hidden) return false;
-    if (!isBusiness || ventureFilter === 'all') return true;
-    if (ventureFilter === 'overhead') return c.venture_id == null;
-    return c.venture_id === ventureFilter;
-  });
+  const visibleCategories = categories
+    .filter((c) => {
+      if (c.is_hidden) return false;
+      if (!isBusiness || ventureFilter === 'all') return true;
+      if (ventureFilter === 'overhead') return c.venture_id == null;
+      return c.venture_id === ventureFilter;
+    })
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
 
   const {
     readyToAssign,
@@ -789,6 +791,9 @@ export function BudgetView() {
                     if (!b.due_date) return -1;
                     return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
                 });
+            } else {
+                // default: alphabetical (matches Move Money / transaction pickers)
+                groupCats.sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
             }
 
             const isExpanded = expandedGroups.has(group.id);
