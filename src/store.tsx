@@ -1,0 +1,181 @@
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { emptyData, type DataState, type Txn, type Income, type Account, type Bill } from './data';
+import * as db from './db';
+import { supabase } from './supabase';
+import { todayISO } from './lib';
+
+export type Modal =
+  | { type: 'txn'; mode: 'add' | 'view' | 'edit'; id?: string; prefill?: Partial<Txn> }
+  | { type: 'assign' }
+  | { type: 'move'; from?: string; to?: string; amount?: number }
+  | { type: 'category'; id: string }
+  | { type: 'category-add' }
+  | { type: 'bill'; billId: string; date: string }
+  | { type: 'income'; mode: 'view' | 'add'; id?: string; date?: string }
+  | { type: 'reconcile'; id: string }
+  | { type: 'cutover'; id?: string }
+  | { type: 'account-add' }
+  | { type: 'menu' }
+  | { type: 'forecast-detail' };
+
+export interface Toast { id: number; text: string; undo?: () => void; tone?: 'error' }
+export type ThemePref = 'light' | 'dark' | 'system';
+type Opt<T> = T | undefined;
+
+interface Store {
+  data: DataState; status: 'loading' | 'ready' | 'error'; loadError: string; refresh: () => Promise<void>; busy: boolean; email: string; signOut: () => Promise<void>;
+  modal: Modal | null; openModal: (m: Modal) => void; closeModal: () => void;
+  toasts: Toast[]; toast: (text: string, undo?: () => void) => void;
+  theme: ThemePref; setTheme: (t: ThemePref) => void;
+  addTxn: (t: Omit<Txn, 'id'>) => Promise<Opt<string>>;
+  updateTxn: (id: string, t: Omit<Txn, 'id'>) => Promise<boolean>;
+  deleteTxn: (id: string) => Promise<boolean>;
+  assign: (amounts: Record<string, number>) => Promise<boolean>;
+  moveMoney: (from: string, to: string, amount: number) => Promise<boolean>;
+  setTarget: (catId: string, target: number | null) => Promise<boolean>;
+  addCategory: (c: { name: string; groupId: string; target: number | null; emoji?: string }) => Promise<boolean>;
+  payBill: (billId: string, date: string, opts: { post: boolean; amount?: number; accountId?: string }) => Promise<boolean>;
+  setBillMode: (billId: string, mode: Bill['mode']) => Promise<boolean>;
+  receiveIncome: (incomeId: string, opts: { date: string; amount: number; accountId: string }) => Promise<boolean>;
+  skipIncome: (incomeId: string) => Promise<boolean>;
+  addIncome: (i: Omit<Income, 'id' | 'status'>) => Promise<boolean>;
+  setCertainty: (id: string, c: Income['certainty']) => Promise<boolean>;
+  reconcile: (accountId: string, actual: number, note?: string) => Promise<Opt<{ diff: number; adjustmentTxnId?: string }>>;
+  setCutover: (accountId: string, date: string, opening: number) => Promise<boolean>;
+  setCutovers: (date: string, items: { accountId: string; opening: number }[]) => Promise<boolean>;
+  addAccount: (a: { name: string; type: Account['type']; limit?: number; opening: number; cutover: string }) => Promise<boolean>;
+}
+
+const Ctx = createContext<Store>(null as unknown as Store);
+export const useStore = () => useContext(Ctx);
+
+const storedTheme = (): ThemePref => {
+  try { const t = localStorage.getItem('fos-theme'); if (t === 'light' || t === 'dark' || t === 'system') return t; } catch { /* storage unavailable */ }
+  return 'system';
+};
+
+export function StoreProvider({ children, email }: { children: ReactNode; email: string }) {
+  const [data, setData] = useState<DataState>(() => emptyData());
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [loadError, setLoadError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [modal, setModal] = useState<Modal | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [theme, setThemeState] = useState<ThemePref>(storedTheme);
+  const seq = useRef(1);
+  const lock = useRef(false);
+  const loadedAt = useRef(0);
+
+  useEffect(() => {
+    const apply = () => {
+      const dark = theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#0d1311' : '#f6f7f5');
+    };
+    apply();
+    const mq = matchMedia('(prefers-color-scheme: dark)');
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, [theme]);
+  const setTheme = useCallback((t: ThemePref) => { setThemeState(t); try { localStorage.setItem('fos-theme', t); } catch { /* ignore */ } }, []);
+
+  const toast = useCallback((text: string, undo?: () => void, tone?: 'error') => {
+    const id = seq.current++;
+    setToasts((x) => [...x, { id, text, undo, tone }]);
+    setTimeout(() => setToasts((x) => x.filter((t) => t.id !== id)), tone === 'error' ? 8000 : 5200);
+  }, []);
+  const dismissToast = (id: number) => setToasts((x) => x.filter((t) => t.id !== id));
+
+  const refresh = useCallback(async () => {
+    try {
+      const { state } = await db.loadAll();
+      setData(state); setStatus('ready'); setLoadError(''); loadedAt.current = Date.now();
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : String(e));
+      setStatus((s) => (s === 'ready' ? s : 'error'));
+      if (status === 'ready') toast('Could not refresh — showing the last loaded data', undefined, 'error');
+    }
+  }, [status, toast]);
+  useEffect(() => { void refresh(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const f = () => { if (document.visibilityState === 'visible' && Date.now() - loadedAt.current > 90_000 && !lock.current) void refresh(); };
+    document.addEventListener('visibilitychange', f); return () => document.removeEventListener('visibilitychange', f);
+  }, [refresh]);
+
+  /** One write at a time: blocks double-taps, shows a friendly error, then reloads so every number comes from the database. */
+  const run = useCallback(async <T,>(fn: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> => {
+    if (lock.current) return { ok: false };
+    lock.current = true; setBusy(true);
+    try {
+      const value = await fn();
+      await refresh();
+      return { ok: true, value };
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Something went wrong — nothing was changed.', undefined, 'error');
+      return { ok: false };
+    } finally { lock.current = false; setBusy(false); }
+  }, [refresh, toast]);
+
+  const signOut = useCallback(async () => { await supabase.auth.signOut(); }, []);
+
+  const addTxn: Store['addTxn'] = useCallback(async (t) => { const r = await run(() => db.createTxn(t)); return r.ok ? r.value : undefined; }, [run]);
+  const updateTxn: Store['updateTxn'] = useCallback(async (id, t) => (await run(() => db.updateTxn(id, t))).ok, [run]);
+  const deleteTxn: Store['deleteTxn'] = useCallback(async (id) => {
+    const r = await run(() => db.deleteTxn(id));
+    if (r.ok) { const copy = r.value; toast('Transaction deleted', () => { void addTxn(copy); }); }
+    return r.ok;
+  }, [run, toast, addTxn]);
+  const assign: Store['assign'] = useCallback(async (a) => (await run(() => db.assignMoney(a))).ok, [run]);
+  const moveMoney: Store['moveMoney'] = useCallback(async (f, t, a) => (await run(() => db.moveMoney(f, t, a))).ok, [run]);
+  const setTarget: Store['setTarget'] = useCallback(async (id, t) => (await run(() => db.setCategoryTarget(id, t))).ok, [run]);
+  const addCategory: Store['addCategory'] = useCallback(async (c) => (await run(() => db.addCategoryRow(c))).ok, [run]);
+
+  const payBill: Store['payBill'] = useCallback(async (billId, date, opts) => {
+    const bill = data.bills.find((b) => b.id === billId);
+    if (!bill) return false;
+    const txn: Omit<Txn, 'id'> | undefined = opts.post ? {
+      date: todayISO(), payee: bill.payee, amount: opts.amount ?? bill.amount, type: bill.toAccountId ? 'transfer' : 'expense',
+      accountId: opts.accountId ?? bill.accountId, toAccountId: bill.toAccountId, categoryId: bill.categoryId,
+    } : undefined;
+    return (await run(() => db.payBill(billId, date, todayISO(), opts.post ? 'prepare' : 'reminder', txn))).ok;
+  }, [run, data.bills]);
+  const setBillMode: Store['setBillMode'] = useCallback(async (id, m) => (await run(() => db.setBillMode(id, m))).ok, [run]);
+
+  const receiveIncome: Store['receiveIncome'] = useCallback(async (id, o) => (await run(() => db.receiveIncome(id, o.date, o.amount, o.accountId))).ok, [run]);
+  const skipIncome: Store['skipIncome'] = useCallback(async (id) => {
+    const inc = data.incomes.find((i) => i.id === id);
+    return (await run(() => db.skipIncome(id, inc?.date ?? todayISO()))).ok;
+  }, [run, data.incomes]);
+  const addIncome: Store['addIncome'] = useCallback(async (i) => (await run(() => db.addIncomeRow(i))).ok, [run]);
+  const setCertainty: Store['setCertainty'] = useCallback(async (id, c) => (await run(() => db.setIncomeCertainty(id, c))).ok, [run]);
+
+  const reconcile: Store['reconcile'] = useCallback(async (id, actual, note) => {
+    const r = await run(() => db.reconcileAccount(id, actual, todayISO(), db.newRequestId(), note));
+    return r.ok ? r.value : undefined;
+  }, [run]);
+  const setCutover: Store['setCutover'] = useCallback(async (id, date, opening) => (await run(() => db.setCutover(id, date, opening))).ok, [run]);
+  const setCutovers: Store['setCutovers'] = useCallback(async (date, items) => (await run(async () => { for (const it of items) await db.setCutover(it.accountId, date, it.opening); })).ok, [run]);
+  const addAccount: Store['addAccount'] = useCallback(async (a) => (await run(async () => {
+    const id = await db.addAccountRow({ name: a.name, type: a.type, limit: a.limit });
+    await db.setCutover(id, a.cutover, a.opening);
+  })).ok, [run]);
+
+  const value = useMemo<Store>(() => ({
+    data, status, loadError, refresh, busy, email, signOut, modal, openModal: setModal, closeModal: () => setModal(null), toasts, toast, theme, setTheme,
+    addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, payBill, setBillMode, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount,
+  }), [data, status, loadError, busy, email, modal, toasts, theme, refresh, signOut, toast, setTheme, addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, payBill, setBillMode, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount]);
+
+  return (
+    <Ctx.Provider value={value}>
+      {children}
+      <div className="toasts" aria-live="polite">
+        {toasts.map((t) => (
+          <div key={t.id} className={t.tone === 'error' ? 'toast error' : 'toast'} role={t.tone === 'error' ? 'alert' : undefined}>
+            <span>{t.text}</span>
+            {t.undo && <button onClick={() => { t.undo!(); dismissToast(t.id); }}>Undo</button>}
+          </div>
+        ))}
+      </div>
+    </Ctx.Provider>
+  );
+}
