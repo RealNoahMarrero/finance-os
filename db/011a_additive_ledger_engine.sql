@@ -380,5 +380,11 @@ revoke execute on function public.fos_apply_effect(public.transactions, int, jso
 grant execute on function public.fos_apply_effect(public.transactions, int, jsonb), public.fos_check_owner(), public.fos_validate_txn(jsonb), public.fos_acct_delta(text,text,boolean,numeric) to authenticated;
 
 grant select, insert, update, delete on public.account_baselines, public.account_reconciliations, public.bill_payments, public.expected_income_skips to authenticated;
-grant usage, select on all sequences in schema public to authenticated;
+-- sequences of the Finance tables only (this Supabase project is shared with other apps — nothing else is touched)
+do $$ declare s record; begin
+  for s in select distinct sq.relname from pg_class t join pg_depend d on d.refobjid=t.oid and d.deptype in ('a','i') join pg_class sq on sq.oid=d.objid and sq.relkind='S'
+    where t.relnamespace='public'::regnamespace and t.relname in ('accounts','category_groups','categories','transactions','transaction_splits','projected_income','entities','ventures','transaction_attachments','account_baselines','account_reconciliations','bill_payments','expected_income_skips') loop
+    execute format('grant usage, select on sequence public.%I to authenticated', s.relname);
+  end loop;
+end $$;
 grant select on public.account_balance_audit to authenticated;

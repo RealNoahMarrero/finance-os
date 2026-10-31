@@ -20,10 +20,21 @@ begin
 end $$;
 
 
--- the whole public schema: anon gets nothing (functions included)
-revoke all on all tables in schema public from anon;
-revoke all on all sequences in schema public from anon;
-revoke execute on all functions in schema public from anon;
+-- Finance objects only: anon gets nothing. (This Supabase project is shared with other apps; their tables and functions are not touched.)
+do $$ declare t text; s record; f record; begin
+  foreach t in array array['accounts','category_groups','categories','transactions','transaction_splits','projected_income','entities','ventures','transaction_attachments','account_baselines','account_reconciliations','bill_payments','expected_income_skips'] loop
+    if to_regclass('public.'||t) is null then continue; end if;
+    execute format('revoke all on public.%I from anon', t);
+    for s in select distinct sq.relname from pg_class c join pg_depend d on d.refobjid=c.oid and d.deptype in ('a','i') join pg_class sq on sq.oid=d.objid and sq.relkind='S' where c.oid=to_regclass('public.'||t) loop
+      execute format('revoke all on sequence public.%I from anon', s.relname);
+    end loop;
+  end loop;
+  if to_regclass('public.account_balance_audit') is not null then revoke all on public.account_balance_audit from anon; end if;
+  for f in select p.oid::regprocedure as sig from pg_proc p where p.pronamespace='public'::regnamespace and p.proname like 'fos\_%' loop
+    execute format('revoke execute on function %s from public, anon', f.sig);
+    execute format('grant execute on function %s to authenticated', f.sig);
+  end loop;
+end $$;
 
 -- keep the Sheets sync endpoint reachable by its token (it validates the token itself; read-only, one book per token)
 do $$ begin

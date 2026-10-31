@@ -5,6 +5,8 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  # the site was set up for Next.js and still has its plugin installed; this app is a plain static build
+  NETLIFY_NEXT_PLUGIN_SKIP = "true"
 
 [[redirects]]
   from = "/*"

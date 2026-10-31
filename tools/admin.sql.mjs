@@ -2,10 +2,10 @@
 
 // Every ordinary table in the public schema (so nothing is missed, whatever the project contains).
 export const tablesSql = `select c.relname as name from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind in ('r','p') order by 1`;
-export const rowsSql = (t) => `select coalesce(jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text), '[]'::jsonb) as rows from public."${t}" t`;
+export const rowsSql = (t) => `select coalesce(jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text collate "C"), '[]'::jsonb) as rows from public."${t}" t`;
 export const countSql = (t) => `select count(*)::int as n from public."${t}"`;
 // A fingerprint of a table's contents that doesn't depend on row order.
-export const md5Sql = (t) => `select md5(coalesce(string_agg(to_jsonb(t)::text, '|' order by to_jsonb(t)::text), '')) as md5 from public."${t}" t`;
+export const md5Sql = (t) => `select md5(coalesce(string_agg(to_jsonb(t)::text, '|' order by to_jsonb(t)::text collate "C"), '')) as md5 from public."${t}" t`;
 
 // The complete structure of the public schema as an ordered list of SQL statements (sec = order of execution).
 // Covers tables, sequences, constraints, indexes, row-level security, policies, functions, views, triggers and grants.
@@ -13,6 +13,10 @@ export const ddlSql = `
 with t as (select c.oid, c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind in ('r','p')),
 ext as (select objid from pg_depend where deptype='e'),
 stmts(sec, stmt) as (
+  -- custom enum types used by columns
+  select 5, format('create type public.%I as enum (%s);', ty.typname, string_agg(quote_literal(e.enumlabel), ', ' order by e.enumsortorder))
+    from pg_type ty join pg_enum e on e.enumtypid=ty.oid where ty.typnamespace='public'::regnamespace group by ty.typname
+  union all
   -- sequences referenced by column defaults
   select 10, format('create sequence if not exists %s;', case when s like '%.%' then s else 'public.'||s end)
     from (select distinct (regexp_match(pg_get_expr(d.adbin,d.adrelid), 'nextval\\(''([^'']+)''::regclass\\)'))[1] s from pg_attrdef d join t on t.oid=d.adrelid) q where s is not null
@@ -28,6 +32,11 @@ stmts(sec, stmt) as (
   union all
   select 50, format('alter table public.%I add constraint %I %s;', cl.relname, co.conname, pg_get_constraintdef(co.oid))
     from pg_constraint co join pg_class cl on cl.oid=co.conrelid join t on t.oid=cl.oid where co.contype in ('p','u','c')
+  union all
+  -- isolated test restores only (when auth.users is our 2-column stand-in): create the user ids that other tables point at
+  select 55, format('do $x$ begin if (select count(*) from information_schema.columns where table_schema=''auth'' and table_name=''users'')=2 then insert into auth.users(id) select distinct %I from public.%I where %I is not null on conflict do nothing; end if; end $x$;', a.attname, cl.relname, a.attname)
+    from pg_constraint co join pg_class cl on cl.oid=co.conrelid join t on t.oid=cl.oid join pg_attribute a on a.attrelid=co.conrelid and a.attnum=co.conkey[1]
+    where co.contype='f' and co.confrelid = to_regclass('auth.users') and array_length(co.conkey,1)=1
   union all
   select 60, format('alter table public.%I add constraint %I %s;', cl.relname, co.conname, pg_get_constraintdef(co.oid))
     from pg_constraint co join pg_class cl on cl.oid=co.conrelid join t on t.oid=cl.oid where co.contype in ('f','x')
@@ -53,7 +62,7 @@ stmts(sec, stmt) as (
   select 100, format('grant %s on %s public.%I to %s;', string_agg(privilege_type, ', ' order by privilege_type), kind, relname, grantee)
     from (select c.relname, case when c.relkind='S' then 'sequence' else 'table' end kind, x.privilege_type, r.rolname grantee
           from pg_class c join pg_namespace n on n.oid=c.relnamespace, lateral aclexplode(c.relacl) x join pg_roles r on r.oid=x.grantee
-          where n.nspname='public' and c.relkind in ('r','p','v','m','S') and r.rolname in ('anon','authenticated','service_role')) g group by relname, kind, grantee
+          where n.nspname='public' and c.relkind in ('r','p','v','m','S') and x.privilege_type <> 'MAINTAIN' and not (c.relkind='S' and exists (select 1 from pg_depend dd where dd.objid=c.oid and dd.deptype='i')) and r.rolname in ('anon','authenticated','service_role')) g group by relname, kind, grantee
   union all
   select 101, format('grant execute on function %s to %s;', p.oid::regprocedure, r.rolname)
     from pg_proc p join pg_namespace n on n.oid=p.pronamespace, lateral aclexplode(p.proacl) x join pg_roles r on r.oid=x.grantee
@@ -77,3 +86,5 @@ do $pf$ declare n_tables int; n_pol int; n_fn int; n_anon int; begin
   select count(*) into n_anon from information_schema.role_table_grants where table_schema='public' and grantee='anon';
   raise exception 'PREFLIGHT_OK rls_tables=% owner_policies=% fos_functions=% anon_table_grants=%', n_tables, n_pol, n_fn, n_anon;
 end $pf$;`;
+
+export const tableAllSql = (t) => `select coalesce(jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text collate "C"), '[]'::jsonb)::text as rows_text, count(*)::int as n, md5(coalesce(string_agg(to_jsonb(t)::text, '|' order by to_jsonb(t)::text collate "C"), '')) as md5 from public."${t}" t`;

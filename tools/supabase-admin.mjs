@@ -3,7 +3,7 @@
 //   backup                  full backup (every table's rows + checksums + complete structure) and restore/rollback scripts, verified
 //   verify-restore DIR      checks the connected database against a backup's checksums (used to prove a restore worked)
 //   preflight               applies 011a + 012 + 011b inside a transaction that is always rolled back; reports what it saw
-//   apply-a EMAIL           EARLY STEP: applies 011a + 012 (additive, old site keeps working), registers EMAIL as owner, turns off sign-ups
+//   apply-a EMAIL           EARLY STEP: applies 011a + 012 (additive, old site keeps working), registers EMAIL as owner
 //   lockdown                CUTOVER STEP: applies 011b (removes all anonymous access). Run right after the V2 site is live
 //   rollback DIR            EMERGENCY: undoes the lock-down using DIR/rollback.sql (old public access returns)
 //   restore-data DIR --yes  EMERGENCY: replaces the current rows with the backup's rows (structure must exist)
@@ -11,7 +11,7 @@
 //   verify                  confirms the public (anonymous) key can no longer read the private tables
 // Test mode: set FOS_LOCAL_PG to a postgres connection string to run everything against a local database instead of Supabase.
 import fs from 'node:fs'; import path from 'node:path'; import crypto from 'node:crypto'; import { fileURLToPath } from 'node:url'; import { execFileSync } from 'node:child_process';
-import { tablesSql, rowsSql, countSql, md5Sql, ddlSql, preflightSql } from './admin.sql.mjs';
+import { tableAllSql, tablesSql, rowsSql, countSql, md5Sql, ddlSql, preflightSql } from './admin.sql.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url)); const root = path.resolve(here, '..');
 const LOCAL = process.env.FOS_LOCAL_PG;
@@ -26,12 +26,16 @@ async function sql(query) {
   if (LOCAL) {
     const q = query.trim().replace(/;\s*$/, ''); const isSelect = /^(select|with)\b/i.test(q);
     try {
-      if (isSelect) { const out = execFileSync('psql', [LOCAL, '-X', '-At', '-v', 'ON_ERROR_STOP=1', '-c', `copy (select coalesce(jsonb_agg(to_jsonb(q)), '[]'::jsonb) from (${q}) q) to stdout`], { encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'pipe'] }); return JSON.parse(out.replace(/\\\\/g, '\\')); }
-      execFileSync('psql', [LOCAL, '-X', '-q', '-v', 'ON_ERROR_STOP=1'], { input: query, encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['pipe', 'pipe', 'pipe'] }); return [];
+      if (isSelect) { const out = execFileSync('psql', [LOCAL, '-X', '-At', '-v', 'ON_ERROR_STOP=1', '-c', `copy (select coalesce(jsonb_agg(to_jsonb(q)), '[]'::jsonb) from (${q}) q) to stdout`], { encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PGTZ: 'UTC' } }); return JSON.parse(out.replace(/\\\\/g, '\\')); }
+      execFileSync('psql', [LOCAL, '-X', '-q', '-v', 'ON_ERROR_STOP=1'], { input: query, encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, PGTZ: 'UTC' } }); return [];
     } catch (e) { throw new Error(String(e.stderr || e.message)); }
   }
-  const r = await api('/database/query', { method: 'POST', body: JSON.stringify({ query }) });
-  const text = await r.text(); let body; try { body = JSON.parse(text); } catch { body = text; }
+  let r, text;
+  for (let i = 0; i < 8; i++) { // the Supabase API allows only a few requests per minute: wait and retry
+    r = await api('/database/query', { method: 'POST', body: JSON.stringify({ query }) }); text = await r.text();
+    if (r.status !== 429) break; await new Promise((res) => setTimeout(res, 8000 + i * 6000));
+  }
+  await new Promise((res) => setTimeout(res, 700)); let body; try { body = JSON.parse(text); } catch { body = text; }
   if (!r.ok) { const e = new Error(typeof body === 'object' ? body.message ?? text : text); e.status = r.status; throw e; }
   return body;
 }
@@ -44,12 +48,15 @@ const dollar = (s) => { let tag = 'fosj'; while (s.includes(`$${tag}$`)) tag += 
 const cmd = process.argv[2];
 
 // Statements that put the original (pre-lock-down) access rules back. Generated from the live catalog at backup time.
-const rollbackSql = `with t as (select c.oid, c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind in ('r','p'))
+const FIN = ['accounts','category_groups','categories','transactions','transaction_splits','projected_income','entities','ventures','transaction_attachments'];
+const finList = FIN.map((t) => `'${t}'`).join(',');
+// Only the Finance tables: this Supabase project is shared with other apps, which must never be touched.
+const rollbackSql = `with t as (select c.oid, c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind in ('r','p') and c.relname in (${finList}))
 select stmt from (
   select 1 o, format('drop policy if exists owner_all on public.%I;', relname) stmt from t
-  union all select 2, format('drop policy if exists %I on public.%I;', policyname, tablename) from pg_policies where schemaname='public'
+  union all select 2, format('drop policy if exists %I on public.%I;', policyname, tablename) from pg_policies where schemaname='public' and tablename in (${finList})
   union all select 3, format('create policy %I on public.%I as %s for %s to %s%s%s;', policyname, tablename, lower(permissive), cmd, array_to_string(roles, ', '),
-      case when qual is not null then ' using (' || qual || ')' else '' end, case when with_check is not null then ' with check (' || with_check || ')' else '' end) from pg_policies where schemaname='public'
+      case when qual is not null then ' using (' || qual || ')' else '' end, case when with_check is not null then ' with check (' || with_check || ')' else '' end) from pg_policies where schemaname='public' and tablename in (${finList})
   union all select 4, format('alter table public.%I %s row level security;', relname, case when relrowsecurity then 'enable' else 'disable' end) from t
 ) x order by o, stmt`;
 
@@ -60,8 +67,8 @@ if (cmd === 'backup') {
   const ordered = []; const seen = new Set(); const visit = (t, stack = []) => { if (seen.has(t) || stack.includes(t)) return; for (const f of fks.filter((x) => x.child === t)) visit(f.parent, [...stack, t]); seen.add(t); ordered.push(t); };
   tables.forEach((t) => visit(t)); tables = ordered; const manifest = { created: new Date().toISOString(), tables: {}, ddl: {} }; const data = {}; const bad = [];
   for (const t of tables) {
-    const rows = (await sql(rowsSql(t)))[0].rows; const n = (await sql(countSql(t)))[0].n; const md5 = (await sql(md5Sql(t)))[0].md5;
-    fs.writeFileSync(path.join(dir, `${t}.json`), JSON.stringify(rows)); data[t] = rows; manifest.tables[t] = { rows: rows.length, md5 };
+    const one = (await sql(tableAllSql(t)))[0]; const rowsText = one.rows_text; const n = one.n; const md5 = one.md5; const rows = { length: JSON.parse(rowsText).length }; // keep the database's own number formatting: never re-serialize
+    fs.writeFileSync(path.join(dir, `${t}.json`), rowsText); data[t] = rowsText; manifest.tables[t] = { rows: rows.length, md5 };
     if (rows.length !== n) bad.push(`${t}: saved ${rows.length}, database says ${n}`);
     console.log(`${t.padEnd(26)} ${String(rows.length).padStart(6)} rows`);
   }
@@ -76,17 +83,27 @@ do $r$ begin
   if not exists (select 1 from pg_roles where rolname='service_role') then create role service_role nologin bypassrls; end if;
 end $r$;
 create schema if not exists auth;
+create schema if not exists extensions;
+do $r3$ begin create extension if not exists pgcrypto with schema extensions; create extension if not exists "uuid-ossp" with schema extensions;
+exception when others then raise notice 'optional extensions skipped'; end $r3$;
+do $r4$ begin
+  if to_regprocedure('auth.jwt()') is null then create function auth.jwt() returns jsonb language sql stable as $f$ select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb $f$; end if;
+  if to_regprocedure('auth.role()') is null then create function auth.role() returns text language sql stable as $f$ select auth.jwt()->>'role' $f$; end if;
+end $r4$;
+set search_path = public, extensions;
+set check_function_bodies = off;
+set timezone = 'UTC';
 create table if not exists auth.users (id uuid primary key, email text);
 do $r2$ begin if to_regprocedure('auth.uid()') is null then
   create function auth.uid() returns uuid language sql stable as $f$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $f$;
 end if; end $r2$;
 `;
-  const load = (t) => data[t].length ? `insert into public."${t}" overriding system value select * from jsonb_populate_recordset(null::public."${t}", ${dollar(JSON.stringify(data[t]))}::jsonb);\n` : '';
-  const stubUsers = data.app_owner?.length ? `insert into auth.users (id,email) select user_id,email from public.app_owner on conflict do nothing;\n` : '';
-  fs.writeFileSync(path.join(dir, 'restore.sql'), `${preamble}begin;\n${ddlText(10, 20)}\n${tables.map(load).join('')}${stubUsers}${ddlText(40, 101)}\n${ddlText(110, 110)}\ncommit;\n`);
+  const load = (t) => manifest.tables[t].rows ? `insert into public."${t}" overriding system value select * from jsonb_populate_recordset(null::public."${t}", ${dollar(data[t])}::jsonb);\n` : '';
+  const stubUsers = manifest.tables.app_owner?.rows ? `insert into auth.users (id,email) select user_id,email from public.app_owner on conflict do nothing;\n` : '';
+  fs.writeFileSync(path.join(dir, 'restore.sql'), `${preamble}begin;\n${ddlText(5, 20)}\n${tables.map(load).join('')}${stubUsers}${ddlText(40, 101)}\n${ddlText(110, 110)}\ncommit;\n`);
   fs.writeFileSync(path.join(dir, 'restore-data.sql'), `-- Puts the saved ROWS back into the existing tables of THIS project (structure must already exist). Replaces current rows.\nbegin;\ntruncate ${tables.map((t) => `public."${t}"`).join(', ')} restart identity cascade;\n${tables.map(load).join('')}${ddlText(110, 110)}\ncommit;\n`);
   const rb = (await sql(rollbackSql)).map((r) => r.stmt);
-  fs.writeFileSync(path.join(dir, 'rollback.sql'), `-- EMERGENCY: undoes the lock-down (011b). Restores the original row-security rules and public access that existed when this backup was taken.\n-- This re-opens the old public access. Use only if V2 cannot be made to work and you are reverting to the previous site.\nbegin;\n${rb.join('\n')}\n${ddlText(100, 101)}\ncommit;\n`);
+  fs.writeFileSync(path.join(dir, 'rollback.sql'), `-- EMERGENCY: undoes the lock-down (011b). Restores the original row-security rules and public access that existed when this backup was taken.\n-- This re-opens the old public access. Use only if V2 cannot be made to work and you are reverting to the previous site.\nbegin;\n${rb.join('\n')}\n${ddl.filter((r) => r.sec === 100 && FIN.some((t) => r.stmt.includes(` public.${t} to `))).map((r) => r.stmt).join('\n')}\ncommit;\n`);
   fs.writeFileSync(path.join(dir, '_manifest.json'), JSON.stringify(manifest, null, 1));
   if (bad.length) { console.error('BACKUP MISMATCH', bad); process.exit(2); }
   console.log(`\nBackup verified (rows saved = rows in database, checksums recorded): ${dir}\nFiles: <table>.json, schema.sql, restore.sql, restore-data.sql, rollback.sql, _manifest.json`);
@@ -96,7 +113,7 @@ end if; end $r2$;
     const n = (await sql(countSql(t)))[0].n; const md5 = (await sql(md5Sql(t)))[0].md5; const ok = n === m.rows && md5 === m.md5; if (!ok) fail++;
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${t.padEnd(26)} rows ${n}/${m.rows}  contents ${md5 === m.md5 ? 'identical' : 'DIFFERENT'}`);
   }
-  const now = sections(await sql(ddlSql)); const names = { 10: 'sequences', 20: 'tables+columns', 50: 'keys/checks', 60: 'foreign keys', 70: 'indexes', 80: 'row security on', 81: 'row security forced', 82: 'policies', 40: 'functions', 91: 'views', 92: 'triggers', 100: 'table grants', 101: 'function grants', 110: 'id counters' };
+  const now = sections(await sql(ddlSql)); const names = { 5: 'enum types', 10: 'sequences', 20: 'tables+columns', 50: 'keys/checks', 55: 'test-only users', 60: 'foreign keys', 70: 'indexes', 80: 'row security on', 81: 'row security forced', 82: 'policies', 40: 'functions', 91: 'views', 92: 'triggers', 100: 'table grants', 101: 'function grants', 110: 'id counters' };
   for (const [sec, m] of Object.entries(manifest.ddl)) { const ok = now[sec]?.md5 === m.md5; if (!ok) fail++; console.log(`${ok ? 'PASS' : 'FAIL'}  structure ${(names[sec] || sec).padEnd(20)} ${now[sec]?.count ?? 0}/${m.count} items`); }
   console.log(fail ? `\n${fail} check(s) FAILED` : '\nRestore verified: every table, row, policy, function and index matches the backup.'); process.exit(fail ? 5 : 0);
 } else if (cmd === 'preflight') {
@@ -113,7 +130,7 @@ end if; end $r2$;
   if (found.length !== 1) { console.error(`No Supabase login found for ${email}. Create it first (Authentication → Users → Add user).`); process.exit(4); }
   await sql(`begin;\n${A()}\ninsert into public.app_owner (user_id, email) select id, email from auth.users where lower(email)=lower('${email}') on conflict (user_id) do nothing;\ncommit;`);
   console.log(`Early step applied (backup ${b} matched). Old site is unaffected. Owner registered:`, JSON.stringify(await sql('select email from public.app_owner')));
-  if (!LOCAL) { const r = await api('/config/auth', { method: 'PATCH', body: JSON.stringify({ disable_signup: true }) }); console.log(r.ok ? 'Public sign-ups turned off.' : `Could not turn off sign-ups automatically (${r.status}) — do it in Authentication → Sign In / Providers.`); }
+  console.log('Sign-ups were left as they are (this Supabase project is shared with other apps). Anyone who signs up still cannot see Finance data: only the registered owner can.');
 } else if (cmd === 'lockdown') {
   const b = latestBackup(); if (!b) { console.error('No verified backup found. Run backup first.'); process.exit(6); }
   const has = await sql(`select to_regclass('public.app_owner') is not null as ok, (select count(*) from public.app_owner)::int as n`).catch(() => [{ ok: false }]);
