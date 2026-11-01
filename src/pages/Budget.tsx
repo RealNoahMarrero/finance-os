@@ -123,6 +123,7 @@ export function Budget() {
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div className="li-title ellipsis" style={{ fontSize: 14 }}>{cat.name}</div>
                         <div className="li-sub ellipsis" style={{ fontSize: 12 }}>{sub}</div>
+                        {cat.isDebt && <div style={{ marginTop: 3 }}><span className="pill neg" data-testid="owe-pill">Owes {money(cat.debtBalance ?? 0)}</span></div>}
                         {cat.target != null && <div className="m-only" style={{ marginTop: 6 }}><div className="bar planned" style={{ height: 6 }}><i style={{ width: pct }} /></div>
                           <div className="tgt-line"><span>{money(env.assigned, { cents: false })} of {money(cat.target, { cents: false })}</span>{env.remaining > 0 ? <span className="c-planned" style={{ fontWeight: 600 }}>needs {money(env.remaining, { cents: false })}</span> : <span className="pos" style={{ fontWeight: 600 }}>funded</span>}</div></div>}
                       </div>

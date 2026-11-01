@@ -21,6 +21,7 @@ export interface Category {
   priority: 1 | 2 | 3; carry: number;
   assigned: number; // the envelope's Available balance as stored (budgeted minus activity)
   cardAccountId?: string; hidden: boolean; billPaused?: boolean;
+  isDebt?: boolean; debtBalance?: number; // a standalone amount owed (cents), independent of envelope funding, bills and credit cards
 }
 export interface Txn {
   id: string; date: string; payee: string; amount: number; type: 'expense' | 'income' | 'transfer';

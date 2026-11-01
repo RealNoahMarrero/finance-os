@@ -426,16 +426,34 @@ export function CategorySheet({ id }: { id: string }) {
   const recent = data.txns.filter((t) => t.categoryId === id || t.splits?.some((s) => s.categoryId === id)).slice(0, 4);
   const bill = data.bills.find((b) => b.categoryId === id);
   const over = env.avail < 0;
+  // Payments confirmed through the linked bill that produced a transaction (the only payments that reduce the balance automatically)
+  const confirmed = bill ? Object.values(bill.paid).map((tid) => data.txns.find((t) => t.id === tid)).filter((t): t is Txn => !!t) : [];
+  const confirmedSum = sum(confirmed, (t) => t.amount);
   return (
     <Sheet title={<span className="row gap12"><span className="li-ico planned" style={{ width: 34, height: 34 }}><CatIcon k={cat.icon} /></span>{cat.name}</span>} onClose={closeModal}
       footer={<>
         <button className="btn" onClick={() => openModal({ type: 'move', from: over ? undefined : id, to: over ? id : undefined, amount: over ? -env.avail : undefined })}>Move money</button>
         <button className="btn primary" onClick={() => openModal({ type: 'move', from: 'rta', to: id, amount: env.remaining || undefined })}>Assign money</button>
       </>}>
+      {cat.isDebt && (
+        <div className="card pad" style={{ boxShadow: 'none', borderColor: 'color-mix(in srgb, var(--neg) 30%, var(--line))', marginBottom: 14 }} data-testid="debt-section">
+          <div className="row between" style={{ gap: 8 }}>
+            <div><div className="eyebrow">Outstanding debt</div><div className={cn('amt-xl num', (cat.debtBalance ?? 0) > 0 && 'neg')} data-testid="debt-balance"><Money v={cat.debtBalance ?? 0} /></div></div>
+            <div style={{ textAlign: 'right' }}>{(cat.debtBalance ?? 0) === 0 ? <StatusPill status="ok">Paid off</StatusPill> : <StatusPill status="late">Owed</StatusPill>}
+              <div><button className="btn sm" style={{ marginTop: 8 }} onClick={() => openModal({ type: 'debt-edit', categoryId: id })}><Pencil />Edit debt</button></div></div>
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <div className="kv"><span className="k">Payment target</span><span className="v num">{cat.target != null ? money(cat.target) : 'None set'}</span></div>
+            <div className="kv"><span className="k">Next due date</span><span className="v">{bill?.date && !bill.paused ? fmtDate(bill.date) : bill?.paused ? 'Bill paused' : 'None — no bill linked'}</span></div>
+            {confirmed.length > 0 && <div className="kv"><span className="k">Payments confirmed via bill</span><span className="v num">{money(confirmedSum)} · {plural(confirmed.length, 'payment')}</span></div>}
+          </div>
+          <div className="xs muted" style={{ marginTop: 8 }}>This is what you owe, separate from the money set aside below. $0 available doesn’t mean $0 owed.{bill?.paused ? ' Pausing the bill doesn’t pause or change the debt.' : ''}</div>
+        </div>
+      )}
       {over && <div style={{ marginBottom: 14 }}><Callout tone="neg">This envelope is overspent by <b>{money(-env.avail)}</b>. Cover it by moving money in from another category.</Callout></div>}
       <div className="card pad" style={{ boxShadow: 'none', background: 'var(--surface-2)' }}>
         <div className="row between" style={{ marginBottom: 10 }}>
-          <div><div className="eyebrow">Available to spend</div><div className={cn('amt-xl num', over && 'neg')}><Money v={env.avail} /></div></div>
+          <div><div className="eyebrow">{cat.isDebt ? 'Set aside toward payments' : 'Available to spend'}</div><div className={cn('amt-xl num', over && 'neg')}><Money v={env.avail} /></div></div>
           {cat.billPaused ? <StatusPill status="muted">Bill paused</StatusPill> : cat.target != null && <StatusPill status={env.remaining === 0 ? 'ok' : 'planned'}>{env.remaining === 0 ? 'Target funded' : `${Math.round(env.fundedPct * 100)}% funded`}</StatusPill>}
         </div>
         {cat.target != null && <div className="bar planned"><i style={{ width: `${env.fundedPct * 100}%` }} /></div>}
@@ -448,7 +466,7 @@ export function CategorySheet({ id }: { id: string }) {
       </div>
       <div className="row between" style={{ margin: '16px 0 4px' }}>
         <div className="small muted">Group: <b style={{ color: 'var(--ink)' }}>{data.groups.find((g) => g.id === cat.groupId)?.name}</b></div>
-        {!editing ? <button className="btn ghost sm" onClick={() => setEditing(true)}>Edit target</button> : null}
+        {!editing ? <span className="row gap8">{!cat.isDebt && <button className="btn ghost sm" onClick={() => openModal({ type: 'debt-edit', categoryId: id })}>Track as debt</button>}<button className="btn ghost sm" onClick={() => setEditing(true)}>Edit target</button></span> : null}
       </div>
       {editing && (
         <div className="row gap8 fade-in" style={{ marginBottom: 10 }}>
@@ -854,6 +872,36 @@ export function MenuSheet() {
 }
 
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// Debt details for a category (amount owed). Independent of bills, envelopes and accounts.
+// ═══════════════════════════════════════════════════════════
+export function DebtEditSheet({ categoryId }: { categoryId: string }) {
+  const { data, closeModal, saveDebt, toast } = useStore();
+  const cat = data.categories.find((c) => c.id === categoryId);
+  const [isDebt, setIsDebt] = useState(true); // opened to track a debt; the toggle switches it back off
+  const [bal, setBal] = useState(cat?.debtBalance ? centsToInput(cat.debtBalance) : '');
+  const [saving, setSaving] = useState(false);
+  if (!cat) return <Sheet title="Category not found" onClose={closeModal}><div className="small muted">This category no longer exists.</div></Sheet>;
+  const cents = toCents(bal);
+  const changed = isDebt !== !!cat.isDebt || (isDebt && cents !== (cat.debtBalance ?? 0));
+  const save = async () => {
+    setSaving(true);
+    const ok = await saveDebt(categoryId, { isDebt, balance: isDebt ? cents : (cat.debtBalance ?? 0) });
+    if (ok) { toast(isDebt ? `${cat.name}: balance owed set to ${money(cents)} · nothing else changed` : `${cat.name} is now an ordinary category`); closeModal(); } else setSaving(false);
+  };
+  return (
+    <Sheet title={cat.isDebt ? 'Edit debt' : 'Track as debt'} sub={cat.name} onClose={closeModal}
+      footer={<><button className="btn" onClick={closeModal}>Cancel</button><button className="btn primary" disabled={!changed || saving} onClick={save}>{saving ? 'Saving…' : 'Save'}</button></>}>
+      <Callout icon={<Info />}>This only records how much you owe. No transaction is created, and account balances, budget funding, bills and payment history are not touched.</Callout>
+      <div className="field" style={{ marginTop: 14 }}><label>This category is</label>
+        <Seg block value={isDebt ? 'debt' : 'plain'} onChange={(v) => setIsDebt(v === 'debt')} options={[{ v: 'plain', label: 'An ordinary category' }, { v: 'debt', label: 'A debt' }]} /></div>
+      {isDebt && <div className="field" style={{ marginTop: 14 }}><label htmlFor="debt-bal">Amount you currently owe</label><MoneyInput id="debt-bal" value={bal} onChange={setBal} autoFocus placeholder="0.00" />
+        <div className="xs muted" style={{ marginTop: 6 }}>Correct it any time. A due date or monthly payment is optional — set those with “Edit target” or a linked bill. If the debt has a bill and you post its payment with a transaction, the balance drops by the amount paid.</div></div>}
+      {!isDebt && cat.isDebt && <div className="xs muted" style={{ marginTop: 10 }}>The saved balance ({money(cat.debtBalance ?? 0)}) is kept in case you switch this back on.</div>}
+    </Sheet>
+  );
+}
+
 const PERIODS: { v: 'once' | BillPeriod; label: string }[] = [{ v: 'once', label: 'One time' }, { v: 'Weekly', label: 'Weekly' }, { v: 'Bi-Weekly', label: 'Every 2 weeks' }, { v: 'Monthly', label: 'Monthly' }, { v: 'Yearly', label: 'Yearly' }];
 export function BillEditSheet({ billId }: { billId: string }) {
   const { data, closeModal, updateBill, toast } = useStore();
@@ -923,6 +971,7 @@ export function SheetHost() {
     case 'credit-score': return <CreditScoreSheet key={`${modal.id ?? 'new'}-${modal.bureau ?? ''}-${modal.model ?? ''}`} id={modal.id} bureau={modal.bureau} model={modal.model} />;
     case 'credit-card': return <CreditCardSheet key={modal.accountId} accountId={modal.accountId} />;
     case 'credit-reported': return <CreditReportedSheet key={`${modal.id ?? 'new'}-${modal.accountId ?? ''}`} id={modal.id} accountId={modal.accountId} />;
+    case 'debt-edit': return <DebtEditSheet key={modal.categoryId} categoryId={modal.categoryId} />;
     case 'menu': return <MenuSheet />;
     default: return null;
   }

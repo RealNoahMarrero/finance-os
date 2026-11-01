@@ -107,12 +107,13 @@ export function Accounts() {
                     <div className="li-ico"><Landmark /></div>
                     <div className="grow" style={{ minWidth: 150 }}><div className="li-title">{d.name}</div><div className="li-sub">{d.payment > 0 ? `${money(d.payment)} payment` : 'No set payment'}{d.dueDay ? ` · due the ${d.dueDay}${['th','st','nd','rd'][d.dueDay % 10 > 3 || [11, 12, 13].includes(d.dueDay) ? 0 : d.dueDay % 10]}` : ''}</div></div>
                     <div className="right" style={{ minWidth: 100 }}><div className="eyebrow">Balance</div><div className="amt-md num">{money(d.balance)}</div></div>
+                    <button className="btn sm" aria-label={`Edit ${d.name} debt`} onClick={() => openModal({ type: 'debt-edit', categoryId: d.id })}>Edit</button>
                   </div>
                 );
               })}
             </div>
           </section>
-          <p className="xs muted" style={{ marginTop: 8 }}>Balances owed drop automatically when you confirm a payment on the matching bill. Simple records — no interest modeling.</p>
+          <p className="xs muted" style={{ marginTop: 8 }}>Balances owed drop when you confirm a payment on the matching bill with a transaction, and you can correct any balance with Edit. Simple records — no interest modeling.</p>
         </>
       )}
     </div>

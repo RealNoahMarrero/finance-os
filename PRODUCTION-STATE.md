@@ -29,3 +29,8 @@ Site: https://marrero-finance.netlify.app/ (existing Netlify site; GitHub repo R
 - Credit limits stay in `accounts.credit_limit`; payment due dates come from the linked bill (`categories.due_date`) — nothing duplicated.
 - Google Sheets: paste the updated `scripts/google-sheets-sync.gs` into the Personal sheet's Apps Script; it adds `CreditScores` and `CreditCards` tabs. Hourly trigger unchanged.
 - App: Credit page (`#/credit`), sidebar entry; mobile via the More sheet.
+
+## Debt categories restored (no database change)
+- Cause: V2's category sheet and Budget list never read the `is_debt` / `balance` columns, so debts looked like empty envelopes. The data itself was never touched: all 18 `is_debt` rows are byte-identical in the earliest pre-redesign backup and in production (e.g. AfterPay $223.86). Bill editing / migration 013 did not change them.
+- Dave - Teria was never flagged as a debt (is_debt=false, balance 0 in the original data) — it is a plain bill; it can now be switched on with "Track as debt".
+- Fix is UI-only: debt section on the category sheet, "Owes $X" pill in Budget, Edit debt (plain update of `categories.is_debt/balance`; no transactions, accounts, funding or bills touched), Edit buttons on the Accounts loans list.

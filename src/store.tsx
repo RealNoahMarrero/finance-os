@@ -20,6 +20,7 @@ export type Modal =
   | { type: 'credit-score'; id?: string; bureau?: Bureau; model?: string }
   | { type: 'credit-card'; accountId: string }
   | { type: 'credit-reported'; id?: string; accountId?: string }
+  | { type: 'debt-edit'; categoryId: string }
   | { type: 'menu' }
   | { type: 'forecast-detail' };
 
@@ -49,6 +50,7 @@ interface Store {
   reconcile: (accountId: string, actual: number, note?: string) => Promise<Opt<{ diff: number; adjustmentTxnId?: string }>>;
   setCutover: (accountId: string, date: string, opening: number) => Promise<boolean>;
   setCutovers: (date: string, items: { accountId: string; opening: number }[]) => Promise<boolean>;
+  saveDebt: (categoryId: string, d: { isDebt: boolean; balance: number }) => Promise<boolean>;
   saveScore: (id: string | undefined, s: db.ScoreInput) => Promise<boolean>;
   deleteScore: (id: string) => Promise<boolean>;
   saveCard: (accountId: string, limit: number | null, meta: db.CardMetaInput) => Promise<boolean>;
@@ -172,6 +174,7 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
     await db.setCutover(id, a.cutover, a.opening);
   })).ok, [run]);
 
+  const saveDebt: Store['saveDebt'] = useCallback(async (id, d) => (await run(() => db.setDebt(id, d))).ok, [run]);
   const saveScore: Store['saveScore'] = useCallback(async (id, sc) => (await run(async () => { if (id) await db.updateScore(id, sc); else await db.addScore(sc); })).ok, [run]);
   const deleteScore: Store['deleteScore'] = useCallback(async (id) => {
     const old = data.credit.scores.find((x) => x.id === id);
@@ -193,8 +196,8 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
 
   const value = useMemo<Store>(() => ({
     data, status, loadError, refresh, busy, email, signOut, modal, openModal: setModal, closeModal: () => setModal(null), toasts, toast, theme, setTheme,
-    addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount, saveScore, deleteScore, saveCard, saveReported, deleteReported,
-  }), [data, status, loadError, busy, email, modal, toasts, theme, refresh, signOut, toast, setTheme, addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount, saveScore, deleteScore, saveCard, saveReported, deleteReported]);
+    addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported,
+  }), [data, status, loadError, busy, email, modal, toasts, theme, refresh, signOut, toast, setTheme, addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported]);
 
   return (
     <Ctx.Provider value={value}>

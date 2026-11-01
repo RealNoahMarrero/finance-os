@@ -93,7 +93,7 @@ export function toDataState(raw: RawData, today = todayISO()): DataState {
     return {
       id: S(c.id), groupId: S(c.group_id), name: c.name, icon: c.emoji || '', target: Number(c.target_amount) > 0 ? cents(c.target_amount) : null,
       priority: kind === 'bills' ? 1 : kind === 'everyday' ? 2 : 3, carry: 0, assigned: cents(c.assigned_amount),
-      cardAccountId: cardOf.get(S(c.id)), hidden: !!c.is_hidden, billPaused: !!c.bill_paused,
+      cardAccountId: cardOf.get(S(c.id)), hidden: !!c.is_hidden, billPaused: !!c.bill_paused, isDebt: !!c.is_debt, debtBalance: cents(c.balance),
     };
   });
 
@@ -218,6 +218,11 @@ export const updateBill = async (id: string, p: BillPatch) => {
   ok(await supabase.from('categories').update({
     name: p.name.trim(), target_amount: dollars(p.amount), due_date: p.date, is_repeating: p.recurring, target_period: p.period, bill_mode: p.mode, group_id: Number(p.groupId), bill_paused: p.paused, ...(p.anchor ? { bill_anchor: p.anchor } : {}),
   }).eq('id', Number(id)));
+};
+/** Debt details live on the category row: is_debt + balance (the amount owed). A plain edit: it never creates a transaction, never touches
+ *  account balances, envelope funding, bills or payment history. Turning debt off keeps the stored balance in case it is switched back on. */
+export const setDebt = async (id: string, d: { isDebt: boolean; balance: number }) => {
+  ok(await supabase.from('categories').update({ is_debt: d.isDebt, balance: dollars(Math.max(0, d.balance)) }).eq('id', Number(id)));
 };
 export const addCategoryRow = async (c: { name: string; groupId: string; target: number | null; emoji?: string }) => {
   ok(await supabase.from('categories').insert({ name: c.name, group_id: Number(c.groupId), target_amount: c.target ? dollars(c.target) : 0, target_period: 'Monthly', emoji: c.emoji || null, entity_id: 'personal', assigned_amount: 0 }));
