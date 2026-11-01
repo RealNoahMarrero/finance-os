@@ -1,37 +1,12 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Finance OS v2
 
-## Getting Started
+Private personal-finance command center. Vite + React + TypeScript single-page app, Supabase (Auth + Postgres), deployed as static files on the existing Netlify site.
 
-First, run the development server:
+- `src/` — app. `db.ts` maps database rows to the UI; `data.ts` is all the money math; `store.tsx` runs every write through one atomic server function and reloads.
+- `db/011_security_and_ledger_engine.sql` — owner-only access (RLS), atomic ledger functions, cutover/reconciliation, bill & income confirmation. **Apply to production only after a verified backup.**
+- `db/test_ledger.sql` + `db/load.sh` — 37 database checks against a restored copy of your data.
+- `tests/engine.test.ts` — 12 calculation checks (`npm test`). `tests/e2e/` — mock Supabase + real-browser flow checks (need local Postgres/PostgREST; used during development).
+- `scripts/` — secure Google Sheets sync scripts (Apps Script).
+- `netlify.toml` — build `npm run build`, publish `dist`, SPA redirect, security headers.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-"# finance-os" 
+Develop: `npm install`, create `.env.local` (see `.env.example`), `npm run dev`. Never commit `.env*`.

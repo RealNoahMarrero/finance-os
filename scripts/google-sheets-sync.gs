@@ -1,17 +1,27 @@
 /**
- * Finance OS → Google Sheets sync (Apps Script)
+ * Finance OS → Google Sheets sync (Apps Script) — token version
  *
- * Setup:
- * 1. Extensions → Apps Script — paste this file
- * 2. Set SUPABASE_URL and SUPABASE_KEY below (Project Settings → API → anon/publishable key)
- * 3. Reload spreadsheet — Finance OS menu → Sync Latest Data
+ * Uses a narrow, read-only, revocable SYNC TOKEN (limited to the "personal" book). Your Finance OS password is NOT used or stored.
+ * Revoke at any time: `node tools/supabase-admin.mjs sync-token revoke personal`, or delete the row in Supabase table sync_tokens.
  *
- * Sheets (compact for AI): Summary, Accounts, Categories, Transactions, ExpectedIncome, TransactionSplits
- * Do NOT commit real API keys to git.
+ * Setup (once):
+ * 1. Extensions → Apps Script — replace the old code with this file, Save.
+ * 2. Project Settings (gear) → Script properties → Add these three (never put them in the code):
+ *      SUPABASE_URL       https://<your-project>.supabase.co
+ *      SUPABASE_ANON_KEY  the public anon/publishable key (not a secret)
+ *      SYNC_TOKEN         the token printed by: node tools/supabase-admin.mjs sync-token personal
+ * 3. Run `testSupabaseAuth` once and approve Google's permission prompt.
+ * 4. Reload the spreadsheet — Finance OS menu → Sync Latest Data
+ *
+ * Do NOT commit the token to git.
  */
 
-const SUPABASE_URL = 'https://YOUR_PROJECT.supabase.co';
-const SUPABASE_KEY = 'YOUR_SUPABASE_ANON_OR_PUBLISHABLE_KEY';
+// Credentials live in Script properties (see above) — never in this file.
+function prop_(name) {
+  var v = PropertiesService.getScriptProperties().getProperty(name);
+  if (!v) throw new Error('Missing script property ' + name + ' (Project Settings → Script properties).');
+  return v;
+}
 
 /** Personal household books — use google-sheets-sync-business.gs for Marrero LLC */
 const ENTITY_ID = 'personal';
@@ -40,21 +50,34 @@ function syncFinanceOS() {
   );
 }
 
-function entityFilter_() {
-  return 'entity_id=eq.' + ENTITY_ID;
+/** Reads every row of one dataset through the token-checked database function (pages of 1000). */
+function supabaseGet_(resource) {
+  var all = [];
+  for (var offset = 0; ; offset += 1000) {
+    var response = UrlFetchApp.fetch(prop_('SUPABASE_URL') + '/rest/v1/rpc/fos_sheets_data', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { apikey: prop_('SUPABASE_ANON_KEY'), Authorization: 'Bearer ' + prop_('SUPABASE_ANON_KEY') },
+      payload: JSON.stringify({ tok: prop_('SYNC_TOKEN'), resource: resource, off: offset, lim: 1000 }),
+      muteHttpExceptions: true,
+    });
+    if (response.getResponseCode() !== 200) {
+      var msg = response.getContentText().slice(0, 200);
+      throw new Error(/invalid or revoked/.test(msg)
+        ? 'The sync token was rejected (revoked or mistyped). Check SYNC_TOKEN in Script properties.'
+        : 'Supabase read failed (' + response.getResponseCode() + '): ' + msg);
+    }
+    var page = JSON.parse(response.getContentText());
+    all = all.concat(page);
+    if (page.length < 1000) break;
+  }
+  return all;
 }
 
-function supabaseHeaders_() {
-  return {
-    apikey: SUPABASE_KEY,
-    Authorization: 'Bearer ' + SUPABASE_KEY,
-  };
-}
-
-function supabaseGet_(path) {
-  const url = SUPABASE_URL + '/rest/v1/' + path;
-  const response = UrlFetchApp.fetch(url, { headers: supabaseHeaders_() });
-  return JSON.parse(response.getContentText());
+/** Run once from the editor to confirm sign-in and read access work. */
+function testSupabaseAuth() {
+  var rows = supabaseGet_('summary_accounts');
+  SpreadsheetApp.getActiveSpreadsheet().toast('Token accepted. Can read ' + rows.length + ' accounts.', 'Finance OS', 8);
 }
 
 function getOrCreateSheet_(name, headers) {
@@ -145,14 +168,9 @@ function computeSummaryMetrics_(accounts, categories, pendingIncome) {
 
 /** Compact headline metrics + definitions (read this first for AI). */
 function syncSummary() {
-  var accounts = supabaseGet_('accounts?select=type,balance&' + entityFilter_());
-  var categories = supabaseGet_(
-    'categories?select=assigned_amount&is_hidden=eq.false&' + entityFilter_()
-  );
-  var pending = supabaseGet_(
-    'projected_income?select=amount,certainty,accounts!account_id(type)&status=eq.pending&' +
-      entityFilter_()
-  );
+  var accounts = supabaseGet_('summary_accounts');
+  var categories = supabaseGet_('summary_categories');
+  var pending = supabaseGet_('summary_pending');
 
   var m = computeSummaryMetrics_(accounts, categories, pending);
   var syncedAt = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
@@ -227,11 +245,7 @@ function syncSummary() {
 }
 
 function syncAccounts() {
-  var data = supabaseGet_(
-    'accounts?select=name,type,balance,credit_limit&' +
-      entityFilter_() +
-      '&order=type,name'
-  );
+  var data = supabaseGet_('accounts');
 
   var sheet = getOrCreateSheet_('Accounts', [
     'Account Name',
@@ -255,11 +269,7 @@ function syncAccounts() {
 }
 
 function syncCategories() {
-  var data = supabaseGet_(
-    'categories?select=name,target_amount,assigned_amount,is_debt,balance,due_date,is_repeating,target_period,notes,venture_id,ventures(name)&is_hidden=eq.false&' +
-      entityFilter_() +
-      '&order=name'
-  );
+  var data = supabaseGet_('categories');
 
   var sheet = getOrCreateSheet_('Categories', [
     'Category Name',
@@ -298,14 +308,7 @@ function syncCategories() {
 }
 
 function syncTransactions() {
-  var data = supabaseGet_(
-    'transactions?select=id,date,type,amount,payee,notes,category_id,owner_flow,' +
-      'accounts!account_id(name),categories!category_id(name),ventures(name),' +
-      'transaction_splits(amount,categories!category_id(name))' +
-      '&' +
-      entityFilter_() +
-      '&order=date.desc'
-  );
+  var data = supabaseGet_('transactions');
 
   var sheet = getOrCreateSheet_('Transactions', [
     'Date',
@@ -362,12 +365,7 @@ function syncTransactions() {
 }
 
 function syncTransactionSplits() {
-  var data = supabaseGet_(
-    'transaction_splits?select=transaction_id,amount,sort_order,' +
-      'categories!category_id(name),' +
-      'transactions!transaction_id(date,payee,type,amount,entity_id)' +
-      '&order=transaction_id.desc'
-  );
+  var data = supabaseGet_('transaction_splits');
 
   var sheet = getOrCreateSheet_('TransactionSplits', [
     'Transaction ID',
@@ -405,13 +403,7 @@ function syncTransactionSplits() {
 
 function syncProjectedIncome() {
   // Pending only — received/cancelled omitted (received shows as Income in Transactions)
-  var data = supabaseGet_(
-    'projected_income?select=label,amount,expected_date,source_type,certainty,is_repeating,repeat_period,notes,' +
-      'accounts!account_id(name),categories!category_id(name),ventures(name)' +
-      '&status=eq.pending&' +
-      entityFilter_() +
-      '&order=expected_date.asc'
-  );
+  var data = supabaseGet_('projected_income');
 
   var sheet = getOrCreateSheet_('ExpectedIncome', [
     'Label',
