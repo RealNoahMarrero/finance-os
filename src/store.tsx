@@ -11,6 +11,7 @@ export type Modal =
   | { type: 'category'; id: string }
   | { type: 'category-add' }
   | { type: 'bill'; billId: string; date: string }
+  | { type: 'bill-edit'; billId: string }
   | { type: 'income'; mode: 'view' | 'add'; id?: string; date?: string }
   | { type: 'reconcile'; id: string }
   | { type: 'cutover'; id?: string }
@@ -36,6 +37,7 @@ interface Store {
   addCategory: (c: { name: string; groupId: string; target: number | null; emoji?: string }) => Promise<boolean>;
   payBill: (billId: string, date: string, opts: { post: boolean; amount?: number; accountId?: string }) => Promise<boolean>;
   setBillMode: (billId: string, mode: Bill['mode']) => Promise<boolean>;
+  updateBill: (billId: string, patch: db.BillPatch) => Promise<boolean>;
   receiveIncome: (incomeId: string, opts: { date: string; amount: number; accountId: string }) => Promise<boolean>;
   skipIncome: (incomeId: string) => Promise<boolean>;
   addIncome: (i: Omit<Income, 'id' | 'status'>) => Promise<boolean>;
@@ -140,6 +142,7 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
     return (await run(() => db.payBill(billId, date, todayISO(), opts.post ? 'prepare' : 'reminder', txn))).ok;
   }, [run, data.bills]);
   const setBillMode: Store['setBillMode'] = useCallback(async (id, m) => (await run(() => db.setBillMode(id, m))).ok, [run]);
+  const updateBill: Store['updateBill'] = useCallback(async (id, p) => (await run(() => db.updateBill(id, p))).ok, [run]);
 
   const receiveIncome: Store['receiveIncome'] = useCallback(async (id, o) => (await run(() => db.receiveIncome(id, o.date, o.amount, o.accountId))).ok, [run]);
   const skipIncome: Store['skipIncome'] = useCallback(async (id) => {
@@ -162,8 +165,8 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
 
   const value = useMemo<Store>(() => ({
     data, status, loadError, refresh, busy, email, signOut, modal, openModal: setModal, closeModal: () => setModal(null), toasts, toast, theme, setTheme,
-    addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, payBill, setBillMode, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount,
-  }), [data, status, loadError, busy, email, modal, toasts, theme, refresh, signOut, toast, setTheme, addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, payBill, setBillMode, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount]);
+    addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount,
+  }), [data, status, loadError, busy, email, modal, toasts, theme, refresh, signOut, toast, setTheme, addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount]);
 
   return (
     <Ctx.Provider value={value}>

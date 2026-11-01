@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState, useEffect } from 'react';
-import { ArrowRight, ArrowUpDown, Bell, Check, CircleCheck, Download, Eye, FlaskConical, Landmark, LogOut, ListChecks, Plus, Scale, Split, StickyNote, Trash, TriangleAlert } from 'lucide-react';
+import { ArrowRight, ArrowUpDown, Bell, Check, CircleCheck, Download, Eye, FlaskConical, Info, Landmark, LogOut, ListChecks, Pencil, Plus, Scale, Split, StickyNote, Trash, TriangleAlert } from 'lucide-react';
 import { useStore } from './store';
 import {
-  allEnvelopes, envelope, readyToAssign, staleness, billOccurrences, drift, type Account, type Category, type Txn, type Income, type Repeat as Rep,
+  allEnvelopes, envelope, readyToAssign, staleness, billOccurrences, drift, type Account, type Bill, type BillPeriod, type Category, type Txn, type Income, type Repeat as Rep,
 } from './data';
 import { addDays, centsToInput, cn, diffDays, fmtDate, money, monthKey, relDay, sum, toCents, plural } from './lib';
 import { CatIcon, Callout, Money, Seg, Sheet, StatusPill, ThemeSwitch } from './ui';
@@ -454,7 +454,7 @@ export function CategorySheet({ id }: { id: string }) {
           <button className="btn primary" onClick={async () => { if (await setTarget(id, tgt ? toCents(tgt) : null)) setEditing(false); }}>Save</button>
         </div>
       )}
-      {bill && bill.date && <div className="callout planned" style={{ marginTop: 8 }}><Bell /><div>Linked bill: <b>{bill.name}</b>, next due {fmtDate(bill.date)}{bill.recurring ? ` · repeats ${bill.period.toLowerCase()}` : ''}.</div></div>}
+      {bill && bill.date && <div className="callout planned" style={{ marginTop: 8, alignItems: 'center' }}><Bell /><div className="grow">Linked bill: <b>{bill.name}</b>, {money(bill.amount)}, next due {fmtDate(bill.date)}{bill.recurring ? ` · repeats ${bill.period.toLowerCase()}` : ''}.</div><button className="btn sm" onClick={() => openModal({ type: 'bill-edit', billId: bill.id })}><Pencil />Edit bill</button></div>}
       {recent.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <div className="eyebrow" style={{ marginBottom: 4 }}>Recent activity</div>
@@ -528,6 +528,7 @@ export function BillSheet({ billId, date }: { billId: string; date: string }) {
           {occ.short > 0 && <div className="row between small" style={{ marginTop: 10 }}><span className="warn" style={{ fontWeight: 600 }}>{money(occ.short)} still to fund</span><button className="btn sm" onClick={() => openModal({ type: 'move', from: 'rta', to: cat!.id, amount: occ.short })}>Fund it</button></div>}
         </div>
       )}
+      <div style={{ display: 'flex', justifyContent: 'center', margin: '-6px 0 14px' }}><button className="btn sm" onClick={() => openModal({ type: 'bill-edit', billId })}><Pencil />Edit bill</button></div>
       {occ.paid && <Callout icon={<CircleCheck />}>{paidTxn ? <>Posted on {fmtDate(paidTxn.date)} from {data.accounts.find((a) => a.id === paidTxn.accountId)?.name}.</> : 'Marked paid without posting a transaction.'}</Callout>}
       {!occ.paid && (
         <div style={{ marginTop: 4 }}>
@@ -851,6 +852,52 @@ export function MenuSheet() {
 }
 
 // ═══════════════════════════════════════════════════════════
+const PERIODS: { v: 'once' | BillPeriod; label: string }[] = [{ v: 'once', label: 'One time' }, { v: 'Weekly', label: 'Weekly' }, { v: 'Bi-Weekly', label: 'Every 2 weeks' }, { v: 'Monthly', label: 'Monthly' }, { v: 'Yearly', label: 'Yearly' }];
+export function BillEditSheet({ billId }: { billId: string }) {
+  const { data, closeModal, updateBill, toast } = useStore();
+  const bill = data.bills.find((b) => b.id === billId);
+  const [name, setName] = useState(bill?.name ?? '');
+  const [amt, setAmt] = useState(bill ? centsToInput(bill.amount) : '');
+  const [date, setDate] = useState(bill?.date ?? data.today);
+  const [period, setPeriod] = useState<'once' | BillPeriod>(bill ? (bill.recurring ? bill.period : 'once') : 'Monthly');
+  const [mode, setMode] = useState<Bill['mode']>(bill?.mode ?? 'reminder');
+  const [groupId, setGroupId] = useState(data.categories.find((c) => c.id === bill?.categoryId)?.groupId ?? '');
+  const [saving, setSaving] = useState(false);
+  if (!bill) return <Sheet title="Bill not found" onClose={closeModal}><div className="small muted">This bill no longer exists.</div></Sheet>;
+  const cents = toCents(amt);
+  const dup = data.categories.some((c) => c.id !== bill.categoryId && c.name.trim().toLowerCase() === name.trim().toLowerCase());
+  const alreadyPaid = !!bill.paid[date] && date !== bill.date;
+  const skipsOverdue = !!bill.date && bill.date < data.today && !bill.paid[bill.date] && date > bill.date;
+  const err = !name.trim() ? 'Give the bill a name.' : dup ? 'Another category already has that name.' : cents <= 0 ? 'Enter an amount greater than $0.' : !date ? 'Choose a due date.' : alreadyPaid ? 'That date is already recorded as paid. Choose the next unpaid date.' : '';
+  const changed = name.trim() !== bill.name || cents !== bill.amount || date !== bill.date || period !== (bill.recurring ? bill.period : 'once') || mode !== bill.mode || groupId !== data.categories.find((c) => c.id === bill.categoryId)?.groupId;
+  const save = async () => {
+    setSaving(true);
+    const ok = await updateBill(billId, { name, amount: cents, date, recurring: period !== 'once', period: period === 'once' ? bill.period : period, mode, groupId });
+    if (ok) { toast(`${name.trim()} updated · no transactions changed`); closeModal(); } else setSaving(false);
+  };
+  return (
+    <Sheet title="Edit bill" sub={bill.name} onClose={closeModal}
+      footer={<><button className="btn" onClick={closeModal}>Cancel</button><button className="btn primary" disabled={!!err || !changed || saving} onClick={save}>{saving ? 'Saving…' : 'Save changes'}</button></>}>
+      <Callout icon={<Info />}>Changes apply from now on. Past payments, transactions and your budget amounts stay exactly as they are, and nothing is posted.</Callout>
+      <div className="field" style={{ marginTop: 14 }}><label htmlFor="bn">Name</label><input id="bn" className="input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" /></div>
+      <div className="row gap12" style={{ marginTop: 14, alignItems: 'flex-start' }}>
+        <div className="field grow"><label htmlFor="ba">Amount due</label><MoneyInput id="ba" value={amt} onChange={setAmt} /></div>
+        <div className="field grow"><label htmlFor="bd">Next due date</label><input id="bd" type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} /></div>
+      </div>
+      {skipsOverdue && <div className="xs muted" style={{ marginTop: 8 }}>The overdue {fmtDate(bill.date!)} due date stops showing. It isn’t marked paid and nothing is recorded.</div>}
+      <div className="field" style={{ marginTop: 14 }}><label>Repeats</label>
+        <div className="chips">{PERIODS.map((o) => <button key={o.v} className="chip" aria-pressed={period === o.v} onClick={() => setPeriod(o.v)}>{o.label}</button>)}</div></div>
+      <div className="field" style={{ marginTop: 14 }}><label>When you mark it paid…</label>
+        <Seg block value={mode} onChange={setMode} options={[{ v: 'reminder', label: 'Just a reminder' }, { v: 'prepare', label: 'Prepare a transaction' }]} />
+        <div className="xs muted" style={{ marginTop: 6 }}>{mode === 'reminder' ? 'Finance OS only tracks the due date.' : 'Finance OS prepares the transaction for you to review. It is never posted without your confirmation.'}</div></div>
+      <div className="field" style={{ marginTop: 14 }}><label htmlFor="bg">Budget group</label>
+        <select id="bg" className="input" value={groupId} onChange={(e) => setGroupId(e.target.value)}>{data.groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}</select>
+        <div className="xs muted" style={{ marginTop: 6 }}>This bill is paid from its own budget envelope, <b>{name.trim() || bill.name}</b>. Renaming it renames that envelope everywhere; its history stays attached.</div></div>
+      {err && changed && <div className="small neg" style={{ marginTop: 12 }} role="alert">{err}</div>}
+    </Sheet>
+  );
+}
+
 export function SheetHost() {
   const { modal } = useStore();
   if (!modal) return null;
@@ -860,6 +907,7 @@ export function SheetHost() {
     case 'move': return <MoveSheet key={`${modal.from}-${modal.to}-${modal.amount}`} from={modal.from} to={modal.to} amount={modal.amount} />;
     case 'category': return <CategorySheet key={modal.id} id={modal.id} />;
     case 'category-add': return <CategoryAddSheet />;
+    case 'bill-edit': return <BillEditSheet key={modal.billId} billId={modal.billId} />;
     case 'bill': return <BillSheet key={`${modal.billId}-${modal.date}`} billId={modal.billId} date={modal.date} />;
     case 'income': return <IncomeSheet key={`${modal.mode}-${modal.id}`} mode={modal.mode} id={modal.id} />;
     case 'reconcile': return <ReconcileSheet key={modal.id} id={modal.id} />;

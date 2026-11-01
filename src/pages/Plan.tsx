@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Bell, ChevronLeft, ChevronRight, Info, Plus, Receipt, TrendingDown } from 'lucide-react';
+import { Bell, ChevronLeft, ChevronRight, Info, Pencil, Plus, Receipt, TrendingDown } from 'lucide-react';
 import { useStore } from '../store';
 import {
   billOccurrences, buildForecast, incomeOccurrences, shortfall, upcomingBills, type BillOcc, type DataState,
@@ -46,6 +46,21 @@ function BillCard({ o }: { o: BillOcc }) {
     </button>
   );
 }
+function AllBills() {
+  const { data, openModal } = useStore();
+  const rows = [...data.bills].sort((a, b) => a.name.localeCompare(b.name));
+  return (
+    <section className="card" style={{ overflow: 'hidden', margin: '16px 0' }}>
+      <div className="pad" style={{ paddingBottom: 6 }}><div className="sect-head" style={{ marginBottom: 0 }}><h2 className="sect-title">All bills &amp; subscriptions</h2><span className="small muted">{rows.length} · tap to edit</span></div></div>
+      <div className="list">{rows.map((b) => (
+        <button key={b.id} className="li" style={{ padding: '12px 20px' }} aria-label={`Edit ${b.name}`} onClick={() => openModal({ type: 'bill-edit', billId: b.id })}>
+          <div className="grow" style={{ minWidth: 0 }}><div className="li-title ellipsis">{b.name}</div>
+            <div className="li-sub">{b.recurring ? b.period : 'One time'} · next due {b.date ? fmtDate(b.date) : '—'} · {b.mode === 'prepare' ? 'Prepares' : 'Reminder'}</div></div>
+          <div className="right row gap8"><Money v={b.amount} className="amt-md" /><Pencil size={15} style={{ color: 'var(--ink-4)' }} /></div>
+        </button>))}</div>
+    </section>
+  );
+}
 function BillsTab() {
   const { data } = useStore();
   const occ = upcomingBills(data, 45);
@@ -73,6 +88,7 @@ function BillsTab() {
       {grp('This week', week)}
       {grp('Later this month', later)}
       {grp('Next month', next)}
+      <AllBills />
       <Callout icon={<Info />}>Bills never post a transaction on their own. If a bill is set to <b>Prepares</b>, Finance OS fills in the transaction when you mark it paid — you review and confirm before anything is recorded.</Callout>
     </div>
   );

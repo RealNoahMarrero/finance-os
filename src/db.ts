@@ -195,6 +195,16 @@ export const addIncomeRow = async (i: Omit<Income, 'id' | 'status'>) => {
 export const setIncomeCertainty = async (id: string, c: Income['certainty']) => { ok(await supabase.from('projected_income').update({ certainty: c }).eq('id', Number(id))); };
 export const setCategoryTarget = async (id: string, target: number | null) => { ok(await supabase.from('categories').update({ target_amount: target == null ? 0 : dollars(target) }).eq('id', Number(id))); };
 export const setBillMode = async (id: string, mode: Bill['mode']) => { ok(await supabase.from('categories').update({ bill_mode: mode }).eq('id', Number(id))); };
+/** Edits a bill. A bill is a budget category with a due date, so this updates that one row only:
+ *  it never creates, changes or deletes a transaction, payment record or budget amount. */
+export interface BillPatch { name: string; amount: number; date: string; recurring: boolean; period: BillPeriod; mode: Bill['mode']; groupId: string }
+export const updateBill = async (id: string, p: BillPatch) => {
+  const clash = ok(await supabase.from('bill_payments').select('id').eq('category_id', Number(id)).eq('due_date', p.date).limit(1)) as Row[];
+  if (clash.length) throw new DbError('That due date is already recorded as paid. Choose the next unpaid date.');
+  ok(await supabase.from('categories').update({
+    name: p.name.trim(), target_amount: dollars(p.amount), due_date: p.date, is_repeating: p.recurring, target_period: p.period, bill_mode: p.mode, group_id: Number(p.groupId),
+  }).eq('id', Number(id)));
+};
 export const addCategoryRow = async (c: { name: string; groupId: string; target: number | null; emoji?: string }) => {
   ok(await supabase.from('categories').insert({ name: c.name, group_id: Number(c.groupId), target_amount: c.target ? dollars(c.target) : 0, target_period: 'Monthly', emoji: c.emoji || null, entity_id: 'personal', assigned_amount: 0 }));
 };
