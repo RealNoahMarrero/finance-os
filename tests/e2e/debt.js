@@ -28,15 +28,15 @@ const bal = (n) => q(`select balance from categories where name='${n}'`);
   q("update categories set assigned_amount=assigned_amount where false");
   // 3 debt with bill
   await p.click('.brow:has-text("Progressive Leasing")'); await p.waitForSelector('[data-testid=debt-section]');
-  ck('debt + linked bill shown together, separately', (await txt('.sheet')).includes('Linked bill') && (await txt('[data-testid=debt-balance]')).includes('592.42'));
+  ck('debt + linked bill shown together, separately', (await txt('.sheet')).includes('Scheduled bill') && (await txt('[data-testid=debt-balance]')).includes('592.42'));
   await p.click('.sheet button:has-text("Edit bill")'); await p.waitForSelector('#ba'); await p.fill('#ba', '80'); await p.click('button:has-text("Save changes")'); await p.waitForTimeout(1300);
-  ck('editing a bill leaves the debt balance alone', bal('Progressive Leasing - Laptop') === '592.42' && q("select target_amount from categories where name like 'Progressive%'") === '80.00');
+  ck('editing a bill leaves the debt balance alone', bal('Progressive Leasing - Laptop') === '592.42' && q("select bill_amount from categories where name like 'Progressive%'") === '80.00');
   await p.click('.sidebar >> text=Plan'); await p.waitForSelector('text=All bills & subscriptions'); await p.click('button[aria-label="Edit Progressive Leasing - Laptop"]'); await p.waitForSelector('#bn'); await p.click('.sheet .seg button:has-text("Paused")'); await p.click('button:has-text("Save changes")'); await p.waitForTimeout(1300);
   ck('pausing the bill keeps the debt (still a debt, same balance)', q("select is_debt||':'||balance||':'||bill_paused from categories where name like 'Progressive%'") === 'true:592.42:true');
   await p.click('.sidebar >> text=Budget'); await p.click('.brow:has-text("Progressive Leasing")'); await p.waitForSelector('[data-testid=debt-section]');
   ck('paused bill is explained; debt still displayed', (await txt('[data-testid=debt-section]')).includes('Pausing the bill doesn’t pause or change the debt') && (await txt('[data-testid=debt-balance]')).includes('592.42'));
   await p.click('[data-testid=debt-section] button:has-text("Edit debt")'); await p.waitForSelector('#debt-bal'); await p.fill('#debt-bal', '500'); await p.click('.sheet button.primary'); await p.waitForTimeout(1200);
-  ck('editing debt leaves the bill amount/date alone', q("select target_amount||'|'||due_date from categories where name like 'Progressive%'") === '80.00|2026-11-03' && bal('Progressive Leasing - Laptop') === '500.00');
+  ck('editing debt leaves the bill amount/date alone', q("select bill_amount||'|'||due_date from categories where name like 'Progressive%'") === '80.00|2026-11-03' && bal('Progressive Leasing - Laptop') === '500.00');
   // resume bill
   await p.click('.sidebar >> text=Plan'); await p.waitForSelector('text=All bills & subscriptions'); await p.click('button[aria-label="Edit Progressive Leasing - Laptop"]'); await p.waitForSelector('#bn'); await p.click('.sheet .seg button:has-text("Active")'); await p.click('button:has-text("Save changes")'); await p.waitForTimeout(1300);
   console.log('paused after resume:', q("select bill_paused from categories where name like 'Progressive%'"));
@@ -53,7 +53,7 @@ const bal = (n) => q(`select balance from categories where name='${n}'`);
   ck('ordinary category has no debt section', await p.locator('[data-testid=debt-section]').count() === 0);
   await p.click('.sheet button:has-text("Track as debt")'); await p.waitForSelector('#debt-bal'); await p.fill('#debt-bal', '75'); await p.click('.sheet button.primary'); await p.waitForTimeout(1200);
   ck('ordinary category can become a debt; its bill is untouched', q("select is_debt||':'||balance||':'||target_amount||':'||due_date from categories where name='Dave - Teria'") === 'true:75.00:10.14:2026-09-25');
-  await p.click('.brow:has-text("Dave - Teria")'); await p.waitForSelector('[data-testid=debt-section]'); ck('Dave - Teria now shows debt + bill', (await txt('.sheet')).includes('Linked bill') && (await txt('[data-testid=debt-balance]')).includes('75.00'));
+  await p.click('.brow:has-text("Dave - Teria")'); await p.waitForSelector('[data-testid=debt-section]'); ck('Dave - Teria now shows debt + bill', (await txt('.sheet')).includes('Scheduled bill') && (await txt('[data-testid=debt-balance]')).includes('75.00'));
   await p.click('[data-testid=debt-section] button:has-text("Edit debt")'); await p.waitForSelector('#debt-bal'); await p.click('.sheet .seg button:has-text("An ordinary category")'); await p.click('.sheet button.primary'); await p.waitForTimeout(1200);
   ck('switching off debt keeps the number stored', q("select is_debt||':'||balance from categories where name='Dave - Teria'") === 'false:75.00');
   // 6 accounts page shows loans with edit; net worth side untouched

@@ -11,6 +11,8 @@ export type Modal =
   | { type: 'move'; from?: string; to?: string; amount?: number }
   | { type: 'category'; id: string }
   | { type: 'category-add' }
+  | { type: 'category-edit'; id: string }
+  | { type: 'bill-schedule'; categoryId: string }
   | { type: 'bill'; billId: string; date: string }
   | { type: 'bill-edit'; billId: string }
   | { type: 'income'; mode: 'view' | 'add'; id?: string; date?: string }
@@ -39,7 +41,10 @@ interface Store {
   assign: (amounts: Record<string, number>) => Promise<boolean>;
   moveMoney: (from: string, to: string, amount: number) => Promise<boolean>;
   setTarget: (catId: string, target: number | null) => Promise<boolean>;
-  addCategory: (c: { name: string; groupId: string; target: number | null; emoji?: string }) => Promise<boolean>;
+  addCategory: (c: { name: string; groupId: string; target: number | null; emoji?: string; schedule?: db.ScheduleInput }) => Promise<boolean>;
+  updateCategory: (id: string, p: { name: string; emoji: string; groupId: string }) => Promise<boolean>;
+  scheduleBill: (categoryId: string, s: db.ScheduleInput) => Promise<boolean>;
+  removeBill: (categoryId: string) => Promise<boolean>;
   payBill: (billId: string, date: string, opts: { post: boolean; amount?: number; accountId?: string }) => Promise<boolean>;
   setBillMode: (billId: string, mode: Bill['mode']) => Promise<boolean>;
   updateBill: (billId: string, patch: db.BillPatch) => Promise<boolean>;
@@ -152,6 +157,9 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
     } : undefined;
     return (await run(() => db.payBill(billId, date, todayISO(), opts.post ? 'prepare' : 'reminder', txn))).ok;
   }, [run, data.bills]);
+  const updateCategory: Store['updateCategory'] = useCallback(async (id, p) => (await run(() => db.updateCategory(id, p))).ok, [run]);
+  const scheduleBill: Store['scheduleBill'] = useCallback(async (id, s) => (await run(() => db.scheduleBill(id, s))).ok, [run]);
+  const removeBill: Store['removeBill'] = useCallback(async (id) => (await run(() => db.removeBill(id))).ok, [run]);
   const setBillMode: Store['setBillMode'] = useCallback(async (id, m) => (await run(() => db.setBillMode(id, m))).ok, [run]);
   const updateBill: Store['updateBill'] = useCallback(async (id, p) => (await run(() => db.updateBill(id, p))).ok, [run]);
 
@@ -196,8 +204,8 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
 
   const value = useMemo<Store>(() => ({
     data, status, loadError, refresh, busy, email, signOut, modal, openModal: setModal, closeModal: () => setModal(null), toasts, toast, theme, setTheme,
-    addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported,
-  }), [data, status, loadError, busy, email, modal, toasts, theme, refresh, signOut, toast, setTheme, addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported]);
+    addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported,
+  }), [data, status, loadError, busy, email, modal, toasts, theme, refresh, signOut, toast, setTheme, addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported]);
 
   return (
     <Ctx.Provider value={value}>

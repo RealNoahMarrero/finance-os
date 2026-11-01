@@ -116,8 +116,9 @@ export function toDataState(raw: RawData, today = todayISO()): DataState {
 
   const paidBy = new Map<string, Record<string, string>>();
   for (const p of raw.billPayments) { const k = S(p.category_id); if (!paidBy.has(k)) paidBy.set(k, {}); paidBy.get(k)![p.due_date] = p.transaction_id ? S(p.transaction_id) : 'manual'; }
-  const bills: Bill[] = cats.filter((c) => !c.is_hidden && c.due_date && Number(c.target_amount) > 0).map((c) => ({
-    id: S(c.id), name: c.name, payee: c.name, categoryId: S(c.id), amount: cents(c.target_amount), dueDay: Number(String(c.due_date).slice(8, 10)),
+  const billAmt = (c: Row) => (c.bill_amount != null ? cents(c.bill_amount) : cents(c.target_amount)); // one payment; falls back to the funding target for older bills
+  const bills: Bill[] = cats.filter((c) => !c.is_hidden && c.due_date && billAmt(c) > 0).map((c) => ({
+    id: S(c.id), name: c.name, payee: c.name, categoryId: S(c.id), amount: billAmt(c), dueDay: Number(String(c.due_date).slice(8, 10)),
     recurring: !!c.is_repeating, date: c.due_date, period: PERIOD(c.target_period), mode: c.bill_mode === 'prepare' ? 'prepare' : 'reminder',
     accountId: defaultAcct, toAccountId: cardOf.get(S(c.id)), paid: paidBy.get(S(c.id)) ?? {}, isDebt: !!c.is_debt, anchor: c.bill_anchor ?? undefined, paused: !!c.bill_paused,
   }));
@@ -211,12 +212,12 @@ export const setCategoryTarget = async (id: string, target: number | null) => { 
 export const setBillMode = async (id: string, mode: Bill['mode']) => { ok(await supabase.from('categories').update({ bill_mode: mode }).eq('id', Number(id))); };
 /** Edits a bill. A bill is a budget category with a due date, so this updates that one row only:
  *  it never creates, changes or deletes a transaction, payment record or budget amount. */
-export interface BillPatch { name: string; amount: number; date: string; recurring: boolean; period: BillPeriod; mode: Bill['mode']; groupId: string; paused: boolean; anchor?: string }
+export interface BillPatch { name: string; amount: number; date: string; recurring: boolean; period: BillPeriod; mode: Bill['mode']; groupId: string; paused: boolean; anchor?: string; target?: number | null }
 export const updateBill = async (id: string, p: BillPatch) => {
   const clash = ok(await supabase.from('bill_payments').select('id').eq('category_id', Number(id)).eq('due_date', p.date).limit(1)) as Row[];
   if (clash.length) throw new DbError('That due date is already recorded as paid. Choose the next unpaid date.');
   ok(await supabase.from('categories').update({
-    name: p.name.trim(), target_amount: dollars(p.amount), due_date: p.date, is_repeating: p.recurring, target_period: p.period, bill_mode: p.mode, group_id: Number(p.groupId), bill_paused: p.paused, ...(p.anchor ? { bill_anchor: p.anchor } : {}),
+    name: p.name.trim(), bill_amount: dollars(p.amount), ...(p.target !== undefined ? { target_amount: dollars(p.target ?? 0) } : {}), due_date: p.date, is_repeating: p.recurring, target_period: p.period, bill_mode: p.mode, group_id: Number(p.groupId), bill_paused: p.paused, ...(p.anchor ? { bill_anchor: p.anchor } : {}),
   }).eq('id', Number(id)));
 };
 /** Debt details live on the category row: is_debt + balance (the amount owed). A plain edit: it never creates a transaction, never touches
@@ -224,8 +225,24 @@ export const updateBill = async (id: string, p: BillPatch) => {
 export const setDebt = async (id: string, d: { isDebt: boolean; balance: number }) => {
   ok(await supabase.from('categories').update({ is_debt: d.isDebt, balance: dollars(Math.max(0, d.balance)) }).eq('id', Number(id)));
 };
-export const addCategoryRow = async (c: { name: string; groupId: string; target: number | null; emoji?: string }) => {
-  ok(await supabase.from('categories').insert({ name: c.name, group_id: Number(c.groupId), target_amount: c.target ? dollars(c.target) : 0, target_period: 'Monthly', emoji: c.emoji || null, entity_id: 'personal', assigned_amount: 0 }));
+export interface ScheduleInput { amount: number; date: string; period: 'once' | BillPeriod; mode: Bill['mode'] }
+const scheduleCols = (s: ScheduleInput) => ({ bill_amount: dollars(s.amount), due_date: s.date, bill_anchor: s.date, is_repeating: s.period !== 'once', ...(s.period !== 'once' ? { target_period: s.period } : {}), bill_mode: s.mode, bill_paused: false });
+export const addCategoryRow = async (c: { name: string; groupId: string; target: number | null; emoji?: string; schedule?: ScheduleInput }) => {
+  ok(await supabase.from('categories').insert({ name: c.name.trim(), group_id: Number(c.groupId), target_amount: c.target ? dollars(c.target) : 0, target_period: 'Monthly', emoji: c.emoji || null, entity_id: 'personal', assigned_amount: 0, ...(c.schedule ? scheduleCols(c.schedule) : {}) }));
+};
+/** Name, emoji and group only. Never touches funding, transactions, bills or debt fields. */
+export const updateCategory = async (id: string, p: { name: string; emoji: string; groupId: string }) => {
+  ok(await supabase.from('categories').update({ name: p.name.trim(), emoji: p.emoji.trim() || null, group_id: Number(p.groupId) }).eq('id', Number(id)));
+};
+/** Adds a payment schedule to an existing category (only its bill columns change). */
+export const scheduleBill = async (id: string, s: ScheduleInput) => {
+  const clash = ok(await supabase.from('bill_payments').select('id').eq('category_id', Number(id)).eq('due_date', s.date).limit(1)) as Row[];
+  if (clash.length) throw new DbError('That due date is already recorded as paid. Choose the next unpaid date.');
+  ok(await supabase.from('categories').update(scheduleCols(s)).eq('id', Number(id)));
+};
+/** Removes the schedule only. The category, its funding target and balance, transactions, payment history and any debt balance stay exactly as they are. */
+export const removeBill = async (id: string) => {
+  ok(await supabase.from('categories').update({ due_date: null, bill_anchor: null, is_repeating: false, bill_paused: false, bill_amount: null, bill_mode: 'reminder' }).eq('id', Number(id)));
 };
 export const addAccountRow = async (a: { name: string; type: AccountType; limit?: number }): Promise<string> => {
   const r = ok(await supabase.from('accounts').insert({ name: a.name, type: DB_ACCT_TYPE[a.type], balance: 0, credit_limit: a.limit ? dollars(a.limit) : 0, entity_id: 'personal' }).select('id').single()) as Row;

@@ -34,3 +34,7 @@ Site: https://marrero-finance.netlify.app/ (existing Netlify site; GitHub repo R
 - Cause: V2's category sheet and Budget list never read the `is_debt` / `balance` columns, so debts looked like empty envelopes. The data itself was never touched: all 18 `is_debt` rows are byte-identical in the earliest pre-redesign backup and in production (e.g. AfterPay $223.86). Bill editing / migration 013 did not change them.
 - Dave - Teria was never flagged as a debt (is_debt=false, balance 0 in the original data) — it is a plain bill; it can now be switched on with "Track as debt".
 - Fix is UI-only: debt section on the category sheet, "Owes $X" pill in Budget, Edit debt (plain update of `categories.is_debt/balance`; no transactions, accounts, funding or bills touched), Edit buttons on the Accounts loans list.
+
+## Unified category + bill creation (migration 015)
+- Applied 2026-11-01 after verified backup db-full-2026-11-01T01-47-02. Adds nullable `categories.bill_amount` (payment amount, separate from the `target_amount` funding target; NULL = same as target, so every existing bill is unchanged) and updates `fos_pay_bill` to use it. No policy/grant changes; 2,051 transactions and 18 debts intact; anon still blocked.
+- App: New category form (Bills groups: scheduled bill vs funding only), Edit category (name/emoji/group), scheduled-bill section on the category sheet (add/edit/pause/resume/remove with confirmation), mobile entry via More → New category or bill.

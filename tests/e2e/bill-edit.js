@@ -2,7 +2,7 @@ const { chromium } = require('playwright'); const { execSync } = require('child_
 const q = (sql) => execSync(`psql -h /tmp/pg -p 5433 -U postgres -d fos_test -At -c "${sql}"`).toString().trim();
 let pass = 0, fail = 0; const ck = (n, c, d = '') => { c ? pass++ : fail++; console.log((c ? 'PASS ' : 'FAIL ') + n + (c ? '' : '  ' + d)); };
 const snap = () => ({ tx: q("select count(*)||':'||md5(string_agg(t::text,'|' order by id)) from transactions t"), bp: q('select count(*) from bill_payments'), env: q("select md5(string_agg(id||':'||assigned_amount,'|' order by id)) from categories"), acc: q("select md5(string_agg(id||':'||balance,'|' order by id)) from accounts"), splits: q('select count(*) from transaction_splits') });
-const row = (n) => q(`select target_amount||'|'||due_date||'|'||is_repeating||'|'||target_period||'|'||bill_mode||'|'||name from categories where name='${n}' and entity_id='personal'`);
+const row = (n) => q(`select coalesce(bill_amount,target_amount)||'|'||due_date||'|'||is_repeating||'|'||target_period||'|'||bill_mode||'|'||name from categories where name='${n}' and entity_id='personal'`);
 (async () => {
   const b = await chromium.launch(); const ctx = await b.newContext({ viewport: { width: 1440, height: 900 } }); const p = await ctx.newPage();
   const errs = []; p.on('pageerror', (e) => errs.push(e.message));
@@ -35,7 +35,7 @@ const row = (n) => q(`select target_amount||'|'||due_date||'|'||is_repeating||'|
   ck('rename + amount saved on the same category', row('Adobe CC').startsWith('59.99|2026-12-27|true|Monthly|reminder'), row('Adobe CC'));
   ck('renamed bill keeps its transactions', q("select count(*) from transactions t join categories c on c.id=t.category_id where c.name='Adobe CC'") === q("select count(*) from transactions t join categories c on c.id=t.category_id where c.name='Adobe CC'"));
   // 4. Budget category > linked bill > Edit
-  await p.click('.sidebar >> text=Budget'); await p.waitForSelector('text=Car Payment'); await p.click('text=Car Payment >> nth=0'); await p.waitForSelector('text=Linked bill');
+  await p.click('.sidebar >> text=Budget'); await p.waitForSelector('text=Car Payment'); await p.click('text=Car Payment >> nth=0'); await p.waitForSelector('text=Scheduled bill');
   await p.click('.sheet button:has-text("Edit bill")'); await p.waitForSelector('#bn'); ck('Budget → linked bill → Edit bill opens editor', (await p.inputValue('#bn')) === 'Car Payment');
   await p.click('.sheet .chip:has-text("One time")'); await p.click('button:has-text("Save changes")'); await p.waitForTimeout(1500);
   ck('switch to one-time', row('Car Payment').includes('|false|'), row('Car Payment'));
