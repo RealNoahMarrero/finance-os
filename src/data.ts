@@ -85,8 +85,18 @@ export function envelope(d: DataState, catId: string, month = monthKey(d.today))
   return { assigned: funded, spent, moved: 0, avail, target: k.target, remaining, fundedPct: k.target ? Math.min(1, funded / k.target) : 0 };
 }
 export const allEnvelopes = (d: DataState) => d.categories.map((k) => ({ cat: k, env: envelope(d, k.id) }));
-export const totalAvail = (d: DataState) => sum(allEnvelopes(d), (e) => e.env.avail);
+/** Money sitting in the envelopes you actually budget with. Archived (hidden) envelopes are NOT part of the budget — the original app ignored them
+ *  in every total, and several hold old negative balances (overspending from before the redesign) that would otherwise look like free cash. */
+export const totalAvail = (d: DataState) => sum(allEnvelopes(d).filter((e) => !e.cat.hidden), (e) => e.env.avail);
+export const archivedAvail = (d: DataState) => sum(allEnvelopes(d).filter((e) => e.cat.hidden && Math.abs(e.env.avail) > 0), (e) => e.env.avail);
 export const readyToAssign = (d: DataState) => liquidTotal(d) - totalAvail(d);
+/** The four numbers that must always tie out: recorded cash = assigned to envelopes + ready to assign (negative = over-assigned).
+ *  Expected income is shown beside them but is never part of that equation. */
+export function cashCheck(d: DataState) {
+  const cash = liquidTotal(d), assigned = totalAvail(d), rta = cash - assigned;
+  const exp = incomeOccurrences(d, addDays(d.today, 1), addDays(d.today, 30));
+  return { cash, assigned, rta, overAssigned: rta < 0 ? -rta : 0, archived: archivedAvail(d), expected30: sum(exp, (o) => o.amount), guaranteed30: sum(exp.filter((o) => o.inc.certainty === 'guaranteed'), (o) => o.amount) };
+}
 export function buckets(d: DataState) {
   const by = (kinds: Group['kind'][]) => sum(allEnvelopes(d).filter((e) => !e.cat.hidden && kinds.includes(d.groups.find((g) => g.id === e.cat.groupId)?.kind ?? 'goals')), (e) => e.env.avail);
   const committed = by(['bills', 'goals']);

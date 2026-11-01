@@ -44,8 +44,8 @@ describe('adapter', () => {
   it('links card payment envelope to its card', () => { expect(d.categories.find((c) => c.name === 'Rent')!.cardAccountId).toBe('2'); });
 });
 describe('budget math', () => {
-  it('Ready to Assign = liquid cash minus ALL envelopes (archived ones included)', () => {
-    expect(readyToAssign(d)).toBe(100000 - (30000 + 10000 - 5000 + 0));
+  it('Ready to Assign = liquid cash minus the visible envelopes (archived ones are excluded, as in the original app)', () => {
+    expect(readyToAssign(d)).toBe(100000 - (30000 + 10000 + 0));
   });
   it('envelope available is the stored balance; target remaining is derived', () => {
     const e = envelope(d, '10'); expect(e.avail).toBe(30000); expect(e.remaining).toBe(20000);
@@ -114,5 +114,35 @@ describe('paused bills', () => {
     expect(envelope(d, '10').remaining).toBeGreaterThan(0);
     const f = (x: typeof d) => buildForecast(x, 60).conservative.at(-1)!.balance;
     expect(f(p)).toBeGreaterThan(f(d));
+  });
+});
+
+// ── Cash vs budget reconciliation (real October-31 figures; names anonymised) ──
+import { cashCheck, readyToAssign, totalAvail, buckets, archivedAvail, emptyData } from '../src/data';
+describe('cash vs envelopes', () => {
+  const acct = (id: string, type: 'checking' | 'savings' | 'cash' | 'credit', balance: number) => ({ id, name: id, type, mask: '', institution: '', balance, lastReconciled: '2026-10-31', baseline: '2026-10-31', openingBalance: balance, derived: balance });
+  const cat = (id: string, groupId: string, assigned: number, hidden: boolean) => ({ id, groupId, name: id, icon: '', target: null, priority: 2 as const, carry: 0, assigned, hidden });
+  const d = {
+    ...emptyData(), today: '2026-10-31',
+    accounts: [acct('daily', 'checking', 6327), acct('fixed', 'checking', 2142), acct('savings', 'savings', 0), acct('cash', 'cash', 0), acct('card1', 'credit', 19854), acct('card2', 'credit', 34469)],
+    groups: [{ id: '1', name: 'Bills', kind: 'bills' as const }, { id: '2', name: 'Subscriptions', kind: 'bills' as const }, { id: '3', name: 'Needs', kind: 'everyday' as const }, { id: '4', name: 'Wants', kind: 'lifestyle' as const }],
+    categories: [cat('groceries', '3', 699, false), cat('gas', '3', 2000, false), cat('spending', '4', 10000, false),
+      cat('arch1', '1', -15998, true), cat('arch2', '1', -14442, true), cat('arch3', '2', -1719, true), cat('arch4', '1', 60, true), cat('arch5', '1', 0, true)],
+  };
+  it('ready to assign ignores archived envelopes (the original app did too)', () => {
+    expect(totalAvail(d)).toBe(12699);
+    expect(readyToAssign(d)).toBe(8469 - 12699); // −$42.30: over-assigned, not +$278.69
+    expect(archivedAvail(d)).toBe(-15998 - 14442 - 1719 + 60);
+  });
+  it('the four numbers tie out: cash = assigned + ready to assign', () => {
+    const c = cashCheck(d);
+    expect(c.cash).toBe(8469); expect(c.assigned).toBe(12699); expect(c.cash).toBe(c.assigned + c.rta);
+    expect(c.overAssigned).toBe(4230); expect(buckets(d).rta).toBe(c.rta);
+  });
+  it('credit cards are not cash; expected income is shown but never counted', () => {
+    const c = cashCheck(d);
+    expect(c.cash).toBe(8469); // cards (owed) excluded
+    const d2 = { ...d, incomes: [{ id: 'i', label: 'Pay', amount: 50000, date: '2026-11-05', certainty: 'guaranteed' as const, repeat: 'none' as const, accountId: 'daily', status: 'pending' as const, who: 'x' }] };
+    expect(cashCheck(d2).expected30).toBe(50000); expect(cashCheck(d2).rta).toBe(c.rta);
   });
 });

@@ -26,7 +26,7 @@ export function Insights() {
 
   const last = flow[flow.length - 2];
   const savingsRate = last && last.income ? Math.round(((last.income - last.expense) / last.income) * 100) : 0;
-  const envs = allEnvelopes(data);
+  const envs = allEnvelopes(data).filter((e) => !e.cat.hidden); // archived envelopes aren't part of the budget
   const over = envs.filter((e) => e.env.avail < 0);
   const adherence = Math.round(((envs.length - over.length) / Math.max(1, envs.length)) * 100);
   const avgExp = sum(flow.filter((m) => !m.partial), (m) => m.expense) / Math.max(1, flow.filter((m) => !m.partial).length);

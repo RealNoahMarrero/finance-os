@@ -52,9 +52,9 @@ export function Budget() {
       <div className="grid g12" style={{ marginBottom: 16 }}>
         <section className="card rta-card fade-in" style={{ gridColumn: '1 / span 7' }} aria-label="Ready to Assign">
           <div>
-            <div className="eyebrow" style={{ color: 'var(--planned)' }}>Ready to Assign</div>
-            <div className="amt-hero num c-planned" style={{ marginTop: 6 }}><Money v={rta} /></div>
-            <div className="small muted" style={{ marginTop: 6, maxWidth: 360 }}>Money that’s in your accounts right now but doesn’t have a job yet.{totalNeeds > 0 && <> Your monthly targets still need <b className="num" style={{ color: 'var(--ink-2)' }}>{money(totalNeeds, { cents: false })}</b>.</>}</div>
+            <div className="eyebrow" style={{ color: rta < 0 ? 'var(--neg)' : 'var(--planned)' }}>{rta < 0 ? 'Over-assigned' : 'Ready to Assign'}</div>
+            <div className={cn('amt-hero num', rta < 0 ? 'neg' : 'c-planned')} style={{ marginTop: 6 }} data-testid="rta-value"><Money v={rta} /></div>
+            <div className="small muted" style={{ marginTop: 6, maxWidth: 360 }}>{rta < 0 ? <>Your envelopes hold more than the cash recorded in your accounts. Move money between envelopes or review old balances.</> : <>Money that’s in your accounts right now but doesn’t have a job yet.</>}{totalNeeds > 0 && <> Your monthly targets still need <b className="num" style={{ color: 'var(--ink-2)' }}>{money(totalNeeds, { cents: false })}</b>.</>}</div>
           </div>
           <div className="stack gap8" style={{ flex: 'none', minWidth: 170 }}>
             <button className="btn primary" onClick={() => openModal({ type: 'assign' })} disabled={rta <= 0}><Sparkles />Assign money</button>

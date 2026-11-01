@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Plus, ChevronRight, Info, TrendingUp, Landmark, CircleCheck, Lightbulb, Wallet } from 'lucide-react';
 import { useStore } from '../store';
 import {
-  buckets, buildForecast, shortfall, netWorth, netWorthSeries, upcomingBills, incomeOccurrences, allEnvelopes, envelope, spendingTotal, staleness,
+  buckets, cashCheck, buildForecast, shortfall, netWorth, netWorthSeries, upcomingBills, incomeOccurrences, allEnvelopes, envelope, spendingTotal, staleness,
   monthlyFlow, usualSpend, type DataState,
 } from '../data';
 import { addDays, compact, daysInMonth, diffDays, fmtDate, mon, money, monthKey, parse, plural, sum, cn } from '../lib';
@@ -55,6 +55,7 @@ export function Overview() {
   if (data.accounts.length === 0) return <Welcome />;
 
   const b = buckets(data);
+  const cc = cashCheck(data);
   const nw = netWorth(data);
   const nwSeries = netWorthSeries(data);
   const nwDelta = nw - nwSeries[0].value;
@@ -105,7 +106,7 @@ export function Overview() {
           <div className="eyebrow row gap8">Available to spend <span className="pill" title="Money in your everyday and lifestyle envelopes"><Info />after bills &amp; goals</span></div>
           <div className="amt-hero num" style={{ marginTop: 8 }}><Money v={b.flexible} /></div>
           <div className="small muted" style={{ marginTop: 6 }}>
-            What’s left in your everyday &amp; lifestyle envelopes.
+            Budget money in your everyday &amp; lifestyle envelopes — not the same as cash in the bank.
             {overs.length > 0 && <> <a href="#/budget" className="neg" style={{ fontWeight: 600 }}>{overs.length === 1 ? `${overs[0].cat.name} is overspent` : `${overs.length} envelopes overspent`}.</a></>}
           </div>
           <div style={{ marginTop: 22 }}>
@@ -117,9 +118,17 @@ export function Overview() {
             <div className="hero-metrics">
               <a href="#/budget" className="hero-metric"><div className="k"><i className="sw" style={{ background: 'var(--ink-2)' }} />Committed<span className="long">&nbsp;to bills &amp; goals</span></div><Money v={b.committed} className="amt-md num" /></a>
               <a href="#/budget" className="hero-metric"><div className="k"><i className="sw" style={{ background: 'var(--pos)' }} />Spendable</div><Money v={b.flexible} className="amt-md num" /></a>
-              <button className="hero-metric" style={{ textAlign: 'left' }} onClick={() => openModal({ type: 'assign' })}><div className="k"><i className="sw" style={{ background: 'var(--planned)' }} />Ready to Assign</div><Money v={b.rta} className="amt-md num c-planned" /></button>
+              <button className="hero-metric" style={{ textAlign: 'left' }} onClick={() => openModal({ type: 'assign' })}><div className="k"><i className="sw" style={{ background: 'var(--planned)' }} />{b.rta < 0 ? 'Over-assigned' : 'Ready to Assign'}</div><Money v={b.rta} className={cn('amt-md num', b.rta < 0 ? 'neg' : 'c-planned')} /></button>
             </div>
           </div>
+          <div className="cashcheck" data-testid="cash-check" aria-label="How your cash and budget tie together">
+            <div><span className="k">Cash in accounts</span><b className="num" data-testid="cc-cash">{money(cc.cash)}</b><span className="xs muted">recorded balances</span></div>
+            <div><span className="k">Assigned to envelopes</span><b className="num" data-testid="cc-assigned">{money(cc.assigned)}</b><span className="xs muted">your budget</span></div>
+            <div><span className="k">{cc.rta < 0 ? 'Over-assigned by' : 'Ready to assign'}</span><b className={cn('num', cc.rta < 0 && 'neg')} data-testid="cc-rta">{money(cc.rta < 0 ? -cc.rta : cc.rta)}</b><span className="xs muted">cash − assigned</span></div>
+            <div><span className="k">Expected income</span><b className="num" data-testid="cc-expected">{money(cc.expected30)}</b><span className="xs muted">next 30 days · not counted</span></div>
+          </div>
+          {cc.overAssigned > 0 && <div style={{ marginTop: 12 }}><Callout tone="warn">Your envelopes hold <b className="num">{money(cc.overAssigned)}</b> more than the cash recorded in your accounts. Some envelope balances carried over from before the redesign may be out of date — review them in <a href="#/budget" style={{ fontWeight: 600, textDecoration: 'underline' }}>Budget</a>. Nothing has been changed automatically.</Callout></div>}
+          {cc.archived !== 0 && <div className="xs muted" style={{ marginTop: 8 }} data-testid="cc-archived">Archived envelopes hold {money(cc.archived)} from before the redesign. They’re kept for history and excluded from every total above.</div>}
           <div className="hero-foot">
             <a href="#/accounts" className="small muted">Net worth <b className="num" style={{ color: 'var(--ink-2)' }}>{money(nw, { cents: false })}</b> <span className={nwDelta >= 0 ? 'pos' : 'neg'} style={{ fontWeight: 600 }}>{nwDelta >= 0 ? '↗' : '↘'} {compact(Math.abs(nwDelta))} in 12 mo</span></a>
             {stale.length > 0 && <a href="#/accounts" className="small" style={{ color: 'var(--warn)', fontWeight: 600 }}>{stale.map((a) => a.name).join(', ')} not checked in {staleness(stale[0], data.today).days}+ days</a>}

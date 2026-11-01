@@ -104,6 +104,7 @@ export function attentionItems(d: DataState): Attn[] {
     out.push({ id: `uf-${o.bill.id}`, tone: 'warn', icon: <TriangleAlert />, title: `${o.bill.name} needs ${money(o.short)} more`, sub: `Due ${fmtDate(o.date)} · ${money(o.funded)} of ${money(o.bill.amount)} funded`, modal: { type: 'move', from: 'rta', to: o.bill.categoryId, amount: o.short } });
   }
   const rta = readyToAssign(d);
+  if (rta < 0) out.push({ id: 'rta-neg', tone: 'warn', icon: <TriangleAlert />, title: `Envelopes hold ${money(-rta)} more than your cash`, sub: 'Review envelope balances — nothing was changed automatically', href: '#/budget' });
   if (rta > 0) out.push({ id: 'rta', tone: 'planned', icon: <Sparkles />, title: `${money(rta)} is ready to assign`, sub: `${underfunded(d).length} targets still need funding`, modal: { type: 'assign' } });
   for (const a of d.accounts) {
     const st = staleness(a, d.today);
