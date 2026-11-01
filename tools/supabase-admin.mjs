@@ -138,6 +138,18 @@ end if; end $r2$;
   await sql(`begin;\n${B()}\ncommit;`);
   console.log(`Lock-down applied. Undo (emergency only): node tools/supabase-admin.mjs rollback ${path.join(backups, b)}`);
   if (!LOCAL) { for (const t of ['accounts', 'transactions']) { const r = await fetch(`${URL_}/rest/v1/${t}?select=id&limit=1`, { headers: { apikey: ANON, Authorization: `Bearer ${ANON}` } }); const body = await r.text(); console.log(`${t}: anonymous read -> HTTP ${r.status} ${r.status === 200 && body !== '[]' ? 'STILL READABLE (problem!)' : 'blocked (good)'}`); } }
+} else if (cmd === 'migrate') {
+  // Applies one additive migration file from db/ in a single transaction. `--dry` runs it and rolls back. Needs a current verified backup.
+  const file = (process.argv[3] || '').replace(/[^A-Za-z0-9_.-]/g, ''); const dry = process.argv.includes('--dry');
+  if (!file || !fs.existsSync(path.join(root, 'db', file))) { console.error('usage: migrate <file in db/> [--dry]'); process.exit(1); }
+  if (dry) { try { await sql(preflightSql(mig(file))); } catch (e) { const ok = /PREFLIGHT_OK/.test(e.message); console.log(ok ? `Dry run passed (nothing changed): ${e.message.match(/PREFLIGHT_OK.*/)[0]}` : `Dry run FAILED (nothing changed):\n${e.message}`); process.exit(ok ? 0 : 3); } }
+  else {
+    const b = latestBackup(); if (!b) { console.error('No verified backup found. Run backup first.'); process.exit(6); }
+    const man = JSON.parse(fs.readFileSync(path.join(backups, b, '_manifest.json'), 'utf8')); const stale = [];
+    for (const t of ['accounts', 'categories', 'transactions', 'bill_payments']) { const n = (await sql(countSql(t)))[0].n; if (n !== man.tables[t].rows) stale.push(`${t}: backup ${man.tables[t].rows}, now ${n}`); }
+    if (stale.length) { console.error(`Latest backup (${b}) is out of date:\n${stale.join('\n')}`); process.exit(6); }
+    await sql(`begin;\n${mig(file)}\ncommit;`); console.log(`Applied ${file} (backup ${b} matched).`);
+  }
 } else if (cmd === 'rollback') {
   const dir = path.resolve(process.argv[3] || ''); await sql(fs.readFileSync(path.join(dir, 'rollback.sql'), 'utf8')); console.log('Lock-down undone: original access rules restored from', dir);
 } else if (cmd === 'restore-data') {
@@ -158,4 +170,4 @@ end if; end $r2$;
     const r = await fetch(`${URL_}/rest/v1/${t}?select=id&limit=1`, { headers: { apikey: ANON, Authorization: `Bearer ${ANON}` } });
     const body = await r.text(); console.log(`${t}: anonymous read -> HTTP ${r.status} ${r.status === 200 && body !== '[]' ? 'STILL READABLE (problem!)' : 'blocked / empty (good)'}`);
   }
-} else { console.log('commands: backup | verify-restore DIR | preflight | apply-a EMAIL | lockdown | rollback DIR | restore-data DIR --yes | sync-token [revoke] personal|business | verify'); }
+} else { console.log('commands: backup | verify-restore DIR | preflight | apply-a EMAIL | lockdown | rollback DIR | migrate FILE [--dry] | restore-data DIR --yes | sync-token [revoke] personal|business | verify'); }

@@ -19,3 +19,7 @@ Site: https://marrero-finance.netlify.app/ (existing Netlify site; GitHub repo R
 
 ## Open items
 - Owner to confirm production login and Personal Sheets sync; business sheet setup; enter opening balances in the reconciliation screen.
+
+## Update — bill editing, month-end anchor, pause (applied 2026-11-01)
+- Migration `db/013_bill_anchor_and_pause.sql` applied to production (additive; Finance table `categories` only): new columns `bill_anchor`, `bill_paused`; new function `fos_bill_next` (authenticated only); `fos_pay_bill` now advances recurring dates from the anchor (31st → Feb 28/29 → Mar 31; yearly Feb 29 handled). No policies or other apps touched; 2,051 transactions unchanged. Pre-migration backup: `backups\db-full-2026-11-01T00-28-24`.
+- App: Edit bill sheet, All bills list, Active/Paused (paused bills leave upcoming bills, overdue alerts, forecasts and funding prompts; history kept).

@@ -47,6 +47,33 @@ const row = (n) => q(`select target_amount||'|'||due_date||'|'||is_repeating||'|
   ck('paid once at edited date, due date advanced one month', q("select count(*) from bill_payments b join categories c on c.id=b.category_id where c.name='Capital One' and b.due_date='2026-11-18'") === '1' && row('Capital One').includes('|2026-12-18|'), row('Capital One'));
   ck('reminder payment posts no transaction', q('select count(*) from transactions') === txBefore);
   const occ = await p.locator('.li:has-text("Capital One")').count(); ck('no duplicate occurrences in the list', occ <= 2, String(occ));
+
+  // 7. month-end anchor: 31st bill pays on Oct 31 -> Nov 30 -> Dec 31 (returns to the 31st), no drift
+  await p.goto('http://localhost:4173/#/plan'); await p.waitForSelector('text=All bills & subscriptions');
+  await p.click('button[aria-label="Edit AES"]'); await p.waitForSelector('#bd'); await p.fill('#bd', '2026-10-31');
+  ck('month-end hint shown', (await p.textContent('.sheet')).includes('shorter months use their last day')); await p.click('button:has-text("Save changes")'); await p.waitForTimeout(1500);
+  ck('anchor saved with the new date', q("select bill_anchor from categories where name='AES' and entity_id='personal'") === '2026-10-31');
+  await p.locator('.li:has-text("AES")').first().click(); await p.waitForSelector('text=Mark as paid'); await p.click('.sheet button:has-text("Mark as paid")'); await p.waitForTimeout(1500);
+  ck('Oct 31 -> Nov 30', q("select due_date from categories where name='AES' and entity_id='personal'") === '2026-11-30');
+  await p.locator('.li:has-text("AES")').first().click(); await p.waitForSelector('text=Mark as paid'); await p.click('.sheet button:has-text("Mark as paid")'); await p.waitForTimeout(1500);
+  ck('Nov 30 -> Dec 31 (back to the 31st)', q("select due_date from categories where name='AES' and entity_id='personal'") === '2026-12-31');
+  // editing another field keeps the anchor
+  await p.goto('http://localhost:4173/#/plan'); await p.waitForSelector('text=All bills & subscriptions'); await p.click('button[aria-label="Edit AES"]'); await p.waitForSelector('#bn'); await p.fill('#ba', '180'); await p.click('button:has-text("Save changes")'); await p.waitForTimeout(1500);
+  ck('anchor unchanged when only the amount is edited', q("select bill_anchor from categories where name='AES' and entity_id='personal'") === '2026-10-31');
+  // 8. pause / resume
+  const sBefore = snap(); const overdueText = async () => (await p.textContent('body'));
+  await p.goto('http://localhost:4173/#/plan'); await p.waitForSelector('text=All bills & subscriptions');
+  ck('overdue alert exists before pausing', (await overdueText()).includes('CashApp Borrow'));
+  await p.click('button[aria-label="Edit CashApp Borrow"]'); await p.waitForSelector('#bn'); await p.click('.sheet .seg button:has-text("Paused")'); await p.click('button:has-text("Save changes")'); await p.waitForTimeout(1500);
+  ck('paused flag saved', q("select bill_paused from categories where name='CashApp Borrow' and entity_id='personal'") === 't');
+  ck('paused bill gone from upcoming/overdue, listed as Paused', !(await p.locator('.li:has-text("CashApp Borrow") >> text=overdue').count()) && (await p.textContent('button[aria-label="Edit CashApp Borrow"]')).includes('Paused'));
+  await p.goto('http://localhost:4173/#/'); await p.waitForSelector('.sidebar'); await p.waitForTimeout(500); ck('overview has no CashApp Borrow overdue alert', !(await p.textContent('body')).match(/CashApp Borrow[^.]{0,40}overdue/));
+  const sAfter = snap(); ck('pausing changed no transactions, payments, envelopes or balances', JSON.stringify(sBefore) === JSON.stringify(sAfter));
+  await p.goto('http://localhost:4173/#/plan'); await p.waitForSelector('text=All bills & subscriptions'); await p.click('button[aria-label="Edit CashApp Borrow"]'); await p.waitForSelector('#bn'); await p.click('.sheet .seg button:has-text("Active")');
+  const rolled = await p.inputValue('#bd'); ck('resuming rolls a stale date forward to on/after today', rolled >= '2026-10-31' && rolled !== '2026-10-09', rolled);
+  await p.click('button:has-text("Save changes")'); await p.waitForTimeout(1500);
+  ck('resumed and rescheduled in DB', q("select bill_paused::text||'|'||due_date from categories where name='CashApp Borrow' and entity_id='personal'") === 'false|' + rolled);
+  ck('resume left payment history intact', q("select count(*) from bill_payments b join categories c on c.id=b.category_id where c.name='CashApp Borrow'") === '1');
   // 6. mobile
   const m = await (await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })).newPage();
   await m.goto('http://localhost:4173/'); await m.fill('#em', 'owner@test.local'); await m.fill('#pw', 'correct-horse-battery'); await m.click('button.primary'); await m.waitForSelector('nav, .tabbar, .sidebar', { state: 'attached' }); await m.waitForTimeout(600);

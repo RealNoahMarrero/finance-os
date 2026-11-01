@@ -53,10 +53,10 @@ function AllBills() {
     <section className="card" style={{ overflow: 'hidden', margin: '16px 0' }}>
       <div className="pad" style={{ paddingBottom: 6 }}><div className="sect-head" style={{ marginBottom: 0 }}><h2 className="sect-title">All bills &amp; subscriptions</h2><span className="small muted">{rows.length} · tap to edit</span></div></div>
       <div className="list">{rows.map((b) => (
-        <button key={b.id} className="li" style={{ padding: '12px 20px' }} aria-label={`Edit ${b.name}`} onClick={() => openModal({ type: 'bill-edit', billId: b.id })}>
+        <button key={b.id} className="li" style={{ padding: '12px 20px', ...(b.paused ? { opacity: 0.6 } : {}) }} aria-label={`Edit ${b.name}`} onClick={() => openModal({ type: 'bill-edit', billId: b.id })}>
           <div className="grow" style={{ minWidth: 0 }}><div className="li-title ellipsis">{b.name}</div>
-            <div className="li-sub">{b.recurring ? b.period : 'One time'} · next due {b.date ? fmtDate(b.date) : '—'} · {b.mode === 'prepare' ? 'Prepares' : 'Reminder'}</div></div>
-          <div className="right row gap8"><Money v={b.amount} className="amt-md" /><Pencil size={15} style={{ color: 'var(--ink-4)' }} /></div>
+            <div className="li-sub">{b.recurring ? b.period : 'One time'} · {b.paused ? 'Paused' : `next due ${b.date ? fmtDate(b.date) : '—'}`} · {b.mode === 'prepare' ? 'Prepares' : 'Reminder'}</div></div>
+          <div className="right row gap8">{b.paused && <StatusPill status="muted">Paused</StatusPill>}<Money v={b.amount} className="amt-md" /><Pencil size={15} style={{ color: 'var(--ink-4)' }} /></div>
         </button>))}</div>
     </section>
   );

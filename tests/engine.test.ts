@@ -78,3 +78,41 @@ describe('income + forecast', () => {
   });
   it('unverified accounts have no drift info', () => { expect(drift(d.accounts[0])).toBeNull(); });
 });
+
+import { nextDueDate, rollForward, upcomingBills } from '../src/data';
+describe('bill recurrence anchor (matches the database function fos_bill_next)', () => {
+  it('monthly 31st: clamps in short months and returns to the 31st', () => {
+    let cur = '2026-01-31'; const seen: string[] = [];
+    for (let i = 0; i < 6; i++) { cur = nextDueDate('Monthly', '2026-01-31', cur); seen.push(cur); }
+    expect(seen).toEqual(['2026-02-28', '2026-03-31', '2026-04-30', '2026-05-31', '2026-06-30', '2026-07-31']);
+  });
+  it('leap years, 29th/30th anchors and December rollover', () => {
+    expect(nextDueDate('Monthly', '2027-12-31', '2028-01-31')).toBe('2028-02-29');
+    expect(nextDueDate('Monthly', '2026-01-30', '2026-01-30')).toBe('2026-02-28');
+    expect(nextDueDate('Monthly', '2026-01-29', '2028-01-29')).toBe('2028-02-29');
+    expect(nextDueDate('Monthly', '2026-01-15', '2026-12-15')).toBe('2027-01-15');
+  });
+  it('yearly keeps month and day (Feb 29 returns in leap years); weekly/bi-weekly unchanged', () => {
+    expect(nextDueDate('Yearly', '2028-02-29', '2028-02-29')).toBe('2029-02-28');
+    expect(nextDueDate('Yearly', '2028-02-29', '2031-02-28')).toBe('2032-02-29');
+    expect(nextDueDate('Weekly', '2026-01-01', '2026-01-01')).toBe('2026-01-08');
+    expect(nextDueDate('Bi-Weekly', '2026-01-01', '2026-01-01')).toBe('2026-01-15');
+  });
+  it('rollForward lands on the first unpaid date on/after today', () => {
+    expect(rollForward({ recurring: true, period: 'Monthly', anchor: '2026-01-31', date: '2026-01-31', paid: {} }, '2026-08-31', '2026-10-31')).toBe('2026-10-31');
+    expect(rollForward({ recurring: true, period: 'Monthly', anchor: '2026-01-31', date: '2026-01-31', paid: { '2026-10-31': 'manual' } }, '2026-08-31', '2026-10-31')).toBe('2026-11-30');
+    expect(rollForward({ recurring: false, period: 'Monthly', date: '2026-01-05', paid: {} }, '2026-01-05', '2026-10-31')).toBe('2026-01-05');
+  });
+});
+describe('paused bills', () => {
+  const p = toDataState({ ...raw, categories: raw.categories.map((c) => (c.id === 10 ? { ...c, bill_paused: true } : c)) }, '2026-10-31');
+  it('drop out of upcoming bills, overdue alerts and forecasts but keep paid history and funding info', () => {
+    expect(upcomingBills(d, 60).some((o) => o.bill.name === 'Rent')).toBe(true);
+    expect(upcomingBills(p, 60).some((o) => o.bill.name === 'Rent')).toBe(false);
+    expect(billOccurrences(p, '2026-09-01', '2026-12-31').filter((o) => o.bill.name === 'Loan' && o.paid).length).toBe(1);
+    expect(envelope(p, '10').remaining).toBe(0);
+    expect(envelope(d, '10').remaining).toBeGreaterThan(0);
+    const f = (x: typeof d) => buildForecast(x, 60).conservative.at(-1)!.balance;
+    expect(f(p)).toBeGreaterThan(f(d));
+  });
+});

@@ -86,7 +86,7 @@ export function toDataState(raw: RawData, today = todayISO()): DataState {
     return {
       id: S(c.id), groupId: S(c.group_id), name: c.name, icon: c.emoji || '', target: Number(c.target_amount) > 0 ? cents(c.target_amount) : null,
       priority: kind === 'bills' ? 1 : kind === 'everyday' ? 2 : 3, carry: 0, assigned: cents(c.assigned_amount),
-      cardAccountId: cardOf.get(S(c.id)), hidden: !!c.is_hidden,
+      cardAccountId: cardOf.get(S(c.id)), hidden: !!c.is_hidden, billPaused: !!c.bill_paused,
     };
   });
 
@@ -112,7 +112,7 @@ export function toDataState(raw: RawData, today = todayISO()): DataState {
   const bills: Bill[] = cats.filter((c) => !c.is_hidden && c.due_date && Number(c.target_amount) > 0).map((c) => ({
     id: S(c.id), name: c.name, payee: c.name, categoryId: S(c.id), amount: cents(c.target_amount), dueDay: Number(String(c.due_date).slice(8, 10)),
     recurring: !!c.is_repeating, date: c.due_date, period: PERIOD(c.target_period), mode: c.bill_mode === 'prepare' ? 'prepare' : 'reminder',
-    accountId: defaultAcct, toAccountId: cardOf.get(S(c.id)), paid: paidBy.get(S(c.id)) ?? {}, isDebt: !!c.is_debt,
+    accountId: defaultAcct, toAccountId: cardOf.get(S(c.id)), paid: paidBy.get(S(c.id)) ?? {}, isDebt: !!c.is_debt, anchor: c.bill_anchor ?? undefined, paused: !!c.bill_paused,
   }));
   const billIds = new Set(bills.map((b) => b.id));
   const debts: Debt[] = cats.filter((c) => c.is_debt && Number(c.balance) > 0).map((c) => ({
@@ -197,12 +197,12 @@ export const setCategoryTarget = async (id: string, target: number | null) => { 
 export const setBillMode = async (id: string, mode: Bill['mode']) => { ok(await supabase.from('categories').update({ bill_mode: mode }).eq('id', Number(id))); };
 /** Edits a bill. A bill is a budget category with a due date, so this updates that one row only:
  *  it never creates, changes or deletes a transaction, payment record or budget amount. */
-export interface BillPatch { name: string; amount: number; date: string; recurring: boolean; period: BillPeriod; mode: Bill['mode']; groupId: string }
+export interface BillPatch { name: string; amount: number; date: string; recurring: boolean; period: BillPeriod; mode: Bill['mode']; groupId: string; paused: boolean; anchor?: string }
 export const updateBill = async (id: string, p: BillPatch) => {
   const clash = ok(await supabase.from('bill_payments').select('id').eq('category_id', Number(id)).eq('due_date', p.date).limit(1)) as Row[];
   if (clash.length) throw new DbError('That due date is already recorded as paid. Choose the next unpaid date.');
   ok(await supabase.from('categories').update({
-    name: p.name.trim(), target_amount: dollars(p.amount), due_date: p.date, is_repeating: p.recurring, target_period: p.period, bill_mode: p.mode, group_id: Number(p.groupId),
+    name: p.name.trim(), target_amount: dollars(p.amount), due_date: p.date, is_repeating: p.recurring, target_period: p.period, bill_mode: p.mode, group_id: Number(p.groupId), bill_paused: p.paused, ...(p.anchor ? { bill_anchor: p.anchor } : {}),
   }).eq('id', Number(id)));
 };
 export const addCategoryRow = async (c: { name: string; groupId: string; target: number | null; emoji?: string }) => {

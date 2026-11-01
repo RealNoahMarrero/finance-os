@@ -18,7 +18,7 @@ export interface Category {
   id: string; groupId: string; name: string; icon: string; target: number | null;
   priority: 1 | 2 | 3; carry: number;
   assigned: number; // the envelope's Available balance as stored (budgeted minus activity)
-  cardAccountId?: string; hidden: boolean;
+  cardAccountId?: string; hidden: boolean; billPaused?: boolean;
 }
 export interface Txn {
   id: string; date: string; payee: string; amount: number; type: 'expense' | 'income' | 'transfer';
@@ -33,6 +33,8 @@ export interface Bill {
   mode: 'reminder' | 'prepare'; accountId: string; toAccountId?: string;
   paid: Record<string, string>; // due date -> transaction id | 'manual'
   isDebt?: boolean;
+  anchor?: string; // the calendar date the schedule is anchored to (day of month / yearly month+day); falls back to `date`
+  paused: boolean;
 }
 export type Repeat = 'none' | 'weekly' | 'biweekly' | 'semimonthly' | 'monthly';
 export interface Income {
@@ -75,7 +77,7 @@ export function envelope(d: DataState, catId: string, month = monthKey(d.today))
   // The stored envelope balance IS what is available now. A target counts as funded once that much is set aside.
   const avail = k.assigned;
   const funded = Math.max(0, avail);
-  const remaining = k.target != null && k.target > 0 ? Math.max(0, k.target - funded) : 0;
+  const remaining = k.target != null && k.target > 0 && !k.billPaused ? Math.max(0, k.target - funded) : 0; // a paused bill asks for no funding
   return { assigned: funded, spent, moved: 0, avail, target: k.target, remaining, fundedPct: k.target ? Math.min(1, funded / k.target) : 0 };
 }
 export const allEnvelopes = (d: DataState) => d.categories.map((k) => ({ cat: k, env: envelope(d, k.id) }));
@@ -108,20 +110,31 @@ export const isAdjustmentTxn = (t: Txn) => !!t.adjustment;
 
 // ── bill occurrences ──────────────────────────────────────────
 export interface BillOcc { bill: Bill; date: string; key: string; paid: boolean; future: boolean; status: 'overdue' | 'due' | 'upcoming' | 'paid'; funded: number; short: number }
-const nextDue = (b: Bill, date: string) => {
-  if (b.period === 'Weekly') return addDays(date, 7);
-  if (b.period === 'Bi-Weekly') return addDays(date, 14);
-  if (b.period === 'Yearly') { const d = parse(date); d.setFullYear(d.getFullYear() + 1); return iso(d); }
-  const m = monthShift(monthKey(date), 1);
-  return `${m}-${String(Math.min(b.dueDay, daysInMonth(m))).padStart(2, '0')}`;
+/** Next occurrence after `cur`. Mirrors the database function fos_bill_next exactly: monthly keeps the anchor's day, clamped to the
+ *  last valid day of shorter months and returning to it when possible; yearly keeps the anchor's month and day (Feb 29 → Feb 28 in common years). */
+export const nextDueDate = (period: BillPeriod, anchor: string, cur: string) => {
+  if (period === 'Weekly') return addDays(cur, 7);
+  if (period === 'Bi-Weekly') return addDays(cur, 14);
+  const day = Number(anchor.slice(8, 10));
+  if (period === 'Yearly') { const m = `${Number(cur.slice(0, 4)) + 1}-${anchor.slice(5, 7)}`; return `${m}-${String(Math.min(day, daysInMonth(m))).padStart(2, '0')}`; }
+  const m = monthShift(monthKey(cur), 1);
+  return `${m}-${String(Math.min(day, daysInMonth(m))).padStart(2, '0')}`;
 };
+const nextDue = (b: Bill, date: string) => nextDueDate(b.period, b.anchor ?? b.date ?? date, date);
+/** The first unpaid due date on or after today (used when resuming a paused bill). One-time bills keep their date. */
+export function rollForward(b: Pick<Bill, 'recurring' | 'period' | 'anchor' | 'date' | 'paid'>, from: string, today: string): string {
+  let cur = from, guard = 0;
+  if (!b.recurring) return cur;
+  while ((cur < today || b.paid[cur]) && guard++ < 500) cur = nextDueDate(b.period, b.anchor ?? b.date ?? from, cur);
+  return cur;
+}
 export function billOccurrences(d: DataState, from: string, to: string): BillOcc[] {
   const out: BillOcc[] = [];
   const thisMonth = monthKey(d.today);
   for (const b of d.bills) {
     const dates: { date: string; paid: boolean }[] = [];
     for (const dd of Object.keys(b.paid)) if (dd >= from && dd <= to) dates.push({ date: dd, paid: true });
-    if (b.date) {
+    if (b.date && !b.paused) { // a paused bill keeps its history (paid dates above) but schedules nothing new
       let cur = b.date, guard = 0;
       // the stored date is the next unpaid one; it stays visible (as overdue) until it is confirmed
       while (cur <= to && guard++ < 60) {

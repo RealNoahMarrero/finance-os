@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, useEffect } from 'react';
 import { ArrowRight, ArrowUpDown, Bell, Check, CircleCheck, Download, Eye, FlaskConical, Info, Landmark, LogOut, ListChecks, Pencil, Plus, Scale, Split, StickyNote, Trash, TriangleAlert } from 'lucide-react';
 import { useStore } from './store';
 import {
-  allEnvelopes, envelope, readyToAssign, staleness, billOccurrences, drift, type Account, type Bill, type BillPeriod, type Category, type Txn, type Income, type Repeat as Rep,
+  allEnvelopes, envelope, readyToAssign, staleness, billOccurrences, drift, rollForward, type Account, type Bill, type BillPeriod, type Category, type Txn, type Income, type Repeat as Rep,
 } from './data';
 import { addDays, centsToInput, cn, diffDays, fmtDate, money, monthKey, relDay, sum, toCents, plural } from './lib';
 import { CatIcon, Callout, Money, Seg, Sheet, StatusPill, ThemeSwitch } from './ui';
@@ -434,7 +434,7 @@ export function CategorySheet({ id }: { id: string }) {
       <div className="card pad" style={{ boxShadow: 'none', background: 'var(--surface-2)' }}>
         <div className="row between" style={{ marginBottom: 10 }}>
           <div><div className="eyebrow">Available to spend</div><div className={cn('amt-xl num', over && 'neg')}><Money v={env.avail} /></div></div>
-          {cat.target != null && <StatusPill status={env.remaining === 0 ? 'ok' : 'planned'}>{env.remaining === 0 ? 'Target funded' : `${Math.round(env.fundedPct * 100)}% funded`}</StatusPill>}
+          {cat.billPaused ? <StatusPill status="muted">Bill paused</StatusPill> : cat.target != null && <StatusPill status={env.remaining === 0 ? 'ok' : 'planned'}>{env.remaining === 0 ? 'Target funded' : `${Math.round(env.fundedPct * 100)}% funded`}</StatusPill>}
         </div>
         {cat.target != null && <div className="bar planned"><i style={{ width: `${env.fundedPct * 100}%` }} /></div>}
         <div style={{ marginTop: 8 }}>
@@ -454,7 +454,7 @@ export function CategorySheet({ id }: { id: string }) {
           <button className="btn primary" onClick={async () => { if (await setTarget(id, tgt ? toCents(tgt) : null)) setEditing(false); }}>Save</button>
         </div>
       )}
-      {bill && bill.date && <div className="callout planned" style={{ marginTop: 8, alignItems: 'center' }}><Bell /><div className="grow">Linked bill: <b>{bill.name}</b>, {money(bill.amount)}, next due {fmtDate(bill.date)}{bill.recurring ? ` · repeats ${bill.period.toLowerCase()}` : ''}.</div><button className="btn sm" onClick={() => openModal({ type: 'bill-edit', billId: bill.id })}><Pencil />Edit bill</button></div>}
+      {bill && bill.date && <div className={cn('callout', bill.paused ? '' : 'planned')} style={{ marginTop: 8, alignItems: 'center' }}><Bell /><div className="grow">Linked bill: <b>{bill.name}</b>, {money(bill.amount)}, {bill.paused ? 'paused' : `next due ${fmtDate(bill.date)}`}{bill.recurring && !bill.paused ? ` · repeats ${bill.period.toLowerCase()}` : ''}.</div><button className="btn sm" onClick={() => openModal({ type: 'bill-edit', billId: bill.id })}><Pencil />Edit bill</button></div>}
       {recent.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <div className="eyebrow" style={{ marginBottom: 4 }}>Recent activity</div>
@@ -861,6 +861,7 @@ export function BillEditSheet({ billId }: { billId: string }) {
   const [date, setDate] = useState(bill?.date ?? data.today);
   const [period, setPeriod] = useState<'once' | BillPeriod>(bill ? (bill.recurring ? bill.period : 'once') : 'Monthly');
   const [mode, setMode] = useState<Bill['mode']>(bill?.mode ?? 'reminder');
+  const [paused, setPaused] = useState(bill?.paused ?? false);
   const [groupId, setGroupId] = useState(data.categories.find((c) => c.id === bill?.categoryId)?.groupId ?? '');
   const [saving, setSaving] = useState(false);
   if (!bill) return <Sheet title="Bill not found" onClose={closeModal}><div className="small muted">This bill no longer exists.</div></Sheet>;
@@ -869,21 +870,25 @@ export function BillEditSheet({ billId }: { billId: string }) {
   const alreadyPaid = !!bill.paid[date] && date !== bill.date;
   const skipsOverdue = !!bill.date && bill.date < data.today && !bill.paid[bill.date] && date > bill.date;
   const err = !name.trim() ? 'Give the bill a name.' : dup ? 'Another category already has that name.' : cents <= 0 ? 'Enter an amount greater than $0.' : !date ? 'Choose a due date.' : alreadyPaid ? 'That date is already recorded as paid. Choose the next unpaid date.' : '';
-  const changed = name.trim() !== bill.name || cents !== bill.amount || date !== bill.date || period !== (bill.recurring ? bill.period : 'once') || mode !== bill.mode || groupId !== data.categories.find((c) => c.id === bill.categoryId)?.groupId;
+  const changed = name.trim() !== bill.name || cents !== bill.amount || date !== bill.date || period !== (bill.recurring ? bill.period : 'once') || mode !== bill.mode || paused !== bill.paused || groupId !== data.categories.find((c) => c.id === bill.categoryId)?.groupId;
   const save = async () => {
     setSaving(true);
-    const ok = await updateBill(billId, { name, amount: cents, date, recurring: period !== 'once', period: period === 'once' ? bill.period : period, mode, groupId });
+    const ok = await updateBill(billId, { name, amount: cents, date, recurring: period !== 'once', period: period === 'once' ? bill.period : period, mode, groupId, paused, anchor: date !== bill.date ? date : undefined });
     if (ok) { toast(`${name.trim()} updated · no transactions changed`); closeModal(); } else setSaving(false);
   };
   return (
     <Sheet title="Edit bill" sub={bill.name} onClose={closeModal}
       footer={<><button className="btn" onClick={closeModal}>Cancel</button><button className="btn primary" disabled={!!err || !changed || saving} onClick={save}>{saving ? 'Saving…' : 'Save changes'}</button></>}>
       <Callout icon={<Info />}>Changes apply from now on. Past payments, transactions and your budget amounts stay exactly as they are, and nothing is posted.</Callout>
+      <div className="field" style={{ marginTop: 14 }}><label>Status</label>
+        <Seg block value={paused ? 'paused' : 'active'} onChange={(v) => { const p = v === 'paused'; setPaused(p); if (!p && bill.paused && date < data.today && period !== 'once') setDate(rollForward({ recurring: true, period: period as BillPeriod, anchor: bill.anchor, date: bill.date, paid: bill.paid }, date, data.today)); }} options={[{ v: 'active', label: 'Active' }, { v: 'paused', label: 'Paused' }]} />
+        <div className="xs muted" style={{ marginTop: 6 }}>{paused ? 'Paused bills drop out of upcoming bills, overdue alerts and forecasts. History and payments are kept.' : bill.paused ? `Resuming — next due ${fmtDate(date)}. Change it below if needed.` : 'Active bills show in upcoming bills, alerts and forecasts.'}</div></div>
       <div className="field" style={{ marginTop: 14 }}><label htmlFor="bn">Name</label><input id="bn" className="input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" /></div>
       <div className="row gap12" style={{ marginTop: 14, alignItems: 'flex-start' }}>
         <div className="field grow"><label htmlFor="ba">Amount due</label><MoneyInput id="ba" value={amt} onChange={setAmt} /></div>
         <div className="field grow"><label htmlFor="bd">Next due date</label><input id="bd" type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} /></div>
       </div>
+      {(period === 'Monthly' || period === 'Yearly') && Number((date || '0000-00-00').slice(8, 10)) >= 29 && <div className="xs muted" style={{ marginTop: 8 }}>Anchored to the {Number(date.slice(8, 10))}th{period === 'Yearly' ? ' of that month' : ''}: shorter months use their last day, then it returns to the {Number(date.slice(8, 10))}th.</div>}
       {skipsOverdue && <div className="xs muted" style={{ marginTop: 8 }}>The overdue {fmtDate(bill.date!)} due date stops showing. It isn’t marked paid and nothing is recorded.</div>}
       <div className="field" style={{ marginTop: 14 }}><label>Repeats</label>
         <div className="chips">{PERIODS.map((o) => <button key={o.v} className="chip" aria-pressed={period === o.v} onClick={() => setPeriod(o.v)}>{o.label}</button>)}</div></div>
