@@ -30,6 +30,7 @@ do $$ declare t text; s record; f record; begin
     end loop;
   end loop;
   if to_regclass('public.account_balance_audit') is not null then revoke all on public.account_balance_audit from anon; end if;
+  revoke all on public.app_owner from anon;
   for f in select p.oid::regprocedure as sig from pg_proc p where p.pronamespace='public'::regnamespace and p.proname like 'fos\_%' loop
     execute format('revoke execute on function %s from public, anon', f.sig);
     execute format('grant execute on function %s to authenticated', f.sig);
