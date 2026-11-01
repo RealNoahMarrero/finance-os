@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BarChart3, CalendarClock, Home, Landmark, Menu, PieChart, Plus, Receipt, Wallet } from 'lucide-react';
+import { BarChart3, CalendarClock, Gauge, Home, Landmark, Menu, PieChart, Plus, Receipt, Wallet } from 'lucide-react';
 import { useStore } from './store';
 import { attentionItems } from './shared';
 import { ThemeSwitch } from './ui';
@@ -11,6 +11,7 @@ import { Transactions } from './pages/Transactions';
 import { Accounts, AccountDetail } from './pages/Accounts';
 import { Plan } from './pages/Plan';
 import { Insights } from './pages/Insights';
+import { Credit } from './pages/Credit';
 import { cn } from './lib';
 
 function useRoute() {
@@ -27,6 +28,7 @@ const NAV = [
   { to: '/transactions', key: 'transactions', label: 'Transactions', icon: Receipt },
   { to: '/accounts', key: 'accounts', label: 'Accounts', icon: Landmark },
   { to: '/plan/bills', key: 'plan', label: 'Bills & Planning', icon: CalendarClock },
+  { to: '/credit', key: 'credit', label: 'Credit', icon: Gauge },
   { to: '/insights', key: 'insights', label: 'Insights', icon: BarChart3 },
 ];
 
@@ -49,6 +51,7 @@ export function App() {
     case 'transactions': page = <Transactions query={r.query} />; break;
     case 'accounts': page = r.id ? <AccountDetail id={r.id} /> : <Accounts />; break;
     case 'plan': page = <Plan tab={(['bills', 'income', 'forecast', 'calendar'].includes(r.id) ? r.id : 'bills') as 'bills'} />; break;
+    case 'credit': page = <Credit />; break;
     case 'insights': page = <Insights />; break;
     default: page = <Overview />;
   }

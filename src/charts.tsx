@@ -310,3 +310,75 @@ export function Ring({ pct, size = 84, stroke = 9, color = 'var(--planned)', chi
 
 // Re-exported type helper for callers
 export type { FPoint };
+
+// ─────────────────────────────────────────────────────────────
+// Credit score history: one line per bureau + scoring model, on a real date axis.
+// Identity is never colour alone: a legend names every line, line ends are labelled, and a second/third model of the same bureau
+// uses a dashed/dotted stroke with a different marker. Lines are never joined across bureaus or models.
+// ─────────────────────────────────────────────────────────────
+import type { Series, CreditScore } from './credit';
+import { BUREAUS } from './credit';
+import { diffDays, parse } from './lib';
+
+export const BUREAU_COLOR: Record<string, string> = { Experian: 'var(--c-exp)', Equifax: 'var(--c-eq)', TransUnion: 'var(--c-tu)' };
+const DASH = [undefined, '7 4', '2 4', '10 3 2 3'];
+const dashFor = (all: Series[], s: Series) => DASH[Math.min(all.filter((x) => x.bureau === s.bureau).findIndex((x) => x.key === s.key), DASH.length - 1)];
+export function SeriesSwatch({ s, all }: { s: Series; all: Series[] }) {
+  return <svg width="22" height="10" aria-hidden="true"><line x1="1" x2="21" y1="5" y2="5" stroke={BUREAU_COLOR[s.bureau]} strokeWidth="2.4" strokeDasharray={dashFor(all, s)} strokeLinecap="round" /></svg>;
+}
+export function ScoreChart({ series, height = 260 }: { series: Series[]; height?: number }) {
+  const [ref, w] = useWidth<HTMLDivElement>();
+  const [hi, setHi] = useState<{ s: Series; i: number } | null>(null);
+  const pts = series.flatMap((s) => s.points);
+  if (!pts.length) return null;
+  const dates = pts.map((p) => p.observedOn).sort();
+  const d0 = dates[0], d1 = dates[dates.length - 1];
+  const span = Math.max(1, diffDays(d1, d0));
+  const W = Math.max(w, 280), m = { l: 38, r: 16, t: 14, b: 26 };
+  const iw = W - m.l - m.r, ih = height - m.t - m.b;
+  const lo0 = Math.min(...pts.map((p) => p.score)), hi0 = Math.max(...pts.map((p) => p.score));
+  const pad = Math.max(10, Math.round((hi0 - lo0) * 0.2));
+  const tk = ticks(Math.max(250, lo0 - pad), Math.min(900, hi0 + pad), 4);
+  const yMin = tk[0], yMax = tk[tk.length - 1];
+  const x = (d: string) => (span === 1 && d0 === d1 ? m.l + iw / 2 : m.l + (diffDays(d, d0) / span) * iw);
+  const y = (v: number) => m.t + (1 - (v - yMin) / (yMax - yMin || 1)) * ih;
+  const xticks = (() => {
+    if (d0 === d1) return [d0];
+    const n = Math.min(5, Math.max(2, Math.floor(iw / 90)));
+    return Array.from({ length: n }, (_, k) => { const d = new Date(parse(d0).getTime() + (k / (n - 1)) * (parse(d1).getTime() - parse(d0).getTime())); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; });
+  })();
+  const nearest = (cx: number, cy: number) => {
+    let best: { s: Series; i: number } | null = null, bd = 1e9;
+    for (const s of series) s.points.forEach((p, i) => { const dd = Math.hypot(x(p.observedOn) - cx, (y(p.score) - cy) * 0.6); if (dd < bd) { bd = dd; best = { s, i }; } });
+    return bd < 60 ? best : null;
+  };
+  const onMove = (e: React.PointerEvent) => { const r = (e.currentTarget as SVGRectElement).getBoundingClientRect(); setHi(nearest(e.clientX - r.left + m.l, e.clientY - r.top + m.t)); };
+  const label = `Credit score history: ${series.map((s) => `${s.bureau} ${s.model}, latest ${s.points[s.points.length - 1].score}`).join('; ')}`;
+  const tip = hi && hi.s.points[hi.i];
+  const tipPrev = hi && hi.i > 0 ? hi.s.points[hi.i - 1] : null;
+  return (
+    <div className="chart" ref={ref} style={{ height }}>
+      {w > 0 && <>
+        <svg width={W} height={height} role="img" aria-label={label}>
+          {tk.map((t) => (<g key={t}><line x1={m.l} x2={W - m.r} y1={y(t)} y2={y(t)} stroke="var(--grid)" /><text x={m.l - 8} y={y(t) + 4} textAnchor="end">{t}</text></g>))}
+          {xticks.map((d, k) => <text key={d} x={x(d)} y={height - 6} textAnchor={xticks.length === 1 ? 'middle' : k === 0 ? 'start' : k === xticks.length - 1 ? 'end' : 'middle'}>{fmtDate(d)}{d.slice(0, 4) !== (new Date().getFullYear() + '') ? ` ’${d.slice(2, 4)}` : ''}</text>)}
+          {series.map((s) => {
+            const path = linePath(s.points.map((p) => [x(p.observedOn), y(p.score)] as [number, number]));
+            return <g key={s.key}>
+              {s.points.length > 1 && <path d={path} fill="none" stroke={BUREAU_COLOR[s.bureau]} strokeWidth="2" strokeDasharray={dashFor(series, s)} strokeLinejoin="round" strokeLinecap="round" />}
+              {s.points.map((p, i) => <circle key={p.id} cx={x(p.observedOn)} cy={y(p.score)} r={hi && hi.s.key === s.key && hi.i === i ? 5.5 : 4} fill={BUREAU_COLOR[s.bureau]} stroke="var(--surface)" strokeWidth="2" />)}
+            </g>;
+          })}
+          <rect x={m.l} y={m.t} width={iw} height={ih} fill="transparent" onPointerMove={onMove} onPointerDown={onMove} onPointerLeave={(e) => { if (e.pointerType !== 'touch') setHi(null); }} />
+        </svg>
+        {hi && tip && <div className="tip" style={{ left: Math.min(Math.max(x(tip.observedOn), 90), W - 90), top: 0 }}>
+          <div className="t-date">{fmtDate(tip.observedOn, 'long')}</div>
+          <div className="t-row"><span>{hi.s.bureau} · {hi.s.model}</span><b className="num">{tip.score}</b></div>
+          <div className="t-row"><span>Change</span><b className="num">{tipPrev ? `${tip.score - tipPrev.score > 0 ? '+' : tip.score - tipPrev.score < 0 ? '−' : ''}${Math.abs(tip.score - tipPrev.score)}` : 'First entry'}</b></div>
+        </div>}
+      </>}
+    </div>
+  );
+}
+export type { CreditScore };
+void BUREAUS;

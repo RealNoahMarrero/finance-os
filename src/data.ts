@@ -1,5 +1,6 @@
 // Money model + the pure "money math" selectors the UI reads. All amounts are integer cents.
 // Nothing here touches the network; db.ts maps database rows into this shape.
+import type { CreditState } from './credit';
 import { addDays, daysInMonth, diffDays, iso, monthKey, monthShift, parse, sum, todayISO } from './lib';
 
 export type AccountType = 'checking' | 'savings' | 'cash' | 'credit';
@@ -12,6 +13,7 @@ export interface Account {
   openingBalance: number | null;   // the balance the user entered at the cutover date
   derived: number | null;          // balance implied by opening + transactions after cutover
   paymentCategoryId?: string;
+  nextPaymentDue?: string; // account-level payment due date (used only when no linked bill exists)
 }
 export interface Group { id: string; name: string; kind: 'bills' | 'everyday' | 'lifestyle' | 'goals' }
 export interface Category {
@@ -48,10 +50,11 @@ export interface DataState {
   accounts: Account[]; groups: Group[]; categories: Category[]; txns: Txn[]; bills: Bill[];
   incomes: Income[]; debts: Debt[]; planned: Planned[]; reconciliations: Reconciliation[]; today: string;
   hiddenBusiness: { accounts: number; categories: number; transactions: number };
+  credit: CreditState;
 }
 
 export function emptyData(): DataState {
-  return { accounts: [], groups: [], categories: [], txns: [], bills: [], incomes: [], debts: [], planned: [], reconciliations: [], today: todayISO(), hiddenBusiness: { accounts: 0, categories: 0, transactions: 0 } };
+  return { accounts: [], groups: [], categories: [], txns: [], bills: [], incomes: [], debts: [], planned: [], reconciliations: [], today: todayISO(), hiddenBusiness: { accounts: 0, categories: 0, transactions: 0 }, credit: { scores: [], meta: {}, reported: [], ready: false } };
 }
 
 // ═════════ selectors ═════════

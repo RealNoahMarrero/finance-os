@@ -3,6 +3,7 @@
 import { supabase } from './supabase';
 import type { Account, AccountType, Bill, BillPeriod, Category, DataState, Debt, Group, Income, Reconciliation, Repeat, Txn } from './data';
 import { diffDays, iso, todayISO } from './lib';
+import { BUREAUS, type Bureau, type CardMeta, type CreditScore, type CreditState, type ReportedBalance } from './credit';
 
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 export const cents = (x: unknown) => Math.round(Number(x ?? 0) * 100);
@@ -31,13 +32,18 @@ async function fetchAll(table: string, select = '*', order = 'id'): Promise<Row[
 export interface RawData {
   accounts: Row[]; groups: Row[]; categories: Row[]; transactions: Row[]; splits: Row[]; income: Row[];
   baselines: Row[]; recons: Row[]; billPayments: Row[]; audit: Row[];
+  creditScores?: Row[]; creditMeta?: Row[]; creditReported?: Row[]; creditReady?: boolean; // optional so older callers/tests still type-check
 }
 export async function fetchRaw(): Promise<RawData> {
   const [accounts, groups, categories, transactions, splits, income, baselines, recons, billPayments, audit] = await Promise.all([
     fetchAll('accounts'), fetchAll('category_groups'), fetchAll('categories'), fetchAll('transactions'), fetchAll('transaction_splits'),
     fetchAll('projected_income'), fetchAll('account_baselines'), fetchAll('account_reconciliations'), fetchAll('bill_payments'), fetchAll('account_balance_audit', '*', 'account_id'),
   ]);
-  return { accounts, groups, categories, transactions, splits, income, baselines, recons, billPayments, audit };
+  // Credit tracker tables (migration 014). Tolerated as absent so the rest of the app keeps working if the migration is not applied yet.
+  let creditScores: Row[] = [], creditMeta: Row[] = [], creditReported: Row[] = [], creditReady = true;
+  try { [creditScores, creditMeta, creditReported] = await Promise.all([fetchAll('credit_scores'), fetchAll('credit_card_meta', '*', 'account_id'), fetchAll('credit_reported_balances')]); }
+  catch { creditReady = false; }
+  return { accounts, groups, categories, transactions, splits, income, baselines, recons, billPayments, audit, creditScores, creditMeta, creditReported, creditReady };
 }
 
 const ACCT_TYPE: Record<string, AccountType> = { Checking: 'checking', Savings: 'savings', Cash: 'cash', 'Credit Card': 'credit' };
@@ -71,6 +77,7 @@ export function toDataState(raw: RawData, today = todayISO()): DataState {
       lastReconciled: last, baseline: b?.cutover_date ?? null, openingBalance: b ? cents(b.opening_balance) : null,
       derived: au && au.derived_balance != null ? cents(au.derived_balance) : null,
       paymentCategoryId: a.payment_category_id ? S(a.payment_category_id) : undefined,
+      nextPaymentDue: a.next_payment_due_date ?? undefined,
     };
   });
   const acctIds = new Set(accounts.map((a) => a.id));
@@ -131,8 +138,15 @@ export function toDataState(raw: RawData, today = todayISO()): DataState {
     adjustmentTxnId: r.adjustment_transaction_id ? S(r.adjustment_transaction_id) : undefined, note: r.note ?? undefined,
   })).sort((a, b) => (a.date < b.date ? 1 : -1));
 
+  const bureau = (b: unknown): Bureau | undefined => (BUREAUS as readonly string[]).includes(String(b)) ? (b as Bureau) : undefined;
+  const credit: CreditState = {
+    ready: raw.creditReady !== false,
+    scores: (raw.creditScores ?? []).filter((r) => bureau(r.bureau)).map((r): CreditScore => ({ id: S(r.id), bureau: r.bureau, score: Number(r.score), model: r.model || 'Unknown', observedOn: r.observed_on, source: r.source ?? undefined, notes: r.notes ?? undefined })),
+    meta: Object.fromEntries((raw.creditMeta ?? []).filter((m) => acctIds.has(S(m.account_id))).map((m): [string, CardMeta] => [S(m.account_id), { accountId: S(m.account_id), active: m.active !== false, closingDate: m.statement_closing_date ?? undefined, repeats: m.statement_repeats !== false, notes: m.notes ?? undefined }])),
+    reported: (raw.creditReported ?? []).filter((r) => acctIds.has(S(r.account_id))).map((r): ReportedBalance => ({ id: S(r.id), accountId: S(r.account_id), balance: cents(r.balance), reportedOn: r.reported_on, bureau: bureau(r.bureau), notes: r.notes ?? undefined })),
+  };
   return {
-    accounts, groups, categories, txns, bills, incomes, debts, planned: [], reconciliations, today,
+    credit, accounts, groups, categories, txns, bills, incomes, debts, planned: [], reconciliations, today,
     hiddenBusiness: {
       accounts: raw.accounts.filter((a) => !personal(a)).length, categories: raw.categories.filter((c) => !personal(c)).length,
       transactions: raw.transactions.filter((t) => !personal(t)).length,
@@ -212,6 +226,24 @@ export const addAccountRow = async (a: { name: string; type: AccountType; limit?
   const r = ok(await supabase.from('accounts').insert({ name: a.name, type: DB_ACCT_TYPE[a.type], balance: 0, credit_limit: a.limit ? dollars(a.limit) : 0, entity_id: 'personal' }).select('id').single()) as Row;
   return S(r.id);
 };
+
+// ── Credit tracker (plain owner-only rows; none of these touch balances, transactions or bills) ──
+export interface ScoreInput { bureau: Bureau; score: number; model: string; observedOn: string; source?: string; notes?: string }
+const scoreRow = (s: ScoreInput) => ({ bureau: s.bureau, score: s.score, model: s.model.trim() || 'Unknown', observed_on: s.observedOn, source: s.source?.trim() || null, notes: s.notes?.trim() || null });
+export const addScore = async (s: ScoreInput): Promise<string> => S((ok(await supabase.from('credit_scores').insert(scoreRow(s)).select('id').single()) as Row).id);
+export const updateScore = async (id: string, s: ScoreInput) => { ok(await supabase.from('credit_scores').update(scoreRow(s)).eq('id', Number(id))); };
+export const deleteScore = async (id: string) => { ok(await supabase.from('credit_scores').delete().eq('id', Number(id))); };
+export interface CardMetaInput { active: boolean; closingDate?: string; repeats: boolean; notes?: string }
+export const saveCardMeta = async (accountId: string, m: CardMetaInput) => {
+  ok(await supabase.from('credit_card_meta').upsert({ account_id: Number(accountId), active: m.active, statement_closing_date: m.closingDate || null, statement_repeats: m.repeats, notes: m.notes?.trim() || null }, { onConflict: 'account_id' }));
+};
+/** The credit limit lives on the account itself (the one source of truth the Accounts page also uses). 0 = no limit set. */
+export const setCreditLimit = async (accountId: string, limit: number) => { ok(await supabase.from('accounts').update({ credit_limit: dollars(Math.max(0, limit)) }).eq('id', Number(accountId))); };
+export interface ReportedInput { accountId: string; balance: number; reportedOn: string; bureau?: Bureau; notes?: string }
+const repRow = (r: ReportedInput) => ({ account_id: Number(r.accountId), balance: dollars(r.balance), reported_on: r.reportedOn, bureau: r.bureau ?? null, notes: r.notes?.trim() || null });
+export const addReported = async (r: ReportedInput): Promise<string> => S((ok(await supabase.from('credit_reported_balances').insert(repRow(r)).select('id').single()) as Row).id);
+export const updateReported = async (id: string, r: ReportedInput) => { ok(await supabase.from('credit_reported_balances').update(repRow(r)).eq('id', Number(id))); };
+export const deleteReported = async (id: string) => { ok(await supabase.from('credit_reported_balances').delete().eq('id', Number(id))); };
 
 /** Everything, including hidden Business records, as one JSON file the user can keep. */
 export async function exportEverything() {

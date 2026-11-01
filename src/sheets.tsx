@@ -7,10 +7,12 @@ import {
 import { addDays, centsToInput, cn, diffDays, fmtDate, money, monthKey, relDay, sum, toCents, plural } from './lib';
 import { CatIcon, Callout, Money, Seg, Sheet, StatusPill, ThemeSwitch } from './ui';
 import { exportEverything } from './db';
+import { CreditScoreSheet, CreditCardSheet, CreditReportedSheet } from './creditSheets';
+import { Gauge } from 'lucide-react';
 
 const go = (path: string) => { location.hash = path; };
 
-function MoneyInput({ value, onChange, autoFocus, big, placeholder = '0.00', id, invalid }: { value: string; onChange: (v: string) => void; autoFocus?: boolean; big?: boolean; placeholder?: string; id?: string; invalid?: boolean }) {
+export function MoneyInput({ value, onChange, autoFocus, big, placeholder = '0.00', id, invalid }: { value: string; onChange: (v: string) => void; autoFocus?: boolean; big?: boolean; placeholder?: string; id?: string; invalid?: boolean }) {
   return (
     <div style={{ position: 'relative' }}>
       <span style={{ position: 'absolute', left: 13, top: big ? 11 : 10, color: 'var(--ink-4)', fontWeight: 560 }}>$</span>
@@ -843,7 +845,7 @@ export function MenuSheet() {
   );
   return (
     <Sheet title="More" onClose={closeModal}>
-      <div className="list">{link('/accounts', 'Accounts & reconciliation', <Landmark />)}{link('/insights', 'Insights', <Eye />)}
+      <div className="list">{link('/accounts', 'Accounts & reconciliation', <Landmark />)}{link('/credit', 'Credit & utilization', <Gauge />)}{link('/insights', 'Insights', <Eye />)}
         <button className="li hover" style={{ padding: '14px 4px' }} onClick={() => openModal({ type: 'cutover' })}><span className="li-ico"><Scale /></span><span className="li-title grow">Set opening balances</span><ArrowRight size={16} className="muted" /></button></div>
       <div style={{ marginTop: 18 }}><div className="label" style={{ marginBottom: 8 }}>Appearance</div><ThemeSwitch theme={theme} setTheme={setTheme} /></div>
       <div style={{ marginTop: 18 }}><AccountFoot /></div>
@@ -918,6 +920,9 @@ export function SheetHost() {
     case 'reconcile': return <ReconcileSheet key={modal.id} id={modal.id} />;
     case 'cutover': return <CutoverSheet key={modal.id ?? 'all'} id={modal.id} />;
     case 'account-add': return <AccountAddSheet />;
+    case 'credit-score': return <CreditScoreSheet key={`${modal.id ?? 'new'}-${modal.bureau ?? ''}-${modal.model ?? ''}`} id={modal.id} bureau={modal.bureau} model={modal.model} />;
+    case 'credit-card': return <CreditCardSheet key={modal.accountId} accountId={modal.accountId} />;
+    case 'credit-reported': return <CreditReportedSheet key={`${modal.id ?? 'new'}-${modal.accountId ?? ''}`} id={modal.id} accountId={modal.accountId} />;
     case 'menu': return <MenuSheet />;
     default: return null;
   }

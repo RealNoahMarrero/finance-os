@@ -23,3 +23,9 @@ Site: https://marrero-finance.netlify.app/ (existing Netlify site; GitHub repo R
 ## Update — bill editing, month-end anchor, pause (applied 2026-11-01)
 - Migration `db/013_bill_anchor_and_pause.sql` applied to production (additive; Finance table `categories` only): new columns `bill_anchor`, `bill_paused`; new function `fos_bill_next` (authenticated only); `fos_pay_bill` now advances recurring dates from the anchor (31st → Feb 28/29 → Mar 31; yearly Feb 29 handled). No policies or other apps touched; 2,051 transactions unchanged. Pre-migration backup: `backups\db-full-2026-11-01T00-28-24`.
 - App: Edit bill sheet, All bills list, Active/Paused (paused bills leave upcoming bills, overdue alerts, forecasts and funding prompts; history kept).
+
+## Credit Score & Utilization tracker (migration 014)
+- Applied to production 2026-11-01 after a verified backup (db-full-2026-11-01T00-51-21). Additive only: new tables `credit_scores`, `credit_card_meta`, `credit_reported_balances` (owner-only RLS `owner_all`, anon revoked, verified HTTP 401) and `fos_sheets_data` extended with `credit_scores` / `credit_cards` (personal token only). No existing grant, policy or row changed; 2,051 transactions intact.
+- Credit limits stay in `accounts.credit_limit`; payment due dates come from the linked bill (`categories.due_date`) — nothing duplicated.
+- Google Sheets: paste the updated `scripts/google-sheets-sync.gs` into the Personal sheet's Apps Script; it adds `CreditScores` and `CreditCards` tabs. Hourly trigger unchanged.
+- App: Credit page (`#/credit`), sidebar entry; mobile via the More sheet.

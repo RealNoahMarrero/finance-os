@@ -43,6 +43,7 @@ function syncFinanceOS() {
   syncTransactions();
   syncTransactionSplits();
   syncProjectedIncome();
+  syncCredit_();
   SpreadsheetApp.getActiveSpreadsheet().toast(
     'Finance OS (' + ENTITY_ID + ') sync complete.',
     'Finance OS',
@@ -436,6 +437,49 @@ function syncProjectedIncome() {
     ];
   });
 
+  if (rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+  }
+}
+
+/** Credit tracker tabs (read-only copies). Never stops the rest of the sync: if the credit tables aren't available, the other tabs still update. */
+function syncCredit_() {
+  try {
+    syncCreditScores();
+    syncCreditCards();
+  } catch (e) {
+    SpreadsheetApp.getActiveSpreadsheet().toast('Credit tabs skipped: ' + e.message, 'Finance OS', 8);
+  }
+}
+
+function syncCreditScores() {
+  var data = supabaseGet_('credit_scores');
+  var sheet = getOrCreateSheet_('CreditScores', ['Date Seen', 'Bureau', 'Score', 'Model', 'Source', 'Notes']);
+  var rows = data.map(function (s) {
+    return [s.observed_on, s.bureau, s.score, s.model, s.source || '', s.notes || ''];
+  });
+  if (rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+  }
+}
+
+function syncCreditCards() {
+  var data = supabaseGet_('credit_cards');
+  var sheet = getOrCreateSheet_('CreditCards', [
+    'Card', 'Balance Owed', 'Credit Limit', 'Utilization %', 'Active', 'Statement Closing Date',
+    'Closing Repeats Monthly', 'Payment Due Date', 'Reported Balance', 'Reported On', 'Reported Bureau', 'Notes',
+  ]);
+  var rows = data.map(function (c) {
+    var bal = Number(c.balance) || 0;
+    var lim = Number(c.credit_limit) || 0;
+    // Same rules as the app: no limit -> blank; a credit balance counts as 0%.
+    var util = lim > 0 ? Math.round((Math.max(0, bal) / lim) * 1000) / 10 : '';
+    return [
+      c.name, bal, lim, util, c.active ? 'Yes' : 'No', c.statement_closing_date || '',
+      c.statement_repeats ? 'Yes' : 'No', c.payment_due_date || '',
+      c.reported_balance == null ? '' : c.reported_balance, c.reported_on || '', c.reported_bureau || '', c.notes || '',
+    ];
+  });
   if (rows.length > 0) {
     sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
   }

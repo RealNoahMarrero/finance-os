@@ -7,6 +7,7 @@ import { Empty, Money, Kind } from '../ui';
 import { AreaLine, FlowBars } from '../charts';
 import { PageHead } from './../shared';
 import { buildInsights } from './Overview';
+import { cardRows, totals, scoreRows } from '../credit';
 
 export function Insights() {
   const { data } = useStore();
@@ -14,6 +15,7 @@ export function Insights() {
   const nw = useMemo(() => netWorthSeries(data), [data]);
   const cats = useMemo(() => categorySpend(data), [data]);
   const insights = useMemo(() => buildInsights(data), [data]);
+  const cr = useMemo(() => { const rows = cardRows(data, data.credit); return { n: rows.length, t: totals(rows), s: scoreRows(data.credit.scores)[0] }; }, [data]);
 
   if (data.txns.length === 0) {
     return (
@@ -113,6 +115,14 @@ export function Insights() {
           <div className="xs muted" style={{ marginTop: 8, textAlign: 'center' }}>Dollars per week · latest week highlighted</div>
         </section>
       </div>
+
+      {cr.n > 0 && (
+        <a href="#/credit" className="card pad" style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16, flexWrap: 'wrap' }} aria-label="Credit summary" data-testid="insights-credit">
+          <div className="grow"><div className="eyebrow">Credit</div>
+            <div className="small" style={{ marginTop: 4 }}>{cr.t.pct != null ? <>Utilization <b className="num">{cr.t.pct.toFixed(1).replace(/\.0$/, '')}%</b> across {cr.t.eligibleCards} {cr.t.eligibleCards === 1 ? 'card' : 'cards'} (estimate from current balances)</> : 'Add a credit limit to see utilization'}{cr.s ? <> · latest score <b className="num">{cr.s.score}</b> <span className="muted">({cr.s.bureau}, {cr.s.model})</span></> : ''}</div></div>
+          <span className="small muted">Open Credit →</span>
+        </a>
+      )}
 
       <section className="card" style={{ overflow: 'hidden' }}>
         <div className="sect-head" style={{ padding: '16px 18px 4px' }}><h2 className="sect-title">Worth knowing</h2></div>
