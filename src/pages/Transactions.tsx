@@ -92,7 +92,7 @@ export function Transactions({ query }: { query: URLSearchParams }) {
         })}
         {filtered.length > limit && <div style={{ padding: 14, textAlign: 'center' }}><button className="btn" onClick={() => setLimit(limit + 40)}>Show more ({filtered.length - limit} remaining)</button></div>}
       </section>
-      <div className="xs muted" style={{ textAlign: 'center', marginTop: 14 }}>Every past transaction is kept here. Once an account has an opening balance, transactions on or before its cutover date are history only and don’t change its balance.</div>
+      <div className="xs muted" style={{ textAlign: 'center', marginTop: 14 }}>Every past transaction is kept here. Once an account has an opening balance, transactions on or before its opening-balance date are history, and aren’t counted in the opening-balance check.</div>
     </div>
   );
 }

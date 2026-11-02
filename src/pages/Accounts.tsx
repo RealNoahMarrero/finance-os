@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight, Landmark, Plus, Scale } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Landmark, Pencil, Plus, Scale } from 'lucide-react';
 import { useStore } from '../store';
 import { balanceSeries, billOccurrences, cardsOwed, liquidTotal, loansOwed, netWorth, netWorthSeries, staleness, type Account } from '../data';
 import { addDays, cn, compact, fmtDate, money, plural, sum } from '../lib';
 import { AccountIcon, Callout, Empty, Money, StatusPill } from '../ui';
 import { AreaLine, Spark } from '../charts';
-import { BillRow, PageHead, TxnRow } from '../shared';
+import { BillRow, PageHead, TxnRow, txnDisplayAmount } from '../shared';
 
 function StaleBadge({ a, today }: { a: Account; today: string }) {
   const s = staleness(a, today);
@@ -36,7 +36,9 @@ export function Accounts() {
     const series = balanceSeries(data, a.id, 30);
     const util = credit && a.limit ? a.balance / a.limit : 0;
     return (
-      <button key={a.id} className="card acct-card" onClick={() => (location.hash = `/accounts/${a.id}`)} aria-label={`${a.name}, ${money(a.balance)}`}>
+      <div key={a.id} style={{ position: 'relative' }}>
+      <button className="btn icon sm" aria-label={`Edit ${a.name}`} title="Rename, edit or archive" style={{ position: 'absolute', top: 10, right: 38, zIndex: 1 }} onClick={() => openModal({ type: 'account-edit', id: a.id })}><Pencil size={14} /></button>
+      <button className="card acct-card" onClick={() => (location.hash = `/accounts/${a.id}`)} aria-label={`${a.name}, ${money(a.balance)}`}>
         <div className="row between">
           <div className="row gap12"><div className="li-ico"><AccountIcon type={a.type} /></div>
             <div><div className="li-title">{a.name}</div><div className="li-sub">{typeLabel(a)}</div></div></div>
@@ -52,6 +54,7 @@ export function Accounts() {
         ) : null}
         <StaleBadge a={a} today={data.today} />
       </button>
+      </div>
     );
   };
 
@@ -96,6 +99,20 @@ export function Accounts() {
       {cards.length > 0 && <><h2 className="eyebrow" style={{ margin: '0 0 10px' }}>Credit cards</h2>
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', marginBottom: 22 }}>{cards.map(card)}</div></>}
 
+      {data.allAccounts.some((x) => x.archived) && (
+        <details style={{ marginBottom: 22 }} data-testid="archived-accounts">
+          <summary className="eyebrow" style={{ cursor: 'pointer', margin: '0 0 10px' }}>Archived accounts ({data.allAccounts.filter((x) => x.archived).length})</summary>
+          <section className="card" style={{ overflow: 'hidden' }}><div className="list">
+            {data.allAccounts.filter((x) => x.archived).map((x) => (
+              <div className="li" key={x.id}><div className="li-ico"><AccountIcon type={x.type} /></div>
+                <div className="grow"><div className="li-title">{x.name}</div><div className="li-sub">{typeLabel(x)} · history kept</div></div>
+                <a className="btn sm" href={`#/accounts/${x.id}`}>History</a>
+                <button className="btn sm" onClick={() => openModal({ type: 'account-edit', id: x.id })}>Restore…</button></div>
+            ))}
+          </div></section>
+        </details>
+      )}
+
       {data.debts.length > 0 && (
         <>
           <h2 className="eyebrow" style={{ margin: '0 0 10px' }}>Loans</h2>
@@ -123,7 +140,7 @@ export function Accounts() {
 export function AccountDetail({ id }: { id: string }) {
   const { data, openModal } = useStore();
   const [limit, setLimit] = useState(25);
-  const a = data.accounts.find((x) => x.id === id);
+  const a = data.allAccounts.find((x) => x.id === id);
   if (!a) return <div className="page"><Empty icon={<Landmark />} title="Account not found" text="It may no longer exist." action={<a className="btn" href="#/accounts">Back to accounts</a>} /></div>;
   const credit = a.type === 'credit';
   const txns = data.txns.filter((t) => (t.accountId === a.id || t.toAccountId === a.id) && t.date <= data.today).sort((x, y) => y.date.localeCompare(x.date));
@@ -156,7 +173,7 @@ export function AccountDetail({ id }: { id: string }) {
           <div className="list">{txns.slice(0, limit).map((t, i, arr) => (
             <div key={t.id}>
               {a.baseline && t.date <= a.baseline && (i === 0 || arr[i - 1].date > a.baseline) && <div className="xs muted" style={{ padding: '10px 20px', background: 'var(--surface-2)', borderTop: '1px solid var(--line)', borderBottom: '1px solid var(--line)' }}>History through {fmtDate(a.baseline, 'long')} — saved for reference; not counted in the balance (the opening balance replaces it).</div>}
-              <div style={a.baseline && t.date <= a.baseline ? { opacity: 0.62 } : undefined}><TxnRow t={t} onOpen={() => openModal({ type: 'txn', mode: 'view', id: t.id })} /></div>
+              <div style={a.baseline && t.date <= a.baseline ? { opacity: 0.62 } : undefined}><TxnRow t={t} pov={a.id} onOpen={() => openModal({ type: 'txn', mode: 'view', id: t.id })} /></div>
             </div>
           ))}</div>
           {txns.length > limit && <div style={{ padding: 14, textAlign: 'center' }}><button className="btn" onClick={() => setLimit(limit + 25)}>Show more</button></div>}
@@ -167,7 +184,16 @@ export function AccountDetail({ id }: { id: string }) {
             <div className="kv"><span className="k">Last verified</span><span className="v">{a.lastReconciled ? fmtDate(a.lastReconciled, 'long') : 'Never'}</span></div>
             {a.lastReconciled && <div className="kv"><span className="k">Days since</span><span className="v num">{st.days}</span></div>}
             <div className="kv"><span className="k">Recorded</span><span className="v num">{money(a.balance)}</span></div>
-            {a.derived != null && a.derived !== a.balance && <div style={{ marginTop: 10 }}><Callout tone="warn">Opening balance plus transactions adds up to <b className="num">{money(a.derived)}</b>, which differs from the recorded balance. Reconcile to settle it against your bank.</Callout></div>}
+            {a.derived != null && a.derived !== a.balance && (() => {
+              const diff = a.balance - a.derived;
+              const day = a.baseline ? txns.filter((t) => t.date === a.baseline && !t.adjustment) : [];
+              const eff = day.reduce((n, t) => n + (credit ? -1 : 1) * txnDisplayAmount(data, t, a.id).v, 0);
+              const explained = day.length > 0 && eff === diff;
+              return (<div style={{ marginTop: 10 }} data-testid="drift-note"><Callout tone="warn">
+                {explained ? <>The recorded balance is <b className="num">{money(Math.abs(diff))}</b> {diff < 0 ? 'lower' : 'higher'} than opening balance + later transactions. That is exactly {day.length === 1 ? 'one transaction' : `${day.length} transactions`} dated on the opening-balance day itself ({day.map((t) => `${t.payee} ${money(t.amount)}`).join(', ')}): the recorded balance includes {day.length === 1 ? 'it' : 'them'}, the opening-balance check only counts later dates. If your bank balance on {fmtDate(a.baseline!)} already included {day.length === 1 ? 'it' : 'them'}, the recorded balance double-counts. Nothing was changed — reconcile against your bank to settle it.</>
+                  : <>Opening balance plus later transactions adds up to <b className="num">{money(a.derived)}</b>; the recorded balance is <b className="num">{money(a.balance)}</b> ({money(Math.abs(diff))} {diff < 0 ? 'lower' : 'higher'}). Nothing was changed — reconcile against your bank to see which is right.</>}
+              </Callout></div>);
+            })()}
             {!a.baseline ? <div style={{ marginTop: 10 }}><Callout tone="warn">This balance hasn’t been checked against your bank yet. Set the real opening balance to anchor it.</Callout></div>
               : st.level !== 'fresh' && <div style={{ marginTop: 10 }}><Callout tone={st.level === 'stale' ? 'warn' : undefined}>Balances are entered manually, so this may have drifted. A quick check takes under a minute.</Callout></div>}
             {data.reconciliations.filter((r) => r.accountId === a.id).slice(0, 4).map((r) => (
@@ -175,7 +201,8 @@ export function AccountDetail({ id }: { id: string }) {
             ))}
           </section>
           <section className="card pad">
-            <div className="sect-head"><h2 className="sect-title">Account details</h2></div>
+            <div className="sect-head"><h2 className="sect-title">Account details</h2><button className="btn sm" onClick={() => openModal({ type: 'account-edit', id: a.id })}><Pencil size={13} />{a.archived ? 'Restore…' : 'Edit'}</button></div>
+            {a.archived && <div className="pill" style={{ marginBottom: 8 }}>Archived</div>}
             <div className="kv"><span className="k">Type</span><span className="v">{typeLabel(a)}</span></div>
             {credit && a.limit && <div className="kv"><span className="k">Credit limit</span><span className="v num">{money(a.limit, { cents: false })}</span></div>}
             {a.baseline ? <>

@@ -1,0 +1,17 @@
+const { chromium } = require('playwright'); const { execSync } = require('child_process');
+const q = (s) => execSync(`psql -h /tmp/pg -p 5433 -U postgres -d fos_test -Atc "${s}"`).toString().trim();
+(async () => { let f = 0; const ck = (n, ok, x) => { console.log((ok ? 'PASS ' : 'FAIL ') + n + (ok ? '' : ' :: ' + x)); if (!ok) f++; };
+  q("update projected_income set status='cancelled' where status='pending'");
+  q("insert into projected_income(label,amount,expected_date,status,certainty,is_repeating,repeat_period,entity_id,account_id) values ('Receipt Test',100,'2026-11-01','pending','guaranteed',false,'None','personal',2)");
+  const b = await chromium.launch(); const p = await (await b.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+  await p.goto('http://localhost:4173/'); await p.fill('#em', 'owner@test.local'); await p.fill('#pw', 'correct-horse-battery'); await p.click('button.primary'); await p.waitForSelector('[data-testid=ov-income]');
+  const bal0 = q("select balance from accounts where id=2");
+  await p.click('[data-testid=ov-income] .li:has-text("Receipt Test")'); await p.waitForSelector('.sheet'); await p.click('button:has-text("Mark as received")'); await p.waitForSelector('#rd');
+  await p.locator('.sheet .field:has(label:has-text("Amount received")) input').first().fill('92.50');
+  ck('shows the difference from the expected amount', (await p.textContent('[data-testid=receipt-diff]')).includes('$7.50 less'));
+  ck('date, account and amount are all adjustable', (await p.locator('#rd').count()) === 1 && (await p.locator('.sheet .chip').count()) >= 2);
+  const btn = p.locator('.sheet button.primary').last(); await btn.dblclick(); await p.waitForTimeout(1800);
+  ck('double-click creates exactly one deposit of the actual amount', q("select count(*)||'|'||sum(amount) from transactions where payee='Receipt Test'") === '1|92.50', q("select count(*)||'|'||sum(amount) from transactions where payee='Receipt Test'"));
+  ck('balance rose once, by the amount actually received', Math.round((Number(q("select balance from accounts where id=2")) - Number(bal0)) * 100) === 9250);
+  ck('expected income is now received, not pending', q("select status from projected_income where label='Receipt Test'") === 'received');
+  console.log(f ? 'FAILED' : 'all passed'); await b.close(); })();

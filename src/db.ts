@@ -67,7 +67,7 @@ export function toDataState(raw: RawData, today = todayISO()): DataState {
   const lastRecon = new Map<string, string>();
   for (const r of raw.recons) { const k = S(r.account_id); if (!lastRecon.has(k) || r.reconciled_on > lastRecon.get(k)!) lastRecon.set(k, r.reconciled_on); }
 
-  const accounts: Account[] = raw.accounts.filter(personal).map((a) => {
+  const allAccounts: Account[] = raw.accounts.filter(personal).map((a) => {
     const b = baseBy.get(S(a.id)); const au = auditBy.get(S(a.id));
     const rec = lastRecon.get(S(a.id));
     const last = [b?.cutover_date, rec].filter(Boolean).sort().pop() ?? null;
@@ -78,8 +78,10 @@ export function toDataState(raw: RawData, today = todayISO()): DataState {
       derived: au && au.derived_balance != null ? cents(au.derived_balance) : null,
       paymentCategoryId: a.payment_category_id ? S(a.payment_category_id) : undefined,
       nextPaymentDue: a.next_payment_due_date ?? undefined,
+      archived: a.is_archived === true,
     };
   });
+  const accounts = allAccounts.filter((a) => !a.archived);
   const acctIds = new Set(accounts.map((a) => a.id));
   const defaultAcct = accounts.find((a) => a.type === 'checking')?.id ?? accounts[0]?.id ?? '';
   const cardOf = new Map(accounts.filter((a) => a.paymentCategoryId).map((a) => [a.paymentCategoryId!, a.id]));
@@ -147,7 +149,7 @@ export function toDataState(raw: RawData, today = todayISO()): DataState {
     reported: (raw.creditReported ?? []).filter((r) => acctIds.has(S(r.account_id))).map((r): ReportedBalance => ({ id: S(r.id), accountId: S(r.account_id), balance: cents(r.balance), reportedOn: r.reported_on, bureau: bureau(r.bureau), notes: r.notes ?? undefined })),
   };
   return {
-    credit, accounts, groups, categories, txns, bills, incomes, debts, planned: [], reconciliations, today,
+    credit, accounts, allAccounts, groups, categories, txns, bills, incomes, debts, planned: [], reconciliations, today,
     hiddenBusiness: {
       accounts: raw.accounts.filter((a) => !personal(a)).length, categories: raw.categories.filter((c) => !personal(c)).length,
       transactions: raw.transactions.filter((t) => !personal(t)).length,
@@ -271,6 +273,18 @@ export const addAccountRow = async (a: { name: string; type: AccountType; limit?
   return S(r.id);
 };
 
+export const updateAccountRow = async (id: string, a: { name: string; type?: AccountType; limit?: number | null }) => {
+  const patch: Row = { name: a.name };
+  if (a.type) patch.type = DB_ACCT_TYPE[a.type];
+  if (a.limit !== undefined) patch.credit_limit = a.limit ? dollars(a.limit) : 0;
+  ok(await supabase.from('accounts').update(patch).eq('id', Number(id)));
+};
+export const setAccountArchived = async (id: string, archived: boolean) => {
+  ok(await supabase.from('accounts').update({ is_archived: archived, archived_at: archived ? new Date().toISOString() : null }).eq('id', Number(id)));
+};
+/** Server-checked: only succeeds for an account with no history whatsoever. */
+export const deleteUnusedAccount = async (id: string) => { ok(await supabase.rpc('fos_delete_unused_account', { acct: Number(id) })); };
+
 // ── Credit tracker (plain owner-only rows; none of these touch balances, transactions or bills) ──
 export interface ScoreInput { bureau: Bureau; score: number; model: string; observedOn: string; source?: string; notes?: string }
 const scoreRow = (s: ScoreInput) => ({ bureau: s.bureau, score: s.score, model: s.model.trim() || 'Unknown', observed_on: s.observedOn, source: s.source?.trim() || null, notes: s.notes?.trim() || null });
@@ -292,8 +306,8 @@ export const deleteReported = async (id: string) => { ok(await supabase.from('cr
 /** Everything, including hidden Business records, as one JSON file the user can keep. */
 export async function exportEverything() {
   const raw = await fetchRaw();
-  const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), app: 'Finance OS', ...raw }, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `finance-os-export-${iso(new Date())}.json`; a.click();
+  const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), app: 'Finances', ...raw }, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `finances-export-${iso(new Date())}.json`; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 void diffDays;

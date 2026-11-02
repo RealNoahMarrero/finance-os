@@ -46,7 +46,7 @@ function syncFinanceOS() {
   syncCredit_();
   SpreadsheetApp.getActiveSpreadsheet().toast(
     'Finance OS (' + ENTITY_ID + ') sync complete.',
-    'Finance OS',
+    'Finances',
     5
   );
 }
@@ -78,7 +78,7 @@ function supabaseGet_(resource) {
 /** Run once from the editor to confirm sign-in and read access work. */
 function testSupabaseAuth() {
   var rows = supabaseGet_('summary_accounts');
-  SpreadsheetApp.getActiveSpreadsheet().toast('Token accepted. Can read ' + rows.length + ' accounts.', 'Finance OS', 8);
+  SpreadsheetApp.getActiveSpreadsheet().toast('Token accepted. Can read ' + rows.length + ' accounts.', 'Finances', 8);
 }
 
 function getOrCreateSheet_(name, headers) {
@@ -448,7 +448,7 @@ function syncCredit_() {
     syncCreditScores();
     syncCreditCards();
   } catch (e) {
-    SpreadsheetApp.getActiveSpreadsheet().toast('Credit tabs skipped: ' + e.message, 'Finance OS', 8);
+    SpreadsheetApp.getActiveSpreadsheet().toast('Credit tabs skipped: ' + e.message, 'Finances', 8);
   }
 }
 
@@ -487,7 +487,7 @@ function syncCreditCards() {
 
 function onOpen() {
   SpreadsheetApp.getUi()
-    .createMenu('Finance OS')
+    .createMenu('Finances')
     .addItem('🔄 Sync Latest Data', 'syncFinanceOS')
     .addToUi();
 }

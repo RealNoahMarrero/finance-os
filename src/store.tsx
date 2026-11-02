@@ -19,6 +19,7 @@ export type Modal =
   | { type: 'reconcile'; id: string }
   | { type: 'cutover'; id?: string }
   | { type: 'account-add' }
+  | { type: 'account-edit'; id: string }
   | { type: 'credit-score'; id?: string; bureau?: Bureau; model?: string }
   | { type: 'credit-card'; accountId: string }
   | { type: 'credit-reported'; id?: string; accountId?: string }
@@ -63,6 +64,10 @@ interface Store {
   saveCard: (accountId: string, limit: number | null, meta: db.CardMetaInput) => Promise<boolean>;
   saveReported: (id: string | undefined, r: db.ReportedInput) => Promise<boolean>;
   deleteReported: (id: string) => Promise<boolean>;
+  updateAccount: (id: string, a: { name: string; type?: Account['type']; limit?: number | null }) => Promise<boolean>;
+  archiveAccount: (id: string) => Promise<boolean>;
+  restoreAccount: (id: string) => Promise<boolean>;
+  deleteAccount: (id: string) => Promise<boolean>;
   addAccount: (a: { name: string; type: Account['type']; limit?: number; opening: number; cutover: string }) => Promise<boolean>;
 }
 
@@ -204,6 +209,15 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
     await db.setCutover(id, a.cutover, a.opening);
   })).ok, [run]);
 
+  const updateAccount: Store['updateAccount'] = useCallback(async (id, a) => (await run(() => db.updateAccountRow(id, a))).ok, [run]);
+  const archiveAccount: Store['archiveAccount'] = useCallback(async (id) => {
+    const a = data.allAccounts.find((x) => x.id === id);
+    const r = await run(() => db.setAccountArchived(id, true));
+    if (r.ok) toast(`${a?.name ?? 'Account'} archived`, () => { void run(() => db.setAccountArchived(id, false)); });
+    return r.ok;
+  }, [run, toast, data.allAccounts]);
+  const restoreAccount: Store['restoreAccount'] = useCallback(async (id) => (await run(() => db.setAccountArchived(id, false))).ok, [run]);
+  const deleteAccount: Store['deleteAccount'] = useCallback(async (id) => (await run(() => db.deleteUnusedAccount(id))).ok, [run]);
   const saveDebt: Store['saveDebt'] = useCallback(async (id, d) => (await run(() => db.setDebt(id, d))).ok, [run]);
   const saveScore: Store['saveScore'] = useCallback(async (id, sc) => (await run(async () => { if (id) await db.updateScore(id, sc); else await db.addScore(sc); })).ok, [run]);
   const deleteScore: Store['deleteScore'] = useCallback(async (id) => {
@@ -226,7 +240,7 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
 
   const value = useMemo<Store>(() => ({
     data, status, loadError, refresh, busy, email, signOut, modal, openModal: setModal, closeModal: () => setModal(null), toasts, toast, theme, setTheme,
-    addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, updateIncome, deleteIncome, reconcile, setCutover, setCutovers, addAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported,
+    addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, updateIncome, deleteIncome, reconcile, setCutover, setCutovers, addAccount, updateAccount, archiveAccount, restoreAccount, deleteAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported,
   }), [data, status, loadError, busy, email, modal, toasts, theme, refresh, signOut, toast, setTheme, addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported]);
 
   return (

@@ -185,3 +185,24 @@ describe('expected income on the homepage', () => {
     expect(w).toEqual(['2026-11-04', '2026-11-11', '2026-11-18', '2026-11-25', '2026-12-02']);
   });
 });
+
+import { txnDisplayAmount, transferLabel } from '../src/shared';
+describe('transfers show real amounts with direction', () => {
+  const acct = (id: string, name: string, type: 'checking' | 'credit') => ({ id, name, type, mask: '', institution: '', balance: 0, lastReconciled: null, baseline: null, openingBalance: null, derived: null });
+  const dd = { ...emptyData(), allAccounts: [acct('a', 'DAILY OPERATIONS (...7081)', 'checking'), acct('b', 'FIXED BILLS', 'checking'), acct('c', 'Capital One', 'credit')] };
+  const t = { id: '1', date: '2026-11-01', amount: 5427, payee: 'Transfer', type: 'transfer' as const, accountId: 'a', toAccountId: 'b' };
+  it('outgoing is negative, incoming positive, neutral view is unsigned', () => {
+    expect(txnDisplayAmount(dd, t, 'a').v).toBe(-5427);
+    expect(txnDisplayAmount(dd, t, 'b').v).toBe(5427);
+    expect(txnDisplayAmount(dd, t).v).toBe(5427);
+  });
+  it('paying a card lowers what you owe (shown negative on the card page)', () => {
+    expect(txnDisplayAmount(dd, { ...t, accountId: 'a', toAccountId: 'c' }, 'c').v).toBe(-5427);
+  });
+  it('labels read naturally', () => {
+    expect(transferLabel(dd, t, 'a')).toBe('Transfer to Fixed Bills');
+    expect(transferLabel(dd, t, 'b')).toBe('Transfer from Daily Operations');
+    expect(transferLabel(dd, t)).toBe('Daily Operations → Fixed Bills');
+  });
+  it('a genuine zero stays zero', () => { expect(Math.abs(txnDisplayAmount(dd, { ...t, amount: 0 }, 'a').v)).toBe(0); });
+});

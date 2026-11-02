@@ -7,7 +7,7 @@ import { CatIcon, Callout, Empty, Money, Seg, StatusPill } from '../ui';
 import { PageHead, SectionTabs } from '../shared';
 
 const PRI = { 1: 'Essential', 2: 'Important', 3: 'Flexible' } as const;
-type Filter = 'all' | 'needs' | 'over' | 'funded';
+type Filter = 'all' | 'needs' | 'over' | 'money' | 'funded' | 'debts';
 
 export function Budget() {
   const { data, openModal } = useStore();
@@ -33,8 +33,11 @@ export function Budget() {
   let pool = Math.max(0, rta);
   const order = needs.map((e) => { const cover = Math.min(pool, e.env.remaining); pool -= cover; return { ...e, cover }; });
 
-  const matches = (e: { env: Envelope }) => filter === 'all' ? true : filter === 'needs' ? e.env.remaining > 0 : filter === 'over' ? e.env.avail < 0 : e.env.remaining === 0 && e.env.avail >= 0;
-  const counts = { needs: needs.length, over: overs.length };
+  // "Funded" means a monthly target that is fully covered. Having no target, owing a debt, or holding money are different things and have their own filters.
+  const isFunded = (e: { cat: Category; env: Envelope }) => !!e.cat.target && e.env.remaining === 0 && e.env.avail >= 0;
+  const matchesEnv = (e: { cat: Category; env: Envelope }) => filter === 'all' ? true : filter === 'needs' ? e.env.remaining > 0 : filter === 'over' ? e.env.avail < 0 : filter === 'money' ? e.env.avail > 0 : filter === 'debts' ? !!e.cat.isDebt && (e.cat.debtBalance ?? 0) > 0 : isFunded(e);
+  const matches = matchesEnv;
+  const counts = { needs: needs.length, over: overs.length, money: envs.filter((e) => e.env.avail > 0).length, debts: envs.filter((e) => e.cat.isDebt && (e.cat.debtBalance ?? 0) > 0).length, funded: envs.filter(isFunded).length };
 
   const nextDue = (c: Category) => {
     const b = data.bills.find((x) => x.categoryId === c.id);
@@ -96,14 +99,15 @@ export function Budget() {
         <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
           <Seg value={filter} onChange={setFilter} options={[
             { v: 'all', label: 'All' }, { v: 'needs', label: `Needs funding${counts.needs ? ` · ${counts.needs}` : ''}` },
-            { v: 'over', label: `Overspent${counts.over ? ` · ${counts.over}` : ''}` }, { v: 'funded', label: 'Funded' }]} />
+            { v: 'over', label: `Overspent${counts.over ? ` · ${counts.over}` : ''}` }, { v: 'money', label: `Has money · ${counts.money}` },
+            { v: 'funded', label: `Target met · ${counts.funded}` }, { v: 'debts', label: `Debts · ${counts.debts}` }]} />
         </div>
         <button className="btn ghost sm" onClick={() => setHelp((v) => !v)} aria-expanded={help}><CircleHelp />What do these mean?</button>
       </div>
       {help && (
         <div className="fade-in" style={{ marginBottom: 12 }}>
           <Callout tone="planned">
-            <b>Target</b> is what you’d like to set aside (optional). <b>Available</b> is the money in that envelope right now — it grows when you assign money and drops as you spend. A target counts as funded once the envelope holds at least that much. <b>Spent</b> is this month’s activity. Anything left in Ready to Assign has no job yet.
+            <b>Target</b> is what you’d like to set aside (optional). <b>Available</b> is the money in that envelope right now — it grows when you assign money and drops as you spend. A target is met once the envelope holds at least that much — categories with no target are never shown as met. <b>Has money</b> lists categories with money you could move. <b>Debts</b> shows what you still owe; debts are tracked separately from funding. <b>Spent</b> is this month’s activity. Anything left in Ready to Assign has no job yet.
           </Callout>
         </div>
       )}
@@ -160,7 +164,7 @@ export function Budget() {
             </div>
           );
         })}
-        {hiddenEnvs.length > 0 && filter === 'all' && <div className="xs muted" style={{ padding: '12px 20px', borderTop: '1px solid var(--line)' }}>{hiddenEnvs.length} archived {hiddenEnvs.length === 1 ? 'category holds' : 'categories hold'} {money(sum(hiddenEnvs, (e) => e.env.avail))} that still counts toward Ready to Assign.</div>}
+        {hiddenEnvs.length > 0 && filter === 'all' && <div className="xs muted" style={{ padding: '12px 20px', borderTop: '1px solid var(--line)' }}>{hiddenEnvs.length} archived {hiddenEnvs.length === 1 ? 'category holds' : 'categories hold'} {money(sum(hiddenEnvs, (e) => e.env.avail))} — old balances that are left out of Ready to Assign and your budget totals. Restore a category to include it again.</div>}
         {envs.every((e) => !matches(e)) && <Empty icon={<Sparkles />} title="Nothing here" text="No categories match this filter right now." />}
       </section>
     </div>

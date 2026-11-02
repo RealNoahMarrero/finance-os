@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, useEffect } from 'react';
+import { useMemo, useRef, useState, useEffect, type ReactNode } from 'react';
 import { ArrowRight, ArrowUpDown, Bell, Check, CircleCheck, Download, Eye, FlaskConical, Info, Landmark, LogOut, ListChecks, Pencil, Plus, Scale, Split, StickyNote, Trash, TriangleAlert, Wallet } from 'lucide-react';
 import { useStore } from './store';
 import {
@@ -50,6 +50,11 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
   const [more, setMore] = useState(!!seed.notes || !!seed.splits?.length);
   const [hint, setHint] = useState('');
   const [focusPayee, setFocusPayee] = useState(false);
+  const [hiSug, setHiSug] = useState(-1);
+  // Anything the user picks by hand is never overwritten by payee autofill.
+  const [catTouched, setCatTouched] = useState(mode !== 'add' || !!seed.categoryId);
+  const [acctTouched, setAcctTouched] = useState(mode !== 'add');
+  const [autoCat, setAutoCat] = useState(false);
   const [showAllCats, setShowAllCats] = useState(false);
   const amtRef = useRef<HTMLInputElement>(null);
 
@@ -57,7 +62,7 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
 
   const cents = toCents(amount);
   const catById = (cid?: string) => data.categories.find((c) => c.id === cid);
-  const acct = (aid?: string) => data.accounts.find((a) => a.id === aid);
+  const acct = (aid?: string) => data.allAccounts.find((a) => a.id === aid);
 
   // payee memory
   const payeeStats = useMemo(() => {
@@ -70,13 +75,33 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
     }
     return [...m.entries()].map(([name, v]) => ({ name, ...v })).sort((a, b) => b.n - a.n);
   }, [data.txns]);
-  const suggestions = payeeStats.filter((p) => p.name.toLowerCase().includes(payee.toLowerCase()) && p.name !== payee).slice(0, 4);
-  const pickPayee = (p: typeof payeeStats[number]) => {
-    setPayee(p.name); setFocusPayee(false);
+  const needle = payee.trim().toLowerCase();
+  const suggestions = (needle
+    ? payeeStats.filter((p) => p.name.toLowerCase().includes(needle) && p.name !== payee).sort((x, y) => Number(y.name.toLowerCase().startsWith(needle)) - Number(x.name.toLowerCase().startsWith(needle)) || y.n - x.n)
+    : payeeStats).slice(0, 5);
+  const applyPayee = (p: typeof payeeStats[number], explicit: boolean) => {
     const lc = p.last.splits?.length ? [...p.last.splits].sort((a, b) => b.amount - a.amount)[0].categoryId : p.last.categoryId;
-    if (lc) setCategoryId(lc);
-    setAccountId(p.last.accountId);
+    // Clicking/choosing a suggestion is an explicit request; an exact typed match only fills what you haven't chosen yourself.
+    if (lc && (explicit || !catTouched)) { setCategoryId(lc); setAutoCat(true); if (explicit) setCatTouched(false); }
+    if (explicit || !acctTouched) setAccountId(p.last.accountId);
     setHint(`Filled in from your last ${p.name} purchase${p.last.splits?.length ? ' (it was split — you can split again below)' : ''}`);
+  };
+  const pickPayee = (p: typeof payeeStats[number]) => { setPayee(p.name); setFocusPayee(false); setHiSug(-1); applyPayee(p, true); };
+  const onPayeeChange = (v: string) => {
+    setPayee(v); setHint(''); setHiSug(-1);
+    if (type !== 'expense' || mode !== 'add') return;
+    const exact = payeeStats.find((p) => p.name.toLowerCase() === v.trim().toLowerCase());
+    if (exact) applyPayee(exact, false);
+    else if (autoCat && !catTouched) { setCategoryId(''); setAutoCat(false); } // typed away from the match: undo the autofill
+  };
+  const onPayeeKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const open = focusPayee && type === 'expense' && suggestions.length > 0;
+    if (!open) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHiSug((h) => Math.min(suggestions.length - 1, h + 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHiSug((h) => Math.max(0, h - 1)); }
+    else if (e.key === 'Enter' && hiSug >= 0) { e.preventDefault(); pickPayee(suggestions[hiSug]); }
+    else if (e.key === 'Tab' && hiSug >= 0) pickPayee(suggestions[hiSug]); // accept, then Tab moves on as normal
+    else if (e.key === 'Escape' && focusPayee) { e.stopPropagation(); setFocusPayee(false); }
   };
 
   // frequent categories
@@ -183,11 +208,11 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
             <label htmlFor="payee">{type === 'income' ? 'From' : 'Payee'}</label>
             <input id="payee" className="input" autoComplete="off" placeholder={type === 'income' ? 'Who paid you?' : 'Where did you spend it?'} value={payee}
               onFocus={() => setFocusPayee(true)} onBlur={() => setTimeout(() => setFocusPayee(false), 140)}
-              onChange={(e) => { setPayee(e.target.value); setHint(''); }} />
+              onChange={(e) => onPayeeChange(e.target.value)} onKeyDown={onPayeeKey} role="combobox" aria-expanded={focusPayee && suggestions.length > 0} aria-autocomplete="list" />
             {focusPayee && type === 'expense' && (suggestions.length > 0) && (
               <div className="suggest" role="listbox">
-                {suggestions.map((p) => (
-                  <button type="button" key={p.name} role="option" onMouseDown={(e) => e.preventDefault()} onClick={() => pickPayee(p)}>
+                {suggestions.map((p, i) => (
+                  <button type="button" key={p.name} role="option" aria-selected={hiSug === i} style={hiSug === i ? { background: 'var(--surface-2)' } : undefined} onMouseDown={(e) => e.preventDefault()} onClick={() => pickPayee(p)}>
                     <span style={{ fontWeight: 580 }}>{p.name}</span>
                     <span className="muted small">{p.last.splits?.length ? 'Split' : catById(p.last.categoryId)?.name}</span>
                   </button>
@@ -202,11 +227,11 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
           <div className="field" style={{ marginTop: 16 }}>
             <label>Category</label>
             <div className="chips">
-              {chipCats.map((k) => { const c = catById(k)!; return <button type="button" key={k} className="chip" aria-pressed={categoryId === k} onClick={() => setCategoryId(k)}><CatIcon k={c.icon} />{c.name}</button>; })}
+              {chipCats.map((k) => { const c = catById(k)!; return <button type="button" key={k} className="chip" aria-pressed={categoryId === k} onClick={() => { setCategoryId(k); setCatTouched(true); setAutoCat(false); }}><CatIcon k={c.icon} />{c.name}</button>; })}
               <button type="button" className="chip" onClick={() => setShowAllCats((v) => !v)}>{showAllCats ? 'Hide' : 'All categories'}</button>
             </div>
             {showAllCats && (
-              <select className="select" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} aria-label="All categories">
+              <select className="select" value={categoryId} onChange={(e) => { setCategoryId(e.target.value); setCatTouched(true); setAutoCat(false); }} aria-label="All categories">
                 <option value="">Choose a category…</option>
                 {groupCats(data.categories, data.groups).map(({ g, items }) => <optgroup key={g.id} label={g.name}>{items.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup>)}
               </select>
@@ -218,7 +243,7 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
         <div className="field" style={{ marginTop: 16 }}>
           <label>{type === 'transfer' ? 'From' : type === 'income' ? 'Deposit to' : 'Account'}</label>
           <div className="chips">
-            {data.accounts.map((a) => <button type="button" key={a.id} className="chip" aria-pressed={accountId === a.id} onClick={() => setAccountId(a.id)}>{a.name}</button>)}
+            {data.accounts.map((a) => <button type="button" key={a.id} className="chip" aria-pressed={accountId === a.id} onClick={() => { setAccountId(a.id); setAcctTouched(true); }}>{a.name}</button>)}
           </div>
           {sourceAcct && afterBal != null && type !== 'transfer' && (
             <div className="xs muted num" style={{ marginTop: 2 }}>Recorded balance {money(sourceAcct.balance)} → <b style={{ color: 'var(--ink-2)' }}>{money(afterBal)}</b> after this</div>
@@ -358,58 +383,128 @@ export function AssignSheet() {
 // ═══════════════════════════════════════════════════════════
 // Move money
 // ═══════════════════════════════════════════════════════════
+interface PickItem { id: string; name: string; group: string; avail: number; need: number }
+/** Searchable list: type to filter, ↑/↓ to move, Enter to choose. */
+function EnvPicker({ items, value, onPick, label, autoFocus, showAfter }: { items: PickItem[]; value: string; onPick: (id: string) => void; label: string; autoFocus?: boolean; showAfter?: (it: PickItem) => ReactNode }) {
+  const [q, setQ] = useState('');
+  const [hi, setHi] = useState(0);
+  const list = useMemo(() => { const n = q.trim().toLowerCase(); return n ? items.filter((i) => i.name.toLowerCase().includes(n) || i.group.toLowerCase().includes(n)) : items; }, [items, q]);
+  return (
+    <div className="picker">
+      <input className="input" placeholder={`Search ${label.toLowerCase()}…`} aria-label={`Search ${label}`} value={q} autoFocus={autoFocus}
+        onChange={(e) => { setQ(e.target.value); setHi(0); }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown') { e.preventDefault(); setHi((h) => Math.min(list.length - 1, h + 1)); }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => Math.max(0, h - 1)); }
+          else if (e.key === 'Enter' && list[hi]) { e.preventDefault(); onPick(list[hi].id); setQ(''); }
+        }} />
+      <div className="picker-list" role="listbox" aria-label={label} style={{ maxHeight: 220, overflowY: 'auto', marginTop: 6 }}>
+        {list.length === 0 && <div className="small muted" style={{ padding: 10 }}>Nothing matches “{q}”.</div>}
+        {list.map((it, i) => (
+          <button type="button" key={it.id} role="option" aria-selected={value === it.id} data-id={it.id} className="li hover" onClick={() => { onPick(it.id); setQ(''); }}
+            style={{ padding: '9px 10px', borderRadius: 10, background: value === it.id ? 'var(--planned-soft)' : i === hi && q ? 'var(--surface-2)' : undefined, width: '100%', textAlign: 'left' }}>
+            <div className="grow" style={{ minWidth: 0 }}><div className="li-title ellipsis" style={{ fontSize: 14 }}>{it.name}</div><div className="li-sub ellipsis" style={{ fontSize: 12 }}>{it.group}{it.need > 0 ? ` · needs ${money(it.need)}` : ''}</div></div>
+            <div className="right num small" style={{ fontWeight: 600 }}>{money(it.avail)}{showAfter && <div className="xs muted" style={{ fontWeight: 400 }}>{showAfter(it)}</div>}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function MoveSheet({ from: f0, to: t0, amount: a0 }: { from?: string; to?: string; amount?: number }) {
   const { data, closeModal, assign, moveMoney, toast } = useStore();
-  const [from, setFrom] = useState(f0 ?? 'rta');
-  const [to, setTo] = useState(t0 ?? '');
-  const [amt, setAmt] = useState(a0 ? centsToInput(a0) : '');
-  const [saving, setSaving] = useState(false);
   const rta = readyToAssign(data);
-  const envs = allEnvelopes(data);
-  const availOf = (id: string) => (id === 'rta' ? rta : envs.find((e) => e.cat.id === id)?.env.avail ?? 0);
-  const nameOf = (id: string) => (id === 'rta' ? 'Ready to Assign' : data.categories.find((c) => c.id === id)?.name ?? '');
+  const envs = allEnvelopes(data).filter((e) => !e.cat.hidden);
+  const groupName = (gid: string) => data.groups.find((g) => g.id === gid)?.name ?? '';
+  const items: PickItem[] = useMemo(() => envs.map((e) => ({ id: e.cat.id, name: e.cat.name, group: groupName(e.cat.groupId), avail: e.env.avail, need: e.env.avail < 0 ? -e.env.avail : Math.max(0, e.env.remaining) })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data]);
+  const rtaItem: PickItem = { id: 'rta', name: 'Ready to Assign', group: 'Unassigned money in your accounts', avail: rta, need: 0 };
+  const byId = (id: string) => (id === 'rta' ? rtaItem : items.find((i) => i.id === id));
+  const nameOf = (id: string) => byId(id)?.name ?? '';
+  const availOf = (id: string) => byId(id)?.avail ?? 0;
+
+  // The most any single source can give (so a suggestion never starts out un-payable).
+  const bestAvail = (excl: string, only?: string) => Math.max(0, ...[rtaItem, ...items].filter((i) => i.id !== excl && (!only || i.id === only)).map((i) => i.avail));
+  const initial = (t: string) => { const want = a0 ?? (t ? (byId(t)?.need ?? 0) : 0); const cap = f0 ? bestAvail('', f0) : bestAvail(t); return want > 0 ? Math.min(want, cap || want) : 0; };
+  const [to, setTo] = useState(t0 ?? '');
+  const [from, setFrom] = useState(f0 ?? '');
+  const [amt, setAmt] = useState(() => { const v = initial(t0 ?? ''); return v ? centsToInput(v) : ''; });
+  const [touchedAmt, setTouchedAmt] = useState(!!a0);
+  const [showEmpty, setShowEmpty] = useState(false);
+  const [saving, setSaving] = useState(false);
+
   const cents = toCents(amt);
-  const max = Math.max(0, availOf(from));
-  const valid = cents > 0 && to && from !== to && cents <= max;
-  const swap = () => { if (to) { setFrom(to); setTo(from); } };
-  const sel = (value: string, set: (v: string) => void, label: string, exclude?: string) => (
-    <select className="select" value={value} onChange={(e) => set(e.target.value)} aria-label={label}>
-      {label.startsWith('From') ? null : <option value="">Choose…</option>}
-      <option value="rta" disabled={exclude === 'rta'}>Ready to Assign · {money(rta)}</option>
-      {groupCats(data.categories, data.groups).map(({ g, items }) => (
-        <optgroup key={g.id} label={g.name}>{items.filter((c) => c.id !== exclude).map((c) => <option key={c.id} value={c.id}>{c.name} · {money(availOf(c.id))}</option>)}</optgroup>
-      ))}
-    </select>
-  );
+  // Sources: only places that actually hold money, best first. Empty ones are tucked away.
+  const sources = useMemo(() => {
+    const funded = [rtaItem, ...items].filter((i) => i.avail > 0 && i.id !== to);
+    const empty = [rtaItem, ...items].filter((i) => i.avail <= 0 && i.id !== to);
+    return { funded: funded.sort((x, y) => (x.id === 'rta' ? -1 : y.id === 'rta' ? 1 : y.avail - x.avail)), empty };
+  }, [items, rta, to]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Suggested amount for a destination: whatever it is short by.
+  const shortBy = (id: string) => byId(id)?.need ?? 0;
+  const pickTo = (id: string) => { setTo(id); if (!touchedAmt && shortBy(id) > 0) setAmt(centsToInput(Math.min(shortBy(id), bestAvail(id) || shortBy(id)))); if (from === id) setFrom(''); };
+  // Recommended source: the one that can cover the amount on its own (Ready to Assign first), else the one with the most.
+  const recommended = useMemo(() => {
+    const want = cents > 0 ? cents : shortBy(to);
+    const cover = sources.funded.filter((i) => i.avail >= want && want > 0);
+    return (cover[0] ?? sources.funded[0])?.id ?? '';
+  }, [sources, cents, to]); // eslint-disable-line react-hooks/exhaustive-deps
+  const src = from || recommended;
+  const max = Math.max(0, availOf(src));
+  const valid = cents > 0 && !!to && !!src && src !== to && cents <= max;
+  const go = async () => {
+    if (!valid || saving) return;
+    setSaving(true);
+    const good = src === 'rta' ? await assign({ [to]: cents }) : to === 'rta' ? await assign({ [src]: -cents }) : await moveMoney(src, to, cents);
+    if (good) {
+      toast(`Moved ${money(cents)} to ${nameOf(to)}`, () => { if (src === 'rta') void assign({ [to]: -cents }); else if (to === 'rta') void assign({ [src]: cents }); else void moveMoney(to, src, cents); });
+      closeModal();
+    } else setSaving(false);
+  };
+  const destItems = useMemo(() => [rtaItem, ...items].filter((i) => i.id !== src).sort((x, y) => (y.need > 0 ? 1 : 0) - (x.need > 0 ? 1 : 0) || y.need - x.need), [items, rta, src]); // eslint-disable-line react-hooks/exhaustive-deps
+  const dest = to ? byId(to) : undefined;
+
   return (
-    <Sheet title="Move money" sub="Shift funds between categories. Nothing leaves your accounts." onClose={closeModal}
-      footer={<button className="btn primary lg" disabled={!valid || saving} onClick={async () => {
-        setSaving(true);
-        const good = from === 'rta' ? await assign({ [to]: cents }) : to === 'rta' ? await assign({ [from]: -cents }) : await moveMoney(from, to, cents);
-        if (good) {
-          toast(`Moved ${money(cents)} to ${nameOf(to)}`, () => { if (from === 'rta') void assign({ [to]: -cents }); else if (to === 'rta') void assign({ [from]: cents }); else void moveMoney(to, from, cents); });
-          closeModal();
-        } else setSaving(false);
-      }}>{cents > 0 ? `Move ${money(cents)}` : 'Move money'}</button>}>
-      <div className="stack gap12">
-        <div className="field"><label>From</label>{sel(from, setFrom, 'From', to)}</div>
-        <div style={{ display: 'flex', justifyContent: 'center' }}><button className="icon-btn" onClick={swap} aria-label="Swap direction" style={{ border: '1px solid var(--line-2)' }}><ArrowUpDown /></button></div>
-        <div className="field"><label>To</label>{sel(to, setTo, 'To', from)}</div>
-        <div className="field"><label>Amount</label>
-          <MoneyInput value={amt} onChange={setAmt} autoFocus invalid={cents > max} />
-          <div className="row between xs muted"><span>{cents > max ? <span className="neg">Only {money(max)} available in {nameOf(from)}</span> : `Up to ${money(max)} available`}</span>
-            {max > 0 && <button className="sect-link" type="button" onClick={() => setAmt(centsToInput(max))}>Use max</button>}</div>
+    <Sheet title="Move money" sub="Shifts budget money between categories. Nothing moves in your bank accounts." onClose={closeModal}
+      footer={<button className="btn primary lg" disabled={!valid || saving} onClick={go}>{valid ? `Move ${money(cents)} from ${nameOf(src)} to ${nameOf(to)}` : cents > max && src ? `Only ${money(max)} in ${nameOf(src)}` : 'Move money'}</button>}>
+      <form className="stack gap16" onSubmit={(e) => { e.preventDefault(); void go(); }}>
+        <div className="field"><label>Cover</label>
+          {dest ? (
+            <div className="row between card pad" style={{ boxShadow: 'none', background: 'var(--surface-2)', padding: '10px 14px' }} data-testid="move-dest">
+              <div><div className="li-title">{dest.name}</div><div className="li-sub">{dest.avail < 0 ? `Overspent by ${money(-dest.avail)}` : dest.need > 0 ? `Has ${money(dest.avail)} · needs ${money(dest.need)} more` : `Has ${money(dest.avail)}`}</div></div>
+              <button type="button" className="sect-link" onClick={() => setTo('')}>Change</button>
+            </div>
+          ) : <EnvPicker items={destItems} value={to} onPick={pickTo} label="Destination" autoFocus />}
         </div>
-        {to && cents > 0 && valid && (
-          <div className="card pad fade-in" style={{ background: 'var(--surface-2)', boxShadow: 'none' }}>
-            {[from, to].map((id, i) => (
+
+        <div className="field"><label htmlFor="mv-amt">Amount</label>
+          <MoneyInput value={amt} onChange={(v) => { setAmt(v); setTouchedAmt(true); }} invalid={cents > max && !!src} autoFocus={!!dest} />
+          <div className="row gap8" style={{ flexWrap: 'wrap', marginTop: 6 }}>
+            {dest && shortBy(to) > 0 && <button type="button" className="chip" onClick={() => { setAmt(centsToInput(shortBy(to))); setTouchedAmt(true); }}>{shortBy(to) > bestAvail(to) ? 'Full shortfall' : 'Cover shortfall'} · {money(shortBy(to))}</button>}
+            {max > 0 && <button type="button" className="chip" onClick={() => { setAmt(centsToInput(max)); setTouchedAmt(true); }}>All of it · {money(max)}</button>}
+          </div>
+        </div>
+
+        <div className="field"><label>Take it from {src && <span className="muted" style={{ fontWeight: 400 }}>· {nameOf(src)}{src === recommended && !from ? ' (suggested)' : ''}</span>}</label>
+          {sources.funded.length === 0 && <div className="small muted">No category or unassigned money has funds available right now.</div>}
+          <EnvPicker items={showEmpty ? [...sources.funded, ...sources.empty] : sources.funded} value={src} onPick={(id) => setFrom(id)} label="Source"
+            showAfter={(it) => (cents > 0 && it.id === src ? `→ ${money(it.avail - cents)}` : undefined)} />
+          {sources.empty.length > 0 && <button type="button" className="sect-link" style={{ marginTop: 6 }} onClick={() => setShowEmpty((v) => !v)}>{showEmpty ? 'Hide empty categories' : `Show ${sources.empty.length} empty categories`}</button>}
+        </div>
+
+        {dest && src && cents > 0 && (
+          <div className="card pad fade-in" style={{ background: 'var(--surface-2)', boxShadow: 'none' }} data-testid="move-preview">
+            {[src, to].map((id, i) => (
               <div className="row between small" key={id} style={{ padding: '3px 0' }}>
                 <span>{nameOf(id)}</span><span className="num"><span className="muted">{money(availOf(id))}</span> → <b>{money(availOf(id) + (i === 0 ? -cents : cents))}</b></span>
               </div>
             ))}
           </div>
         )}
-      </div>
+        <button type="submit" style={{ display: 'none' }} aria-hidden="true" tabIndex={-1} />
+      </form>
     </Sheet>
   );
 }
@@ -547,7 +642,7 @@ export function BillSheet({ billId, date }: { billId: string; date: string }) {
           <div className="kv"><span className="k">Date</span><span className="v">{fmtDate(data.today, 'long')}</span></div>
           {bill.isDebt && <div className="kv"><span className="k">Balance owed</span><span className="v num">{money(data.debts.find((x) => x.billId === bill.id)?.balance ?? 0)} → {money(Math.max(0, (data.debts.find((x) => x.billId === bill.id)?.balance ?? 0) - cents))}</span></div>}
           <div className="kv"><span className="k">Category</span><span className="v">{cat?.name}</span></div>
-          <div className="kv"><span className="k">Type</span><span className="v">{bill.toAccountId ? `Transfer to ${data.accounts.find((x) => x.id === bill.toAccountId)?.name}` : 'Expense'}</span></div>
+          <div className="kv"><span className="k">Type</span><span className="v">{bill.toAccountId ? `Transfer to ${data.allAccounts.find((x) => x.id === bill.toAccountId)?.name}` : 'Expense'}</span></div>
         </div>
         <div className="field"><label>Amount paid</label><MoneyInput value={amt} onChange={setAmt} autoFocus /></div>
         <div className="field" style={{ marginTop: 14 }}><label>Pay from</label>
@@ -575,7 +670,7 @@ export function BillSheet({ billId, date }: { billId: string; date: string }) {
         </div>
       )}
       <div style={{ display: 'flex', justifyContent: 'center', margin: '-6px 0 14px' }}><button className="btn sm" onClick={() => openModal({ type: 'bill-edit', billId })}><Pencil />Edit bill</button></div>
-      {occ.paid && <Callout icon={<CircleCheck />}>{paidTxn ? <>Posted on {fmtDate(paidTxn.date)} from {data.accounts.find((a) => a.id === paidTxn.accountId)?.name}.</> : 'Marked paid without posting a transaction.'}</Callout>}
+      {occ.paid && <Callout icon={<CircleCheck />}>{paidTxn ? <>Posted on {fmtDate(paidTxn.date)} from {data.allAccounts.find((a) => a.id === paidTxn.accountId)?.name}.</> : 'Marked paid without posting a transaction.'}</Callout>}
       {!occ.paid && (
         <div style={{ marginTop: 4 }}>
           <div className="label" style={{ marginBottom: 8 }}>When you mark this paid…</div>
@@ -584,7 +679,7 @@ export function BillSheet({ billId, date }: { billId: string; date: string }) {
         </div>
       )}
       <div style={{ marginTop: 14 }}>
-        <div className="kv"><span className="k">Pays from</span><span className="v">{data.accounts.find((a) => a.id === bill.accountId)?.name}</span></div>
+        <div className="kv"><span className="k">Pays from</span><span className="v">{data.allAccounts.find((a) => a.id === bill.accountId)?.name}</span></div>
         <div className="kv"><span className="k">Repeats</span><span className="v">{bill.recurring ? bill.period : 'One time'}</span></div>
       </div>
     </Sheet>
@@ -631,7 +726,7 @@ export function IncomeSheet({ mode, id }: { mode: 'view' | 'add'; id?: string })
     );
   }
   if (!inc) return null;
-  const acct = data.accounts.find((a) => a.id === inc.accountId)!;
+  const acct = data.allAccounts.find((a) => a.id === inc.accountId)!;
   if (editing) {
     const valid = label.trim() && toCents(amt) > 0 && !!date;
     return (
@@ -662,6 +757,7 @@ export function IncomeSheet({ mode, id }: { mode: 'view' | 'add'; id?: string })
           <button className="btn primary" disabled={cents <= 0 || saving} onClick={async () => { setSaving(true); if (await receiveIncome(inc.id, { date: recvDate, amount: cents, accountId: acctId })) { toast(`${money(cents)} received · added to ${dest.name}`); closeModal(); } else setSaving(false); }}>{saving ? 'Recording…' : 'Record income'}</button></>}>
         <div className="stack gap12">
           <div className="field"><label>Amount received</label><MoneyInput value={amt} onChange={setAmt} autoFocus /></div>
+          {cents > 0 && cents !== inc.amount && <div className="small" data-testid="receipt-diff" style={{ marginTop: -6 }}>That is <b className="num">{money(Math.abs(cents - inc.amount))} {cents < inc.amount ? 'less' : 'more'}</b> than the {money(inc.amount)} you expected. Only the amount you enter here is recorded.</div>}
           <div className="field"><label htmlFor="rd">Date received</label><input id="rd" type="date" className="input" value={recvDate} max={data.today} onChange={(e) => setRecvDate(e.target.value)} /></div>
           <div className="field"><label>Deposited to</label><div className="chips">{liquid.map((a) => <button key={a.id} className="chip" aria-pressed={acctId === a.id} onClick={() => setAcctId(a.id)}>{a.name}</button>)}</div></div>
           <div className="card pad num" style={{ boxShadow: 'none', background: 'var(--surface-2)' }}>
@@ -860,6 +956,54 @@ export function AccountAddSheet() {
           <div className="field grow"><label htmlFor="ad">As of</label><input id="ad" type="date" className="input" value={date} max={data.today} onChange={(e) => setDate(e.target.value)} /></div>
         </div>
         {type === 'credit' && <div className="field"><label>Credit limit (optional)</label><MoneyInput value={limit} onChange={setLimit} /></div>}
+      </div>
+    </Sheet>
+  );
+}
+
+export function AccountEditSheet({ id }: { id: string }) {
+  const { data, closeModal, updateAccount, archiveAccount, restoreAccount, deleteAccount, toast } = useStore();
+  const a = data.allAccounts.find((x) => x.id === id);
+  const [name, setName] = useState(a?.name ?? '');
+  const [type, setType] = useState<Account['type']>(a?.type ?? 'checking');
+  const [limit, setLimit] = useState(a?.limit ? centsToInput(a.limit) : '');
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [typed, setTyped] = useState('');
+  if (!a) return null;
+  const used = data.txns.some((t) => t.accountId === a.id || t.toAccountId === a.id);
+  const linked = used || data.reconciliations.some((r) => r.accountId === a.id) || data.incomes.some((i) => i.accountId === a.id) || !!a.paymentCategoryId
+    || data.bills.some((b) => b.accountId === a.id || b.toAccountId === a.id) || !!data.credit.meta[a.id] || data.credit.reported.some((r) => r.accountId === a.id);
+  const credit = type === 'credit';
+  const dirty = name.trim() !== a.name || type !== a.type || (credit && toCents(limit) !== (a.limit ?? 0));
+  const settled = a.balance === 0;
+  return (
+    <Sheet title={a.archived ? 'Archived account' : 'Edit account'} sub={a.archived ? 'Hidden from lists and pickers. All history is kept.' : 'Renaming never changes transactions, transfers, bills or reconciliations.'} onClose={closeModal}
+      footer={a.archived
+        ? <button className="btn primary lg" disabled={saving} onClick={async () => { setSaving(true); if (await restoreAccount(a.id)) { toast(`${a.name} restored`); closeModal(); } else setSaving(false); }}>Restore account</button>
+        : <button className="btn primary lg" disabled={!name.trim() || !dirty || saving} onClick={async () => { setSaving(true); if (await updateAccount(a.id, { name: name.trim(), type: used ? undefined : type, limit: credit ? toCents(limit) || null : undefined })) { toast('Saved'); closeModal(); } else setSaving(false); }}>Save changes</button>}>
+      <div className="stack gap16">
+        {!a.archived && <>
+          <div className="field"><label htmlFor="ae-n">Name</label><input id="ae-n" className="input" value={name} onChange={(e) => setName(e.target.value)} autoFocus /></div>
+          <div className="field"><label>Type</label><div className="chips">{(['checking', 'savings', 'cash', 'credit'] as const).map((t) => <button key={t} className="chip" aria-pressed={type === t} disabled={used} onClick={() => setType(t)} style={{ textTransform: 'capitalize' }}>{t === 'credit' ? 'Credit card' : t}</button>)}</div>
+            {used && <div className="xs muted">The type is locked because this account has transactions.</div>}</div>
+          {credit && <div className="field"><label>Credit limit (optional)</label><MoneyInput value={limit} onChange={setLimit} /></div>}
+        </>}
+        <div className="card pad" style={{ boxShadow: 'none', background: 'var(--surface-2)' }}>
+          <div className="li-title">{a.archived ? 'Remove it for good' : 'No longer using it?'}</div>
+          {!a.archived && <>
+            <div className="small muted" style={{ margin: '4px 0 10px' }}>{settled ? 'Archiving hides it everywhere but keeps every transaction, transfer and reconciliation. You can restore it any time.' : `It still holds ${money(a.balance)}. Bring the balance to $0 first (record a transfer or reconcile), then archive it.`}</div>
+            <button className="btn" disabled={!settled || saving} onClick={async () => { setSaving(true); if (await archiveAccount(a.id)) closeModal(); else setSaving(false); }}>Archive account</button>
+          </>}
+          {linked
+            ? <div className="xs muted" style={{ marginTop: 10 }}>Permanent deletion is only offered for accounts with no history. This one has history, so archive it instead.</div>
+            : !deleting
+              ? <div style={{ marginTop: 10 }}><div className="xs muted" style={{ marginBottom: 6 }}>This account has no transactions, bills or credit data, so it can be deleted permanently.</div><button className="btn danger" onClick={() => setDeleting(true)}><Trash />Delete permanently…</button></div>
+              : <div style={{ marginTop: 10 }}><div className="small" style={{ marginBottom: 6 }}>This cannot be undone. Type <b>{a.name}</b> to confirm.</div>
+                  <input className="input" value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Type the account name to confirm" />
+                  <div className="row gap8" style={{ marginTop: 8 }}><button className="btn" onClick={() => { setDeleting(false); setTyped(''); }}>Cancel</button>
+                    <button className="btn danger" disabled={typed.trim() !== a.name || saving} onClick={async () => { setSaving(true); if (await deleteAccount(a.id)) { toast('Account deleted'); closeModal(); location.hash = '/accounts'; } else setSaving(false); }}>Delete forever</button></div></div>}
+        </div>
       </div>
     </Sheet>
   );
@@ -1117,6 +1261,7 @@ export function SheetHost() {
     case 'reconcile': return <ReconcileSheet key={modal.id} id={modal.id} />;
     case 'cutover': return <CutoverSheet key={modal.id ?? 'all'} id={modal.id} />;
     case 'account-add': return <AccountAddSheet />;
+    case 'account-edit': return <AccountEditSheet key={modal.id} id={modal.id} />;
     case 'credit-score': return <CreditScoreSheet key={`${modal.id ?? 'new'}-${modal.bureau ?? ''}-${modal.model ?? ''}`} id={modal.id} bureau={modal.bureau} model={modal.model} />;
     case 'credit-card': return <CreditCardSheet key={modal.accountId} accountId={modal.accountId} />;
     case 'credit-reported': return <CreditReportedSheet key={`${modal.id ?? 'new'}-${modal.accountId ?? ''}`} id={modal.id} accountId={modal.accountId} />;

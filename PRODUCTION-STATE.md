@@ -39,3 +39,8 @@ Site: https://marrero-finance.netlify.app/ (existing Netlify site; GitHub repo R
 - Applied 2026-11-01 after verified backup db-full-2026-11-01T01-47-02. Adds nullable `categories.bill_amount` (payment amount, separate from the `target_amount` funding target; NULL = same as target, so every existing bill is unchanged) and updates `fos_pay_bill` to use it. No policy/grant changes; 2,051 transactions and 18 debts intact; anon still blocked.
 - App: New category form (Bills groups: scheduled bill vs funding only), Edit category (name/emoji/group), scheduled-bill section on the category sheet (add/edit/pause/resume/remove with confirmation), mobile entry via More → New category or bill.
 - Finances redesign (Nov 2026): app renamed in UI to 'Finances'; Overview rewritten (accounts, bills, recent, small budget/income); nav = Overview, Transactions, Accounts, Bills & Budget, Insights; no database changes.
+
+## Finances improvement pass (Nov 2026)
+- Migration 016 applied to production (backup db-full-2026-11-02T16-44-43): accounts.is_archived/archived_at + fos_delete_unused_account (owner-only, refuses any account with history). Nothing else changed.
+- Transfers drawn with direction; Move Money rebuilt; Budget filters redefined; payee autofill/keyboard; PWA manifest fetched fresh + cache bumped.
+- Open decision: $9.00 TikTok Shop (Oct 31) explains the full Daily Operations recorded vs derived gap; not changed.

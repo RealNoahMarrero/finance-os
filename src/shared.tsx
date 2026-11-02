@@ -16,12 +16,39 @@ export function PageHead({ title, sub, actions }: { title: ReactNode; sub?: Reac
   );
 }
 
-export function txnCategoryLabel(d: DataState, t: Txn) {
+/** "DAILY OPERATIONS (...7081)" -> "Daily Operations" for compact transfer labels. */
+export const shortAcct = (name: string) => {
+  const n = name.replace(/\s*\(\.\.\.\d+\)\s*$/, '').trim();
+  return n === n.toUpperCase() ? n.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : n;
+};
+/** Where a transfer goes, from an account's point of view (pov) or neutrally ("A → B"). */
+export function transferLabel(d: DataState, t: Txn, pov?: string) {
+  const from = shortAcct(d.allAccounts.find((a) => a.id === t.accountId)?.name ?? 'Unknown account');
+  const to = shortAcct(d.allAccounts.find((a) => a.id === t.toAccountId)?.name ?? 'Unknown account');
+  if (pov && pov === t.accountId) return `Transfer to ${to}`;
+  if (pov && pov === t.toAccountId) return `Transfer from ${from}`;
+  return `${from} → ${to}`;
+}
+
+export function txnCategoryLabel(d: DataState, t: Txn, pov?: string) {
   if (t.adjustment) return 'Adjustment';
   if (t.splits?.length) return `Split · ${t.splits.length}`;
-  if (t.type === 'transfer') return t.categoryId ? `→ ${d.categories.find((c) => c.id === t.categoryId)?.name ?? 'Transfer'}` : 'Transfer';
+  if (t.type === 'transfer') return transferLabel(d, t, pov);
   if (t.type === 'income') return 'Ready to Assign';
   return d.categories.find((c) => c.id === t.categoryId)?.name ?? 'Uncategorized';
+}
+
+/** The signed amount to draw for a row. Transfers are neither income nor spending: with an account
+ *  point of view they show the real direction (credit cards invert, since paying a card lowers what you owe). */
+export function txnDisplayAmount(d: DataState, t: Txn, pov?: string) {
+  if (t.type === 'income') return { v: t.amount, tone: 'pos' as const };
+  if (t.type === 'expense') return { v: -t.amount, tone: '' as const };
+  if (!pov) return { v: t.amount, tone: '' as const, neutral: true };
+  const credit = d.allAccounts.find((a) => a.id === pov)?.type === 'credit';
+  const out = pov === t.accountId;
+  const inflow = out ? false : true;
+  const v = credit ? (inflow ? -t.amount : t.amount) : (inflow ? t.amount : -t.amount);
+  return { v, tone: '' as const };
 }
 
 export function TxnIcon({ t }: { t: Txn }) {
@@ -33,12 +60,13 @@ export function TxnIcon({ t }: { t: Txn }) {
   return <div className="li-ico">{cat ? <CatIcon k={cat.icon} /> : <Wallet />}</div>;
 }
 
-export function TxnRow({ t, full, onOpen }: { t: Txn; full?: boolean; onOpen: () => void }) {
+export function TxnRow({ t, full, onOpen, pov }: { t: Txn; full?: boolean; onOpen: () => void; pov?: string }) {
   const { data } = useStore();
-  const acct = data.accounts.find((a) => a.id === t.accountId);
-  const cat = txnCategoryLabel(data, t);
-  const sign = t.type === 'income' ? 1 : t.type === 'expense' ? -1 : 0;
-  const amt = <Money v={sign * t.amount} sign={sign > 0} className={cn(sign > 0 && 'pos', 'amt-md')} />;
+  const acct = data.allAccounts.find((a) => a.id === t.accountId);
+  const cat = txnCategoryLabel(data, t, pov);
+  const da = txnDisplayAmount(data, t, pov);
+  const amt = <Money v={da.v} sign={t.type === 'income' || (t.type === 'transfer' && !!pov)} className={cn(da.tone === 'pos' && 'pos', 'amt-md')} />;
+  
   if (!full) {
     return (
       <button className="li" onClick={onOpen}>
@@ -53,11 +81,11 @@ export function TxnRow({ t, full, onOpen }: { t: Txn; full?: boolean; onOpen: ()
       <TxnIcon t={t} />
       <div style={{ minWidth: 0 }}>
         <div className="li-title ellipsis">{t.payee}{t.splits?.length ? <span className="badge-split" style={{ marginLeft: 8 }}><Split size={12} />Split</span> : null}</div>
-        <div className="li-sub ellipsis tx-m">{cat} · {acct?.name}</div>
+        <div className="li-sub ellipsis tx-m">{cat}{t.type === 'transfer' ? '' : ` · ${acct?.name}`}</div>
         {t.notes && <div className="li-sub ellipsis" style={{ fontSize: 12 }}>{t.notes}</div>}
       </div>
-      <div className="tx-cat ellipsis small" style={{ color: 'var(--ink-2)' }}>{cat}</div>
-      <div className="tx-acct ellipsis small muted">{acct?.name}</div>
+      <div className="tx-cat ellipsis small" style={{ color: 'var(--ink-2)' }}>{t.type === 'transfer' ? 'Transfer' : cat}</div>
+      <div className="tx-acct ellipsis small muted">{t.type === 'transfer' ? cat : acct?.name}</div>
       <div className="right">{amt}</div>
     </button>
   );

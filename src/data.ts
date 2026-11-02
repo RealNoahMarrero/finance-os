@@ -8,6 +8,7 @@ export interface Account {
   id: string; name: string; type: AccountType; mask: string; institution: string;
   balance: number; // cents. Credit cards: amount owed (positive).
   limit?: number;
+  archived?: boolean;              // hidden from lists and pickers; history is kept
   lastReconciled: string | null;   // latest reconciliation or cutover date; null = never verified
   baseline: string | null;         // cutover date; null = no cutover yet (history not yet anchored)
   openingBalance: number | null;   // the balance the user entered at the cutover date
@@ -48,14 +49,14 @@ export interface Debt { id: string; name: string; balance: number; payment: numb
 export interface Planned { id: string; label: string; amount: number; dayOfMonth?: number; date?: string }
 export interface Reconciliation { id: string; accountId: string; date: string; recorded: number; actual: number; diff: number; adjustmentTxnId?: string; note?: string }
 export interface DataState {
-  accounts: Account[]; groups: Group[]; categories: Category[]; txns: Txn[]; bills: Bill[];
+  accounts: Account[]; allAccounts: Account[]; groups: Group[]; categories: Category[]; txns: Txn[]; bills: Bill[];
   incomes: Income[]; debts: Debt[]; planned: Planned[]; reconciliations: Reconciliation[]; today: string;
   hiddenBusiness: { accounts: number; categories: number; transactions: number };
   credit: CreditState;
 }
 
 export function emptyData(): DataState {
-  return { accounts: [], groups: [], categories: [], txns: [], bills: [], incomes: [], debts: [], planned: [], reconciliations: [], today: todayISO(), hiddenBusiness: { accounts: 0, categories: 0, transactions: 0 }, credit: { scores: [], meta: {}, reported: [], ready: false } };
+  return { accounts: [], allAccounts: [], groups: [], categories: [], txns: [], bills: [], incomes: [], debts: [], planned: [], reconciliations: [], today: todayISO(), hiddenBusiness: { accounts: 0, categories: 0, transactions: 0 }, credit: { scores: [], meta: {}, reported: [], ready: false } };
 }
 
 // ═════════ selectors ═════════
@@ -321,7 +322,7 @@ export function usualSpend(d: DataState, catId: string) {
   return Math.round((envelope(d, catId, m1).spent + envelope(d, catId, m2).spent) / 2);
 }
 export function balanceSeries(d: DataState, accountId: string, days = 30) {
-  const a = d.accounts.find((x) => x.id === accountId)!;
+  const a = d.allAccounts.find((x) => x.id === accountId) ?? d.accounts.find((x) => x.id === accountId)!;
   const pts: number[] = [];
   for (let i = -days; i <= 0; i++) {
     const date = addDays(d.today, i);
