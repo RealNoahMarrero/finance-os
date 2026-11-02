@@ -116,13 +116,18 @@ export function Insights() {
         </section>
       </div>
 
-      {cr.n > 0 && (
-        <a href="#/credit" className="card pad" style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16, flexWrap: 'wrap' }} aria-label="Credit summary" data-testid="insights-credit">
-          <div className="grow"><div className="eyebrow">Credit</div>
-            <div className="small" style={{ marginTop: 4 }}>{cr.t.pct != null ? <>Utilization <b className="num">{cr.t.pct.toFixed(1).replace(/\.0$/, '')}%</b> across {cr.t.eligibleCards} {cr.t.eligibleCards === 1 ? 'card' : 'cards'} (estimate from current balances)</> : 'Add a credit limit to see utilization'}{cr.s ? <> · latest score <b className="num">{cr.s.score}</b> <span className="muted">({cr.s.bureau}, {cr.s.model})</span></> : ''}</div></div>
-          <span className="small muted">Open Credit →</span>
+      <div className="ov-cols" style={{ marginTop: 0, marginBottom: 16 }}>
+        <a href="#/credit" className="card pad" style={{ display: 'block' }} aria-label="Credit summary" data-testid="insights-credit">
+          <div className="eyebrow">Credit</div>
+          <div className="small" style={{ marginTop: 4 }}>{cr.n > 0 ? (cr.t.pct != null ? <>Utilization <b className="num">{cr.t.pct.toFixed(1).replace(/\.0$/, '')}%</b> across {cr.t.eligibleCards} {cr.t.eligibleCards === 1 ? 'card' : 'cards'} (estimate from current balances)</> : 'Add a credit limit to see utilization') : 'Card utilization and scores you enter yourself'}{cr.s ? <> · latest score <b className="num">{cr.s.score}</b> <span className="muted">({cr.s.bureau}, {cr.s.model})</span></> : ''}</div>
+          <div className="small muted" style={{ marginTop: 8 }}>Open Credit →</div>
         </a>
-      )}
+        <a href="#/plan/forecast" className="card pad" style={{ display: 'block' }} aria-label="Forecast" data-testid="insights-forecast">
+          <div className="eyebrow">Forecast</div>
+          <div className="small" style={{ marginTop: 4 }}>A look at the next 30–365 days based on bills and income you’ve entered. A projection, not a promise.</div>
+          <div className="small muted" style={{ marginTop: 8 }}>Open Forecast →</div>
+        </a>
+      </div>
 
       <section className="card" style={{ overflow: 'hidden' }}>
         <div className="sect-head" style={{ padding: '16px 18px 4px' }}><h2 className="sect-title">Worth knowing</h2></div>

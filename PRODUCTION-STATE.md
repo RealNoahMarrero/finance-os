@@ -38,3 +38,4 @@ Site: https://marrero-finance.netlify.app/ (existing Netlify site; GitHub repo R
 ## Unified category + bill creation (migration 015)
 - Applied 2026-11-01 after verified backup db-full-2026-11-01T01-47-02. Adds nullable `categories.bill_amount` (payment amount, separate from the `target_amount` funding target; NULL = same as target, so every existing bill is unchanged) and updates `fos_pay_bill` to use it. No policy/grant changes; 2,051 transactions and 18 debts intact; anon still blocked.
 - App: New category form (Bills groups: scheduled bill vs funding only), Edit category (name/emoji/group), scheduled-bill section on the category sheet (add/edit/pause/resume/remove with confirmation), mobile entry via More → New category or bill.
+- Finances redesign (Nov 2026): app renamed in UI to 'Finances'; Overview rewritten (accounts, bills, recent, small budget/income); nav = Overview, Transactions, Accounts, Bills & Budget, Insights; no database changes.

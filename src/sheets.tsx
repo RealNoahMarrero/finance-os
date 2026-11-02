@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, useEffect } from 'react';
-import { ArrowRight, ArrowUpDown, Bell, Check, CircleCheck, Download, Eye, FlaskConical, Info, Landmark, LogOut, ListChecks, Pencil, Plus, Scale, Split, StickyNote, Trash, TriangleAlert } from 'lucide-react';
+import { ArrowRight, ArrowUpDown, Bell, Check, CircleCheck, Download, Eye, FlaskConical, Info, Landmark, LogOut, ListChecks, Pencil, Plus, Scale, Split, StickyNote, Trash, TriangleAlert, Wallet } from 'lucide-react';
 import { useStore } from './store';
 import {
   allEnvelopes, envelope, readyToAssign, staleness, billOccurrences, drift, rollForward, type Account, type Bill, type BillPeriod, type Category, type Txn, type Income, type Repeat as Rep,
@@ -541,7 +541,7 @@ export function BillSheet({ billId, date }: { billId: string; date: string }) {
       <Sheet title="Review before posting" sub="Nothing is recorded until you confirm." onClose={closeModal}
         footer={<><button className="btn" onClick={() => setStep('view')}>Back</button>
           <button className="btn primary" disabled={cents <= 0 || saving || !a} onClick={async () => { setSaving(true); if (await payBill(billId, date, { post: true, amount: cents, accountId: acctId })) { toast(`${bill.name} paid · ${money(cents)} posted`); closeModal(); } else setSaving(false); }}>{saving ? 'Posting…' : 'Post transaction'}</button></>}>
-        <Callout tone="planned" icon={<Eye />}>Finance OS prepared this transaction from your bill. Edit anything, then post it.</Callout>
+        <Callout tone="planned" icon={<Eye />}>Finances prepared this transaction from your bill. Edit anything, then post it.</Callout>
         <div className="card pad" style={{ margin: '14px 0', boxShadow: 'none', background: 'var(--surface-2)' }}>
           <div className="kv"><span className="k">Payee</span><span className="v">{bill.payee}</span></div>
           <div className="kv"><span className="k">Date</span><span className="v">{fmtDate(data.today, 'long')}</span></div>
@@ -580,7 +580,7 @@ export function BillSheet({ billId, date }: { billId: string; date: string }) {
         <div style={{ marginTop: 4 }}>
           <div className="label" style={{ marginBottom: 8 }}>When you mark this paid…</div>
           <Seg block value={bill.mode} onChange={(m) => { void setBillMode(billId, m); }} options={[{ v: 'reminder', label: 'Just a reminder' }, { v: 'prepare', label: 'Prepare a transaction' }]} />
-          <div className="small muted" style={{ marginTop: 8 }}>{bill.mode === 'reminder' ? 'Finance OS only tracks the due date. You record the payment yourself.' : 'Finance OS prepares the transaction for you to review. It is never posted without your confirmation.'}</div>
+          <div className="small muted" style={{ marginTop: 8 }}>{bill.mode === 'reminder' ? 'Finances only tracks the due date. You record the payment yourself.' : 'Finances prepares the transaction for you to review. It is never posted without your confirmation.'}</div>
         </div>
       )}
       <div style={{ marginTop: 14 }}>
@@ -704,10 +704,10 @@ export function ReconcileSheet({ id }: { id: string }) {
         <div className="stack gap16 fade-in">
           <div>
             <h3 style={{ fontSize: 16, fontWeight: 650, letterSpacing: '-0.02em' }}>What does your {credit ? 'statement or card app' : 'bank'} say right now?</h3>
-            <p className="small muted" style={{ marginTop: 4 }}>{credit ? 'Enter the current amount owed.' : 'Enter the current available balance.'} Finance OS compares it with what’s recorded and never changes anything until you confirm.</p>
+            <p className="small muted" style={{ marginTop: 4 }}>{credit ? 'Enter the current amount owed.' : 'Enter the current available balance.'} Finances compares it with what’s recorded and never changes anything until you confirm.</p>
           </div>
           <div className="card pad" style={{ boxShadow: 'none', background: 'var(--surface-2)' }}>
-            <div className="row between"><div><div className="eyebrow">Recorded in Finance OS</div><div className="amt-lg num"><Money v={a.balance} /></div></div>
+            <div className="row between"><div><div className="eyebrow">Recorded in Finances</div><div className="amt-lg num"><Money v={a.balance} /></div></div>
               <StatusPill status={st.level === 'fresh' ? 'ok' : st.level === 'aging' ? 'warn' : 'late'}>{st.days === 0 ? 'Reconciled today' : `${st.days} days since last`}</StatusPill></div>
             <div className="xs muted" style={{ marginTop: 6 }}>Last reconciled {a.lastReconciled ? fmtDate(a.lastReconciled, 'long') : 'never'}</div>
           </div>
@@ -724,7 +724,7 @@ export function ReconcileSheet({ id }: { id: string }) {
       {step === 2 && (
         <div className="stack gap16 fade-in">
           <div className="card pad" style={{ boxShadow: 'none' }}>
-            <div className="kv"><span className="k">Recorded in Finance OS</span><span className="v num">{money(a.balance)}</span></div>
+            <div className="kv"><span className="k">Recorded in Finances</span><span className="v num">{money(a.balance)}</span></div>
             <div className="kv"><span className="k">{credit ? 'Statement says you owe' : 'Your bank says'}</span><span className="v num">{money(actual)}</span></div>
             <div className="kv"><span className="k" style={{ fontWeight: 650, color: 'var(--ink)' }}>Difference</span>
               <span className={cn('v num', diff === 0 ? 'pos' : 'warn')} style={{ fontSize: 18, fontWeight: 650 }}>{diff === 0 ? 'None — it matches' : money(diff, { sign: true })}</span></div>
@@ -784,7 +784,7 @@ export function CutoverSheet({ id }: { id?: string }) {
         const ok = await setCutovers(date, entered.map((a) => ({ accountId: a.id, opening: toCents(vals[a.id]) })));
         if (ok) closeModal(); else setSaving(false);
       }}>{saving ? 'Saving…' : entered.length ? `Set ${entered.length} opening balance${entered.length > 1 ? 's' : ''}` : 'Enter at least one balance'}</button>}>
-      <Callout tone="planned" icon={<Eye />}>Nothing is deleted or rewritten. Every past transaction stays saved and searchable; only transactions dated <b>after</b> the date you pick change the balance from here on. Use balances from your bank or card statements — Finance OS never guesses them.</Callout>
+      <Callout tone="planned" icon={<Eye />}>Nothing is deleted or rewritten. Every past transaction stays saved and searchable; only transactions dated <b>after</b> the date you pick change the balance from here on. Use balances from your bank or card statements — Finances never guesses them.</Callout>
       <div className="field" style={{ marginTop: 14 }}><label htmlFor="cd">Cutover date</label>
         <input id="cd" type="date" className="input" value={date} max={data.today} onChange={(e) => setDate(e.target.value)} />
         <div className="xs muted">Balances you enter below are as of the end of this day. A recent statement date works best.</div></div>
@@ -855,7 +855,7 @@ function ScheduleFields({ s, set }: { s: ScheduleState; set: (p: Partial<Schedul
         {(s.period === 'Monthly' || s.period === 'Yearly') && day >= 29 && <div className="xs muted" style={{ marginTop: 6 }}>Anchored to the {day}th: shorter months use their last day, then it returns to the {day}th.</div>}</div>
       <div className="field"><label>When you mark it paid…</label>
         <Seg block value={s.mode} onChange={(m) => set({ mode: m })} options={[{ v: 'reminder', label: 'Just a reminder' }, { v: 'prepare', label: 'Prepare a transaction' }]} />
-        <div className="xs muted" style={{ marginTop: 6 }}>{s.mode === 'reminder' ? 'Finance OS only tracks the due date.' : 'Finance OS prepares the transaction for you to review. It is never posted without your confirmation.'}</div></div>
+        <div className="xs muted" style={{ marginTop: 6 }}>{s.mode === 'reminder' ? 'Finances only tracks the due date.' : 'Finances prepares the transaction for you to review. It is never posted without your confirmation.'}</div></div>
     </div>
   );
 }
@@ -974,7 +974,7 @@ export function MenuSheet() {
   );
   return (
     <Sheet title="More" onClose={closeModal}>
-      <div className="list">{link('/accounts', 'Accounts & reconciliation', <Landmark />)}{link('/credit', 'Credit & utilization', <Gauge />)}{link('/insights', 'Insights', <Eye />)}
+      <div className="list">{link('/plan/budget', 'Budget (optional)', <Wallet />)}{link('/accounts', 'Accounts & reconciliation', <Landmark />)}{link('/credit', 'Credit & utilization', <Gauge />)}{link('/insights', 'Insights', <Eye />)}
         <button className="li hover" style={{ padding: '14px 4px' }} onClick={() => openModal({ type: 'category-add' })}><span className="li-ico"><Plus /></span><span className="li-title grow">New category or bill</span><ArrowRight size={16} className="muted" /></button>
         <button className="li hover" style={{ padding: '14px 4px' }} onClick={() => openModal({ type: 'cutover' })}><span className="li-ico"><Scale /></span><span className="li-title grow">Set opening balances</span><ArrowRight size={16} className="muted" /></button></div>
       <div style={{ marginTop: 18 }}><div className="label" style={{ marginBottom: 8 }}>Appearance</div><ThemeSwitch theme={theme} setTheme={setTheme} /></div>
@@ -1067,7 +1067,7 @@ export function BillEditSheet({ billId }: { billId: string }) {
         <div className="xs muted" style={{ marginTop: 6 }}>What you set aside each month. Separate from the payment amount above.</div></div>
       <div className="field" style={{ marginTop: 14 }}><label>When you mark it paid…</label>
         <Seg block value={mode} onChange={setMode} options={[{ v: 'reminder', label: 'Just a reminder' }, { v: 'prepare', label: 'Prepare a transaction' }]} />
-        <div className="xs muted" style={{ marginTop: 6 }}>{mode === 'reminder' ? 'Finance OS only tracks the due date.' : 'Finance OS prepares the transaction for you to review. It is never posted without your confirmation.'}</div></div>
+        <div className="xs muted" style={{ marginTop: 6 }}>{mode === 'reminder' ? 'Finances only tracks the due date.' : 'Finances prepares the transaction for you to review. It is never posted without your confirmation.'}</div></div>
       <div className="field" style={{ marginTop: 14 }}><label htmlFor="bg">Budget group</label>
         <select id="bg" className="input" value={groupId} onChange={(e) => setGroupId(e.target.value)}>{data.groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}</select>
         <div className="xs muted" style={{ marginTop: 6 }}>This bill is paid from its own budget envelope, <b>{name.trim() || bill.name}</b>. Renaming it renames that envelope everywhere; its history stays attached.</div></div>

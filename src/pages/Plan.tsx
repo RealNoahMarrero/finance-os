@@ -7,19 +7,16 @@ import {
 import { addDays, cn, compact, daysInMonth, diffDays, fmtDate, mon, money, monthKey, monthLabel, monthShift, parse, relDay, sum } from '../lib';
 import { Callout, Empty, Money, Seg, StatusPill } from '../ui';
 import { ForecastChart, ForecastLegend, type Scenario } from '../charts';
-import { PageHead, billStatusPill } from '../shared';
+import { PageHead, SectionTabs, billStatusPill } from '../shared';
 
 type Tab = 'bills' | 'income' | 'forecast' | 'calendar';
-const TABS: { v: Tab; label: string }[] = [{ v: 'bills', label: 'Bills' }, { v: 'income', label: 'Income' }, { v: 'forecast', label: 'Forecast' }, { v: 'calendar', label: 'Calendar' }];
 
 export function Plan({ tab }: { tab: Tab }) {
   const { data } = useStore();
   return (
     <div className="page">
-      <PageHead title="Plan" sub="Bills, income and cash flow — what’s coming and whether you’re ready" />
-      <div style={{ marginBottom: 18, overflowX: 'auto' }}>
-        <Seg value={tab} onChange={(t) => (location.hash = `/plan/${t}`)} options={TABS} />
-      </div>
+      <PageHead title={tab === 'forecast' ? 'Forecast' : 'Bills & Budget'} sub={tab === 'forecast' ? 'A projection, not a promise — based on bills and income you’ve entered' : 'What’s coming due, what’s coming in, and your monthly plan'} />
+      {tab === 'forecast' ? <a className="sect-link" href="#/insights" style={{ marginBottom: 14 }}><ChevronLeft size={14} />Back to Insights</a> : <SectionTabs active={tab} />}
       {data.accounts.length === 0 ? (
         <div className="card"><Empty icon={<Bell />} title="Nothing to plan yet" text="Once you add accounts, bills and expected income, this is where you’ll see what’s coming and whether your cash lasts." /></div>
       ) : tab === 'bills' ? <BillsTab /> : tab === 'income' ? <IncomeTab /> : tab === 'forecast' ? <ForecastTab /> : <CalendarTab />}
@@ -89,7 +86,7 @@ function BillsTab() {
       {grp('Later this month', later)}
       {grp('Next month', next)}
       <AllBills />
-      <Callout icon={<Info />}>Bills never post a transaction on their own. If a bill is set to <b>Prepares</b>, Finance OS fills in the transaction when you mark it paid — you review and confirm before anything is recorded.</Callout>
+      <Callout icon={<Info />}>Bills never post a transaction on their own. If a bill is set to <b>Prepares</b>, Finances fills in the transaction when you mark it paid — you review and confirm before anything is recorded.</Callout>
     </div>
   );
 }

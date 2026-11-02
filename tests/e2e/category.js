@@ -10,7 +10,7 @@ const cat = (n, cols) => q(`select ${cols} from categories where name='${n}'`);
   const g0 = guard();
   const txt = async (s) => (await p.locator(s).first().textContent()).replace(/\s+/g, ' ');
   // 1 unified creation
-  await p.click('.sidebar >> text=Budget'); await p.waitForSelector('text=New category'); await p.click('button:has-text("New category") >> nth=0'); await p.waitForSelector('#cn');
+  await p.evaluate(() => (location.hash = '/plan/budget')); await p.waitForSelector('text=New category'); await p.click('button:has-text("New category") >> nth=0'); await p.waitForSelector('#cn');
   await p.fill('#cn', 'Test Power Bill'); await p.fill('#ce', '💡'); await p.click('.sheet .chip:text-is("Bills")');
   ck('Bills group offers scheduled bill vs funding only', (await p.locator('.sheet').textContent()).includes('A scheduled bill') && (await p.locator('.sheet').textContent()).includes('Funding only') && await p.locator('[data-testid=schedule-fields]').count() === 1);
   await p.fill('#sf-amt', '60.76'); await p.fill('#sf-date', '2026-11-20');
@@ -20,9 +20,9 @@ const cat = (n, cols) => q(`select ${cols} from categories where name='${n}'`);
   await p.click('.sheet .chip:text-is("Monthly")'); await p.click('.sheet .seg button:has-text("Prepare a transaction")');
   await p.click('.sheet button.primary'); await p.waitForTimeout(1500);
   ck('category + bill created in one step', cat('Test Power Bill', "coalesce(bill_amount,0)||'|'||target_amount||'|'||due_date||'|'||is_repeating||'|'||target_period||'|'||bill_mode||'|'||emoji||'|'||group_id") === '60.76|40.00|2026-11-20|true|Monthly|prepare|💡|1', cat('Test Power Bill', '*'));
-  await p.click('.sidebar >> text=Plan'); await p.waitForSelector('text=All bills & subscriptions'); ck('new bill appears in Bills & Planning', await p.locator('button[aria-label="Edit Test Power Bill"]').count() === 1);
+  await p.click('.sidebar >> text=Bills & Budget'); await p.waitForSelector('text=All bills & subscriptions'); ck('new bill appears in Bills & Planning', await p.locator('button[aria-label="Edit Test Power Bill"]').count() === 1);
   // funding-only creation
-  await p.click('.sidebar >> text=Budget'); await p.click('button:has-text("New category") >> nth=0'); await p.waitForSelector('#cn'); await p.fill('#cn', 'Test Fund Only'); await p.click('.sheet .chip:text-is("Bills")'); await p.click('.sheet .seg button:has-text("Funding only")');
+  await p.evaluate(() => (location.hash = '/plan/budget')); await p.click('button:has-text("New category") >> nth=0'); await p.waitForSelector('#cn'); await p.fill('#cn', 'Test Fund Only'); await p.click('.sheet .chip:text-is("Bills")'); await p.click('.sheet .seg button:has-text("Funding only")');
   ck('funding-only hides schedule fields', await p.locator('[data-testid=schedule-fields]').count() === 0); await p.fill('#ct', '25'); await p.click('.sheet button.primary'); await p.waitForTimeout(1300);
   ck('funding-only has no due date or bill amount', cat('Test Fund Only', "target_amount||'|'||coalesce(due_date::text,'none')||'|'||coalesce(bill_amount::text,'none')") === '25.00|none|none');
   ck('duplicate name blocked', await (async () => { await p.click('button:has-text("New category") >> nth=0'); await p.waitForSelector('#cn'); await p.fill('#cn', 'test fund only'); const r = (await p.locator('.sheet [role=alert]').textContent()).includes('already exists'); await p.keyboard.press('Escape'); return r; })());
@@ -39,14 +39,14 @@ const cat = (n, cols) => q(`select ${cols} from categories where name='${n}'`);
   ck('name, emoji and group changed', cat('Dave - Noah (phone)', "emoji||'|'||group_id") === '📱|2');
   ck('bill, funding, envelope intact after group change', cat('Dave - Noah (phone)', "coalesce(bill_amount,0)||'|'||target_amount||'|'||due_date||'|'||assigned_amount") === '60.76|60.76|2026-11-18|12.50');
   // 4 bill independence: edit payment on a weekly bill leaves target alone; monthly tied bill moves both
-  await p.click('.sidebar >> text=Plan'); await p.waitForSelector('text=All bills & subscriptions'); await p.click('button[aria-label="Edit Dave - Noah (phone)"]'); await p.waitForSelector('#ba');
+  await p.click('.sidebar >> text=Bills & Budget'); await p.waitForSelector('text=All bills & subscriptions'); await p.click('button[aria-label="Edit Dave - Noah (phone)"]'); await p.waitForSelector('#ba');
   await p.fill('#ba', '70'); ck('tied monthly: target follows the payment by default', (await p.inputValue('#bt')) === '70.00' || (await p.inputValue('#bt')) === '70');
   await p.fill('#bt', '55'); await p.click('button:has-text("Save changes")'); await p.waitForTimeout(1300);
   ck('payment and funding target saved independently', cat('Dave - Noah (phone)', "bill_amount||'|'||target_amount") === '70.00|55.00');
   await p.click('button[aria-label="Edit Dave - Noah (phone)"]'); await p.waitForSelector('#ba'); await p.fill('#ba', '80'); ck('no longer tied: target does not move', (await p.inputValue('#bt')) === '55.00'); await p.click('button:has-text("Save changes")'); await p.waitForTimeout(1300);
   ck('target untouched when untied', cat('Dave - Noah (phone)', "bill_amount||'|'||target_amount") === '80.00|55.00');
   // 5 pause / resume / remove from category sheet
-  await p.click('.sidebar >> text=Budget'); await p.click('.brow:has-text("Dave - Noah (phone)")'); await p.waitForSelector('[data-testid=bill-section]');
+  await p.evaluate(() => (location.hash = '/plan/budget')); await p.click('.brow:has-text("Dave - Noah (phone)")'); await p.waitForSelector('[data-testid=bill-section]');
   await p.click('[data-testid=bill-section] button:has-text("Pause bill")'); await p.waitForTimeout(1300); ck('paused from the category sheet', cat('Dave - Noah (phone)', 'bill_paused') === 't' && (await txt('[data-testid=bill-section]')).includes('Paused'));
   await p.click('[data-testid=bill-section] button:has-text("Resume bill")'); await p.waitForTimeout(1300); ck('resumed', cat('Dave - Noah (phone)', 'bill_paused') === 'f');
   const gBefore = guard();
@@ -66,7 +66,7 @@ const cat = (n, cols) => q(`select ${cols} from categories where name='${n}'`);
   ck('removing a debt category\'s bill keeps the debt', cat('Progressive Leasing Laptop', "is_debt||'|'||balance") === dBefore && (await p.locator('[data-testid=debt-section]').count()) === 1);
   await p.keyboard.press('Escape'); await p.waitForTimeout(300);
   // 7 other features
-  await p.click('.sidebar nav a:has-text("Credit")'); await p.waitForSelector('#credit-page'); ck('credit tracker intact', await p.locator('[data-testid=total-util]').count() === 1);
+  await p.evaluate(() => (location.hash = '/credit')); await p.waitForSelector('#credit-page'); ck('credit tracker intact', await p.locator('[data-testid=total-util]').count() === 1);
   // mobile
   const m = await (await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })).newPage(); m.on('pageerror', (e) => errs.push(e.message));
   await m.goto('http://localhost:4173/#/budget'); await m.fill('#em', 'owner@test.local'); await m.fill('#pw', 'correct-horse-battery'); await m.click('button.primary'); await m.waitForSelector('.tabbar'); await m.waitForTimeout(600);
@@ -74,7 +74,7 @@ const cat = (n, cols) => q(`select ${cols} from categories where name='${n}'`);
   await m.waitForSelector('#cn', { timeout: 4000 }).catch(() => {});
   if (await m.locator('#cn').count()) { await m.click('.sheet .chip:text-is("Bills")'); await m.waitForTimeout(300); ck('mobile: create form has no horizontal overflow', (await m.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) <= 1); await m.screenshot({ path: 'category-mobile.png' }); }
   else ck('mobile create entry reachable', false, 'New category not on mobile budget page');
-  await p.click('.sidebar >> text=Budget'); await p.click('button:has-text("New category") >> nth=0'); await p.waitForSelector('#cn'); await p.click('.sheet .chip:text-is("Bills")'); await p.screenshot({ path: 'category-desktop.png' });
+  await p.evaluate(() => (location.hash = '/plan/budget')); await p.click('button:has-text("New category") >> nth=0'); await p.waitForSelector('#cn'); await p.click('.sheet .chip:text-is("Bills")'); await p.screenshot({ path: 'category-desktop.png' });
   ck('no page errors', errs.length === 0, errs.join('|'));
   await b.close(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })();

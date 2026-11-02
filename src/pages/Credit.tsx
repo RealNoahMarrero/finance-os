@@ -42,7 +42,7 @@ export function Credit() {
     <div className="page" id="credit-page">
       <PageHead title="Credit" sub="Scores you enter by hand · utilization from your credit-card accounts"
         actions={<button className="btn primary" onClick={() => openModal({ type: 'credit-score' })}><Plus />Add score</button>} />
-      {!credit.ready && <div style={{ marginBottom: 16 }}><Callout tone="warn">Credit tracking isn’t set up in the database yet, so scores can’t be saved. Everything else in Finance OS is unaffected.</Callout></div>}
+      {!credit.ready && <div style={{ marginBottom: 16 }}><Callout tone="warn">Credit tracking isn’t set up in the database yet, so scores can’t be saved. Everything else in Finances is unaffected.</Callout></div>}
 
       {/* ── Overview ── */}
       <div className="grid g12" style={{ gap: 12, marginBottom: 12 }}>
@@ -56,7 +56,7 @@ export function Credit() {
             <div className="small muted" style={{ marginTop: 6 }}>{latest.bureau} · {latest.model} · {fmtDate(latest.observedOn, 'long')}{latest.source ? ` · ${latest.source}` : ''}</div>
             <div className="xs muted" style={{ marginTop: 4 }}>Change is only measured against the previous {latest.bureau} {latest.model} entry.</div>
           </> : <div style={{ marginTop: 8 }}>
-            <div className="small muted">No scores yet. Add a score from any bureau’s app or report — Finance OS never looks scores up or estimates them.</div>
+            <div className="small muted">No scores yet. Add a score from any bureau’s app or report — Finances never looks scores up or estimates them.</div>
             <button className="btn" style={{ marginTop: 12 }} onClick={() => openModal({ type: 'credit-score' })}><Plus />Add your first score</button>
           </div>}
         </section>

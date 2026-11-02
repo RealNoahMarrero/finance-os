@@ -72,14 +72,23 @@ export function billStatusPill(o: BillOcc, today: string) {
   return <StatusPill status="planned">Funded</StatusPill>;
 }
 
-export function BillRow({ o, onOpen }: { o: BillOcc; onOpen: () => void }) {
+/** Plain status for the homepage: only whether it's late, close, or just scheduled. Budget funding is not payment. */
+export function simplePill(o: BillOcc, today: string) {
+  const n = diffDays(o.date, today);
+  if (o.paid) return <StatusPill status="ok">Paid</StatusPill>;
+  if (o.status === 'overdue') return <StatusPill status="late">{-n}d overdue</StatusPill>;
+  if (n <= 7) return <StatusPill status="planned">Due soon</StatusPill>;
+  return <StatusPill status="muted">Scheduled</StatusPill>;
+}
+
+export function BillRow({ o, onOpen, simple }: { o: BillOcc; onOpen: () => void; simple?: boolean }) {
   const { data } = useStore();
   const late = o.status === 'overdue';
   return (
     <button className="li" onClick={onOpen}>
       <div className={cn('datebox', late && 'late')}><b className="num">{fmtDate(o.date, 'day')}</b><span>{mon(o.date)}</span></div>
       <div className="grow"><div className="li-title ellipsis">{o.bill.name}</div><div className="li-sub">{late ? `Was due ${relDay(o.date, data.today).toLowerCase()}` : relDay(o.date, data.today)}</div></div>
-      <div className="right stack" style={{ alignItems: 'flex-end', gap: 3 }}><Money v={o.bill.amount} className="amt-md" />{billStatusPill(o, data.today)}</div>
+      <div className="right stack" style={{ alignItems: 'flex-end', gap: 3 }}><Money v={o.bill.amount} className="amt-md" />{simple ? simplePill(o, data.today) : billStatusPill(o, data.today)}</div>
     </button>
   );
 }
@@ -122,5 +131,15 @@ export function AttnRow({ a }: { a: Attn }) {
       <div className="grow"><div className="li-title" style={{ fontSize: 13.5, lineHeight: 1.3 }}>{a.title}</div><div className="li-sub" style={{ fontSize: 12 }}>{a.sub}</div></div>
       <ChevronRight size={16} className="muted" style={{ marginTop: 8, flex: 'none' }} />
     </button>
+  );
+}
+
+/** Tabs shared by the "Bills & Budget" section. */
+export function SectionTabs({ active }: { active: 'bills' | 'budget' | 'income' | 'calendar' | 'forecast' }) {
+  const items = [['bills', 'Bills', '/plan/bills'], ['budget', 'Budget', '/plan/budget'], ['income', 'Income', '/plan/income'], ['calendar', 'Calendar', '/plan/calendar']] as const;
+  return (
+    <nav className="subtabs" aria-label="Bills and budget sections">
+      {items.map(([k, l, to]) => <a key={k} href={`#${to}`} aria-current={active === k ? 'page' : undefined}>{l}</a>)}
+    </nav>
   );
 }

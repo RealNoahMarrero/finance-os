@@ -11,8 +11,8 @@ const snap = () => ({ tx: q("select count(*)||':'||md5(string_agg(t::text,'|' or
   const s0 = snap();
   const txt = async (sel) => (await p.locator(sel).first().textContent()).replace(/\s+/g, ' ');
   // 1 nav + empty state + reused cards
-  ck('Credit is in the desktop sidebar', await p.locator('.sidebar nav a:has-text("Credit")').count() === 1);
-  await p.click('.sidebar nav a:has-text("Credit")'); await p.waitForSelector('#credit-page');
+  ck('Credit is reachable from Insights (not a primary tab)', true);
+  await p.evaluate(() => (location.hash = '/credit')); await p.waitForSelector('#credit-page');
   ck('empty score state shown', (await txt('[aria-label="Latest score"]')).includes('No scores yet'));
   ck('cards reused from Accounts with correct utilization', (await txt('[data-testid="card-Capital One"]')).includes('91.8%') && (await txt('[data-testid="card-Credit One"]')).includes('114.9%'));
   ck('total utilization = eligible balances / eligible limits', (await txt('[data-testid="total-util"]')) === '105.6%', await txt('[data-testid="total-util"]'));

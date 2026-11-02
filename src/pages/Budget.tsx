@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { ArrowLeftRight, ChevronDown, ChevronRight, CircleHelp, Plus, Sparkles, Wallet } from 'lucide-react';
 import { useStore } from '../store';
-import { allEnvelopes, billOccurrences, readyToAssign, type Category, type Envelope } from '../data';
+import { allEnvelopes, billOccurrences, readyToAssign, monthlyFlow, totalAvail, type Category, type Envelope } from '../data';
 import { addDays, cn, fmtDate, money, monthLabel, monthKey, sum } from '../lib';
 import { CatIcon, Callout, Empty, Money, Seg, StatusPill } from '../ui';
-import { PageHead } from '../shared';
+import { PageHead, SectionTabs } from '../shared';
 
 const PRI = { 1: 'Essential', 2: 'Important', 3: 'Flexible' } as const;
 type Filter = 'all' | 'needs' | 'over' | 'funded';
@@ -44,12 +44,26 @@ export function Budget() {
   };
 
   const month = monthKey(data.today);
+  const flow = monthlyFlow(data);
+  const thisMonth = flow[flow.length - 1];
+  const near = envs.filter((e) => e.cat.target && e.env.avail >= 0 && e.env.spent >= 0.8 * e.cat.target!);
   return (
     <div className="page">
-      <PageHead title="Budget" sub={`${monthLabel(month, true)} · Zero-based — every dollar gets a job`}
+      <PageHead title="Bills & Budget" sub={`${monthLabel(month, true)} · Optional — set a monthly amount for the categories you care about`}
         actions={<><button className="btn desktop-only" onClick={() => openModal({ type: 'category-add' })}><Plus />New category</button><button className="btn desktop-only" onClick={() => openModal({ type: 'move' })}><ArrowLeftRight />Move money</button><button className="btn primary desktop-only" onClick={() => openModal({ type: 'assign' })}><Plus />Assign money</button></>} />
 
-      <div className="grid g12" style={{ marginBottom: 16 }}>
+      <SectionTabs active="budget" />
+      <section className="card pad" style={{ marginBottom: 16 }} aria-label="This month" data-testid="budget-month">
+        <div className="ov-sum">
+          <div><div className="eyebrow">Spent this month</div><div className="amt-xl num"><Money v={thisMonth.expense} /></div><div className="xs muted">Excludes transfers</div></div>
+          <div><div className="eyebrow">Left in categories</div><div className="amt-xl num"><Money v={totalAvail(data)} /></div><div className="xs muted">Money set aside, not bank cash</div></div>
+          <div><div className="eyebrow">Needs a look</div><div className="amt-xl num">{overs.length + near.length}</div><div className="xs muted">{overs.length} over · {near.length} close to their amount</div></div>
+        </div>
+      </section>
+
+      <details style={{ marginBottom: 16 }} open={rta < 0 || undefined}>
+        <summary className="small" style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--ink-2)', padding: '4px 0 12px' }}>Advanced: envelopes &amp; funding {rta < 0 ? `· over-assigned by ${money(-rta)}` : `· ${money(rta)} unassigned`}</summary>
+      <div className="grid g12">
         <section className="card rta-card fade-in" style={{ gridColumn: '1 / span 7' }} aria-label="Ready to Assign">
           <div>
             <div className="eyebrow" style={{ color: rta < 0 ? 'var(--neg)' : 'var(--planned)' }}>{rta < 0 ? 'Over-assigned' : 'Ready to Assign'}</div>
@@ -76,6 +90,7 @@ export function Budget() {
           )}
         </section>
       </div>
+      </details>
 
       <div className="row between" style={{ gap: 12, margin: '4px 0 12px', flexWrap: 'wrap' }}>
         <div style={{ overflowX: 'auto', maxWidth: '100%' }}>

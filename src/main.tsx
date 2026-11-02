@@ -34,7 +34,7 @@ function Root() {
     case 'loading': return <div className="boot" aria-busy="true"><span className="boot-dot" /></div>;
     case 'out': return <Login />;
     case 'offline': return <Notice title="Can’t reach the database" action={<button className="btn primary" onClick={() => location.reload()}>Try again</button>}>Check your connection and try again. Nothing has been changed.</Notice>;
-    case 'denied': return <Notice title="Not authorized" action={<button className="btn" onClick={() => supabase.auth.signOut()}>Sign out</button>}>{gate.email} is signed in, but this account isn’t the owner of this Finance OS. No data is shown.</Notice>;
+    case 'denied': return <Notice title="Not authorized" action={<button className="btn" onClick={() => supabase.auth.signOut()}>Sign out</button>}>{gate.email} is signed in, but this account isn’t the owner of this Finances. No data is shown.</Notice>;
     case 'in': return <StoreProvider email={gate.email}><App /></StoreProvider>;
   }
 }

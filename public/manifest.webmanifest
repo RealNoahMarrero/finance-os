@@ -1,6 +1,6 @@
 {
-  "name": "Finance OS",
-  "short_name": "Finance OS",
+  "name": "Finances",
+  "short_name": "Finances",
   "description": "Private personal finance command center",
   "start_url": "/",
   "scope": "/",

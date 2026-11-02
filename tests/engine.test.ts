@@ -146,3 +146,26 @@ describe('cash vs envelopes', () => {
     expect(cashCheck(d2).expected30).toBe(50000); expect(cashCheck(d2).rta).toBe(c.rta);
   });
 });
+
+import { liquidTotal, cardsOwed, loansOwed } from '../src/data';
+describe('reliability: totals the homepage relies on', () => {
+  const flow = monthlyFlow(d).find((m) => m.key === '2026-10')!;
+  it('transfers are neither income nor spending, and the other entity is excluded', () => {
+    expect(flow.income).toBe(50000);
+    expect(flow.expense).toBe(4000); // card payment (transfer) and business expense are not counted
+  });
+  it('position = cash and savings − cards − loans, same figure everywhere', () => {
+    expect(netWorth(d)).toBe(liquidTotal(d) - cardsOwed(d) - loansOwed(d));
+    expect(cardsOwed(d)).toBe(20000);
+  });
+  it('a bill is paid only by a payment record, never because money is set aside', () => {
+    const rent = billOccurrences(d, '2026-11-01', '2026-11-30').find((x) => x.bill.id === '10')!;
+    expect(rent.paid).toBe(false);
+  });
+  it('guaranteed and anticipated income stay separate', () => {
+    const g = incomeOccurrences(d, '2026-11-01', '2026-11-30', 'guaranteed');
+    expect(g.every((o) => o.inc.certainty === 'guaranteed')).toBe(true);
+    const all = incomeOccurrences(d, '2026-11-01', '2026-11-30');
+    expect(all.some((o) => o.inc.certainty === 'anticipated')).toBe(true);
+  });
+});

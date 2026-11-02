@@ -512,3 +512,20 @@ a.hero-metric:hover, button.hero-metric:hover { background: var(--surface-2); }
 .who-note button:hover { color: var(--ink); text-decoration: underline; }
 .emoji-ico { font-size: 17px; line-height: 1; }
 @media (prefers-reduced-motion: reduce) { .boot-dot, .skeleton { animation: none; } }
+
+/* ── Overview (Finances) ─────────────────────────────── */
+.ov-sum { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.ov-sum > div + div { border-left: 1px solid var(--line); padding-left: 20px; }
+.ov-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.ov-tile { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); transition: border-color 0.15s; }
+.ov-tile:hover { border-color: var(--ink-3); }
+.ov-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-top: 24px; align-items: start; }
+@media (max-width: 760px) {
+  .ov-sum { grid-template-columns: 1fr; gap: 12px; }
+  .ov-sum > div + div { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); padding-top: 12px; }
+  .ov-cols { grid-template-columns: minmax(0, 1fr); margin-top: 16px; }
+}
+.subtabs { display: flex; gap: 4px; margin: 0 0 18px; overflow-x: auto; }
+.subtabs a { padding: 7px 14px; border-radius: 999px; font-size: 13.5px; font-weight: 600; color: var(--ink-3); white-space: nowrap; }
+.subtabs a[aria-current="page"] { background: var(--surface-2, var(--line)); color: var(--ink); }
+.subtabs a:hover { color: var(--ink); }

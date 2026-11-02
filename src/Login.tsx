@@ -24,7 +24,7 @@ export function Login() {
       <form className="card login-card fade-in" onSubmit={submit} aria-labelledby="login-h">
         <div className="row gap12" style={{ marginBottom: 18 }}>
           <BrandMark />
-          <div><div id="login-h" className="brand-name" style={{ fontSize: 18 }}>Finance OS</div><div className="small muted">Private — sign in to continue</div></div>
+          <div><div id="login-h" className="brand-name" style={{ fontSize: 18 }}>Finances</div><div className="small muted">Private — sign in to continue</div></div>
         </div>
         <div className="field"><label htmlFor="em">Email</label>
           <input id="em" className="input" type="email" autoComplete="username" required autoFocus value={email} onChange={(e) => setEmail(e.target.value)} /></div>

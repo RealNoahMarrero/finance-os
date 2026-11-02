@@ -36,7 +36,7 @@ export function CreditScoreSheet({ id, bureau: b0, model: m0 }: { id?: string; b
     if (ok) { toast(id ? 'Score updated' : `${bureau} score saved`); closeModal(); } else setSaving(false);
   };
   return (
-    <Sheet title={id ? 'Edit score' : 'Add a score'} sub="Entered by hand — Finance OS never looks scores up or estimates them" onClose={closeModal}
+    <Sheet title={id ? 'Edit score' : 'Add a score'} sub="Entered by hand — Finances never looks scores up or estimates them" onClose={closeModal}
       footer={<>{id && <button className="btn danger" disabled={saving} onClick={async () => { if (await deleteScore(id)) closeModal(); }}>Delete</button>}<button className="btn" onClick={closeModal}>Cancel</button><button className="btn primary" disabled={!!err || saving} onClick={save}>{saving ? 'Saving…' : id ? 'Save changes' : 'Save score'}</button></>}>
       <div className="field"><label>Bureau</label>
         <div className="chips" role="group" aria-label="Bureau">{BUREAUS.map((x) => <button key={x} className="chip" aria-pressed={bureau === x} onClick={() => setBureau(x)}>{x}</button>)}</div></div>
