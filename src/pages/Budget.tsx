@@ -4,7 +4,7 @@ import { useStore } from '../store';
 import { allEnvelopes, billOccurrences, readyToAssign, monthlyFlow, totalAvail, type Category, type Envelope } from '../data';
 import { addDays, cn, fmtDate, money, monthLabel, monthKey, sum } from '../lib';
 import { CatIcon, Callout, Empty, Money, Seg, StatusPill } from '../ui';
-import { PageHead, SectionTabs } from '../shared';
+import { PageHead, ReadyToAssignCard, SectionTabs } from '../shared';
 
 const PRI = { 1: 'Essential', 2: 'Important', 3: 'Flexible' } as const;
 type Filter = 'all' | 'needs' | 'over' | 'money' | 'funded' | 'debts';
@@ -56,6 +56,7 @@ export function Budget() {
         actions={<><button className="btn desktop-only" onClick={() => openModal({ type: 'category-add' })}><Plus />New category</button><button className="btn desktop-only" onClick={() => openModal({ type: 'move' })}><ArrowLeftRight />Move money</button><button className="btn primary desktop-only" onClick={() => openModal({ type: 'assign' })}><Plus />Assign money</button></>} />
 
       <SectionTabs active="budget" />
+      <div style={{ marginBottom: 16 }}><ReadyToAssignCard testid="rta" /></div>
       <section className="card pad" style={{ marginBottom: 16 }} aria-label="This month" data-testid="budget-month">
         <div className="ov-sum">
           <div><div className="eyebrow">Spent this month</div><div className="amt-xl num"><Money v={thisMonth.expense} /></div><div className="xs muted">Excludes transfers</div></div>
@@ -64,21 +65,10 @@ export function Budget() {
         </div>
       </section>
 
-      <details style={{ marginBottom: 16 }} open={rta < 0 || undefined}>
-        <summary className="small" style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--ink-2)', padding: '4px 0 12px' }}>Advanced: envelopes &amp; funding {rta < 0 ? `· over-assigned by ${money(-rta)}` : `· ${money(rta)} unassigned`}</summary>
+      <details style={{ marginBottom: 16 }} >
+        <summary className="small" style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--ink-2)', padding: '4px 0 12px' }}>Advanced: funding order</summary>
       <div className="grid g12">
-        <section className="card rta-card fade-in" style={{ gridColumn: '1 / span 7' }} aria-label="Ready to Assign">
-          <div>
-            <div className="eyebrow" style={{ color: rta < 0 ? 'var(--neg)' : 'var(--planned)' }}>{rta < 0 ? 'Over-assigned' : 'Ready to Assign'}</div>
-            <div className={cn('amt-hero num', rta < 0 ? 'neg' : 'c-planned')} style={{ marginTop: 6 }} data-testid="rta-value"><Money v={rta} /></div>
-            <div className="small muted" style={{ marginTop: 6, maxWidth: 360 }}>{rta < 0 ? <>Your envelopes hold more than the cash recorded in your accounts. Move money between envelopes or review old balances.</> : <>Money that’s in your accounts right now but doesn’t have a job yet.</>}{totalNeeds > 0 && <> Your monthly targets still need <b className="num" style={{ color: 'var(--ink-2)' }}>{money(totalNeeds, { cents: false })}</b>.</>}</div>
-          </div>
-          <div className="stack gap8" style={{ flex: 'none', minWidth: 170 }}>
-            <button className="btn primary" onClick={() => openModal({ type: 'assign' })} disabled={rta <= 0}><Sparkles />Assign money</button>
-            <button className="btn" onClick={() => openModal({ type: 'move' })}><ArrowLeftRight />Move money</button>
-          </div>
-        </section>
-        <section className="card pad" style={{ gridColumn: '8 / span 5' }} aria-label="Funding order">
+        <section className="card pad" style={{ gridColumn: '1 / -1' }} aria-label="Funding order">
           <div className="sect-head" style={{ marginBottom: 8 }}><h2 className="sect-title">Suggested funding order</h2><StatusPill status="planned">Planned</StatusPill></div>
           {order.length === 0 ? <div className="small muted">All targets are funded — nothing to prioritize.</div> : (
             <div className="stack">

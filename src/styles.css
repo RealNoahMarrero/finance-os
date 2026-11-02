@@ -310,7 +310,8 @@ button.attn:hover { background: var(--surface-2); }
 .avail.zero { background: var(--surface-3); color: var(--ink-3); }
 .avail.neg { background: var(--neg-soft); color: var(--neg); }
 .tgt-line { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-3); margin-top: 5px; }
-.rta-card { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 22px 26px; }
+.rta-card { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 24px; }
+.rta-actions { flex: none; min-width: 170px; }
 
 /* ── Transactions ────────────────────────────────────────────── */
 .tx-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
@@ -440,7 +441,9 @@ button.attn:hover { background: var(--surface-2); }
   .bgrid .col-fund, .bgrid .col-spent, .bgrid .col-chev { display: none; }
   .brow { padding: 13px 16px; }
   .bgroup { padding: 10px 16px; }
-  .rta-card { flex-direction: column; align-items: stretch; padding: 18px; gap: 14px; }
+  .rta-card { flex-direction: column; align-items: stretch; padding: 14px 16px; gap: 12px; }
+  .rta-actions { min-width: 0; }
+  .rta-actions .btn { width: 100%; }
 
   /* transactions: stacked */
   .tx { grid-template-columns: 38px minmax(0, 1fr) auto; gap: 12px; padding: 11px 16px; }

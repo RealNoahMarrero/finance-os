@@ -5,7 +5,7 @@ import {
 } from '../data';
 import { addDays, compact, daysInMonth, diffDays, fmtDate, money, monthKey, monthLabel, parse, plural, sum } from '../lib';
 import { Empty, Money, StatusPill } from '../ui';
-import { BillRow, PageHead, TxnRow } from '../shared';
+import { BillRow, PageHead, ReadyToAssignCard, TxnRow } from '../shared';
 
 export interface Insight { id: string; tone: 'pos' | 'warn' | 'planned' | 'proj'; title: string; text: string; href?: string }
 export function buildInsights(d: DataState): Insight[] {
@@ -105,6 +105,7 @@ export function Overview() {
         </div>
       )}
 
+      <div style={{ marginBottom: 16 }}><ReadyToAssignCard testid="ov-rta" compact /></div>
       <section className="card pad ov-sum" aria-label="Where you stand" data-testid="ov-summary">
         <div><div className="eyebrow">Cash &amp; savings</div><div className="amt-xl num" data-testid="ov-cash"><Money v={cc.cash} /></div><div className="xs muted">In your accounts</div></div>
         <div><div className="eyebrow">Owed on cards</div><div className="amt-xl num" data-testid="ov-owed"><Money v={owed} /></div><div className="xs muted">{cards.length ? `${plural(cards.length, 'card')}` : 'No cards'}</div></div>
