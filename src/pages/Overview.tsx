@@ -66,8 +66,17 @@ export function Overview() {
   const inEnvelopes = totalAvail(data);
   const hasBudget = data.categories.some((c) => !c.hidden && (c.target || envelope(data, c.id).assigned > 0));
 
-  const exp = incomeOccurrences(data, addDays(data.today, 1), addDays(data.today, 30)).sort((a, b) => a.date.localeCompare(b.date));
-  const expTotal = sum(exp, (o) => o.amount);
+  // Expected income: entries whose date has arrived but aren't marked received ("waiting"), plus everything scheduled for the next 30 days.
+  const exp = incomeOccurrences(data, addDays(data.today, 1), addDays(data.today, 30));
+  const waiting = data.incomes.filter((i) => i.date <= data.today).sort((x, y) => x.date.localeCompare(y.date));
+  const allExp = [...waiting, ...exp];
+  const expTotal = sum(waiting, (i) => i.amount) + sum(exp, (o) => o.amount);
+  const incRow = (key: string, label: string, date: string, amount: number, cert: 'guaranteed' | 'anticipated', late: boolean, repeats?: boolean) => (
+    <button key={key} className="li" onClick={() => openModal({ type: 'income', mode: 'view', id: key.replace(/\d{4}-\d\d-\d\d$/, '') })}>
+      <div className="grow"><div className="li-title ellipsis">{label}</div><div className="li-sub">{fmtDate(date)}{late ? ' · past expected date' : ''}{repeats ? ' · repeats' : ''}</div></div>
+      <div className="right stack" style={{ alignItems: 'flex-end', gap: 3 }}><Money v={amount} className="amt-md" /><StatusPill status={cert === 'guaranteed' ? 'planned' : 'muted'}>{cert === 'guaranteed' ? 'Guaranteed' : 'Anticipated'}</StatusPill></div>
+    </button>
+  );
 
   const tile = (a: Account) => {
     const credit = a.type === 'credit';
@@ -138,12 +147,19 @@ export function Overview() {
           {cc.overAssigned > 0 && <div className="xs muted" style={{ marginTop: 10 }}>Your categories hold {money(cc.overAssigned)} more than the {money(cc.cash)} in your accounts, so nothing is unassigned. Nothing was changed automatically.</div>}
         </section>
 
-        <section className="card pad" aria-label="Expected income">
-          <div className="sect-head"><h2 className="sect-title">Expected income</h2><a className="sect-link" href="#/plan/income">Details<ChevronRight size={14} /></a></div>
-          {exp.length ? (<>
-            <div className="kv"><span className="k">Next 30 days</span><span className="v num">{money(expTotal)}</span></div>
-            <div className="xs muted" style={{ marginTop: 6 }}>{exp.slice(0, 2).map((o) => `${o.inc.label || 'Income'} ${fmtDate(o.date)}`).join(' · ')}. Not counted as cash until it arrives.</div>
-          </>) : <div className="small muted">No income scheduled in the next 30 days.</div>}
+        <section className="card pad" aria-label="Expected income" data-testid="ov-income">
+          <div className="sect-head"><h2 className="sect-title">Expected income</h2><span className="row gap12"><button className="sect-link" onClick={() => openModal({ type: 'income', mode: 'add' })}><Plus size={14} />Add</button><a className="sect-link" href="#/plan/income">All income<ChevronRight size={14} /></a></span></div>
+          {allExp.length === 0 ? <div className="small muted">No expected income is recorded. Use Add to plan for a paycheck or invoice.</div> : (<>
+            <div className="amt-xl num" data-testid="ov-income-total"><Money v={expTotal} /></div>
+            <div className="xs muted" style={{ marginBottom: 8 }}>
+              {exp.length > 0 && <>{money(sum(exp, (o) => o.amount))} in the next 30 days</>}{exp.length > 0 && waiting.length > 0 && ' · '}{waiting.length > 0 && <>{money(sum(waiting, (i) => i.amount))} past its expected date</>}. Not received yet and not in your balances.</div>
+            <div className="list">
+              {waiting.map((i) => incRow(i.id, i.label, i.date, i.amount, i.certainty, true))}
+              {exp.map((o) => incRow(o.inc.id + o.date, o.inc.label, o.date, o.amount, o.inc.certainty, false, o.inc.repeat !== 'none'))}
+            </div>
+            {waiting.length > 0 && <div className="xs muted" style={{ marginTop: 8 }}>Entries past their date are still marked pending. Open one to mark it received or not coming.</div>}
+            {exp.length === 0 && <div className="xs muted" style={{ marginTop: 8 }}>Nothing else is scheduled in the next 30 days.</div>}
+          </>)}
         </section>
       </div>
     </div>

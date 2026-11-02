@@ -169,3 +169,19 @@ describe('reliability: totals the homepage relies on', () => {
     expect(all.some((o) => o.inc.certainty === 'anticipated')).toBe(true);
   });
 });
+
+describe('expected income on the homepage', () => {
+  const inc = (id: string, date: string, certainty: 'guaranteed' | 'anticipated', repeat: 'none' | 'weekly' = 'none') =>
+    ({ id, label: id, amount: 10000, date, certainty, repeat, accountId: '1', status: 'pending' as const, who: 'Household' });
+  const x = { ...d, today: '2026-11-02', incomes: [inc('a', '2026-10-31', 'guaranteed'), inc('b', '2026-11-01', 'guaranteed'), inc('c', '2026-11-10', 'anticipated'), inc('w', '2026-10-28', 'guaranteed', 'weekly')] };
+  it('past-dated pending entries are not in the forward window (they are shown as "waiting")', () => {
+    const waiting = x.incomes.filter((i) => i.date <= x.today).map((i) => i.id);
+    expect(waiting).toEqual(['a', 'b', 'w']);
+    const fwd = incomeOccurrences(x, '2026-11-03', '2026-12-02');
+    expect(fwd.filter((o) => o.inc.id === 'a' || o.inc.id === 'b')).toHaveLength(0);
+  });
+  it('a repeating entry is counted once per occurrence with no double count of the waiting one', () => {
+    const w = incomeOccurrences(x, '2026-11-03', '2026-12-02').filter((o) => o.inc.id === 'w').map((o) => o.date);
+    expect(w).toEqual(['2026-11-04', '2026-11-11', '2026-11-18', '2026-11-25', '2026-12-02']);
+  });
+});

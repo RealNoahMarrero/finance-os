@@ -207,6 +207,28 @@ export const addIncomeRow = async (i: Omit<Income, 'id' | 'status'>) => {
     is_repeating: i.repeat !== 'none', repeat_period: DB_REPEAT[i.repeat], entity_id: 'personal', source_type: 'manual',
   }));
 };
+export interface IncomePatch { label: string; amount: number; date: string; certainty: Income['certainty']; repeat: Income['repeat']; accountId: string }
+/** Plain edit of a still-pending expected income. Never touches received income or transactions (guarded by status). */
+export const updateIncomeRow = async (id: string, p: IncomePatch) => {
+  ok(await supabase.from('projected_income').update({
+    label: p.label, amount: dollars(p.amount), expected_date: p.date, certainty: p.certainty, account_id: num(p.accountId),
+    is_repeating: p.repeat !== 'none', repeat_period: DB_REPEAT[p.repeat],
+  }).eq('id', Number(id)).eq('status', 'pending'));
+};
+/** "Delete" = mark cancelled. The row is kept (history), nothing is removed, and no next occurrence is created. */
+export const cancelIncomeRow = async (id: string) => { ok(await supabase.from('projected_income').update({ status: 'cancelled' }).eq('id', Number(id)).eq('status', 'pending')); };
+export const restoreIncomeRow = async (id: string) => { ok(await supabase.from('projected_income').update({ status: 'pending' }).eq('id', Number(id)).eq('status', 'cancelled')); };
+/** Skip one occurrence of a repeating income: the database cancels it and schedules the next. Returns the id of that next row so it can be undone. */
+export const skipOccurrence = async (id: string, occ: string) => {
+  await skipIncome(id, occ);
+  const r = ok(await supabase.from('projected_income').select('id').eq('status', 'pending').gt('id', Number(id)).order('id', { ascending: false }).limit(1)) as Row[];
+  return r[0] ? S(r[0].id) : undefined;
+};
+export const undoSkipOccurrence = async (id: string, occ: string, nextId?: string) => {
+  if (nextId) ok(await supabase.from('projected_income').delete().eq('id', Number(nextId)).eq('status', 'pending'));
+  ok(await supabase.from('expected_income_skips').delete().eq('projected_income_id', Number(id)).eq('occurrence_date', occ));
+  await restoreIncomeRow(id);
+};
 export const setIncomeCertainty = async (id: string, c: Income['certainty']) => { ok(await supabase.from('projected_income').update({ certainty: c }).eq('id', Number(id))); };
 export const setCategoryTarget = async (id: string, target: number | null) => { ok(await supabase.from('categories').update({ target_amount: target == null ? 0 : dollars(target) }).eq('id', Number(id))); };
 export const setBillMode = async (id: string, mode: Bill['mode']) => { ok(await supabase.from('categories').update({ bill_mode: mode }).eq('id', Number(id))); };

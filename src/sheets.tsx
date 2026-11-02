@@ -596,12 +596,14 @@ export function BillSheet({ billId, date }: { billId: string; date: string }) {
 // ═══════════════════════════════════════════════════════════
 const REPEATS: { v: Rep; label: string }[] = [{ v: 'none', label: 'One time' }, { v: 'weekly', label: 'Weekly' }, { v: 'biweekly', label: 'Every 2 weeks' }, { v: 'semimonthly', label: 'Twice a month' }, { v: 'monthly', label: 'Monthly' }];
 export function IncomeSheet({ mode, id }: { mode: 'view' | 'add'; id?: string }) {
-  const { data, closeModal, receiveIncome, skipIncome, addIncome, setCertainty, toast } = useStore();
+  const { data, closeModal, receiveIncome, addIncome, updateIncome, deleteIncome, toast } = useStore();
   const [saving, setSaving] = useState(false);
-  const [confirmSkip, setConfirmSkip] = useState(false);
+  const [choose, setChoose] = useState<null | 'delete'>(null);
+  const [editing, setEditing] = useState(false);
+  const [scope, setScope] = useState<'future' | 'this'>('future');
   const inc = id ? data.incomes.find((i) => i.id === id) : undefined;
   const [step, setStep] = useState<'view' | 'confirm'>('view');
-  const [label, setLabel] = useState('');
+  const [label, setLabel] = useState(inc?.label ?? '');
   const [amt, setAmt] = useState(inc ? centsToInput(inc.amount) : '');
   const [date, setDate] = useState(inc?.date ?? addDays(data.today, 7));
   const [cert, setCert] = useState<Income['certainty']>(inc?.certainty ?? 'anticipated');
@@ -630,6 +632,27 @@ export function IncomeSheet({ mode, id }: { mode: 'view' | 'add'; id?: string })
   }
   if (!inc) return null;
   const acct = data.accounts.find((a) => a.id === inc.accountId)!;
+  if (editing) {
+    const valid = label.trim() && toCents(amt) > 0 && !!date;
+    return (
+      <Sheet title="Edit expected income" sub="Changes the plan only — nothing received or recorded is touched." onClose={closeModal}
+        footer={<><button className="btn" onClick={() => setEditing(false)}>Cancel</button><button className="btn primary" disabled={!valid || saving} onClick={async () => { setSaving(true); if (await updateIncome(inc.id, { label: label.trim(), amount: toCents(amt), date, certainty: cert, repeat: rep, accountId: acctId }, scope)) { toast('Saved'); closeModal(); } else setSaving(false); }}>Save changes</button></>}>
+        <div className="stack gap12">
+          <div className="field"><label htmlFor="il">Source</label><input id="il" className="input" value={label} onChange={(e) => setLabel(e.target.value)} autoFocus /></div>
+          <div className="row gap12"><div className="field grow"><label>Amount</label><MoneyInput value={amt} onChange={setAmt} /></div>
+            <div className="field grow"><label htmlFor="id">Expected on</label><input id="id" type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} /></div></div>
+          <div className="field"><label>How sure are you?</label>
+            <Seg block value={cert} onChange={setCert} options={[{ v: 'guaranteed', label: 'Guaranteed' }, { v: 'anticipated', label: 'Anticipated' }]} /></div>
+          <div className="field"><label>Repeats</label><div className="chips">{REPEATS.map((r) => <button key={r.v} className="chip" aria-pressed={rep === r.v} onClick={() => setRep(r.v)}>{r.label}</button>)}</div></div>
+          <div className="field"><label>Deposits to</label><div className="chips">{liquid.map((a) => <button key={a.id} className="chip" aria-pressed={acctId === a.id} onClick={() => setAcctId(a.id)}>{a.name}</button>)}</div></div>
+          {inc.repeat !== 'none' && (
+            <div className="field"><label>Apply to</label>
+              <Seg block value={scope} onChange={setScope} options={[{ v: 'future', label: 'This and future' }, { v: 'this', label: 'Just this one' }]} />
+              <div className="xs muted">{scope === 'future' ? 'Updates this entry and the ones scheduled after it.' : 'Only this date changes; the repeating schedule stays as it was.'}</div></div>)}
+        </div>
+      </Sheet>
+    );
+  }
   if (step === 'confirm') {
     const cents = toCents(amt);
     const dest = data.accounts.find((a) => a.id === acctId)!;
@@ -652,7 +675,9 @@ export function IncomeSheet({ mode, id }: { mode: 'view' | 'add'; id?: string })
   }
   return (
     <Sheet title={inc.label} onClose={closeModal}
-      footer={<>{confirmSkip ? <><button className="btn" onClick={() => setConfirmSkip(false)}>Keep it</button><button className="btn danger" disabled={saving} onClick={async () => { setSaving(true); if (await skipIncome(inc.id)) { toast(inc.repeat !== 'none' ? 'Skipped · the next one is scheduled' : 'Removed from expected income'); closeModal(); } else setSaving(false); }}>Yes, it won’t arrive</button></> : <><button className="btn" onClick={() => setConfirmSkip(true)}>Won’t arrive</button><button className="btn primary" onClick={() => setStep('confirm')}>Mark as received</button></>}</>}>
+      footer={choose === 'delete'
+        ? <><button className="btn" onClick={() => setChoose(null)}>Back</button><button className="btn danger" disabled={saving} onClick={async () => { setSaving(true); if (await deleteIncome(inc.id, 'this')) closeModal(); else setSaving(false); }}>Just this one</button><button className="btn danger" disabled={saving} onClick={async () => { setSaving(true); if (await deleteIncome(inc.id, 'series')) closeModal(); else setSaving(false); }}>Whole series</button></>
+        : <><button className="btn danger" aria-label="Delete expected income" disabled={saving} onClick={async () => { if (inc.repeat !== 'none') { setChoose('delete'); return; } setSaving(true); if (await deleteIncome(inc.id, 'this')) closeModal(); else setSaving(false); }}><Trash />Delete</button><button className="btn" onClick={() => setEditing(true)}><Pencil />Edit</button><button className="btn primary" onClick={() => setStep('confirm')}>Mark as received</button></>}>
       <div style={{ textAlign: 'center', padding: '4px 0 18px' }}>
         <div className="amt-hero num c-proj"><Money v={inc.amount} /></div>
         <div style={{ marginTop: 10, display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
@@ -661,9 +686,8 @@ export function IncomeSheet({ mode, id }: { mode: 'view' | 'add'; id?: string })
       </div>
       <Callout tone="proj" icon={<FlaskConical />}>This is a <b>projection</b>. It does not appear in {acct.name} or in Ready to Assign until you confirm it arrived.</Callout>
       <div style={{ marginTop: 16 }}>
-        <div className="label" style={{ marginBottom: 8 }}>Confidence</div>
-        <Seg block value={inc.certainty} onChange={(c) => { void setCertainty(inc.id, c); }} options={[{ v: 'guaranteed', label: 'Guaranteed' }, { v: 'anticipated', label: 'Anticipated' }]} />
-        <div className="small muted" style={{ marginTop: 8 }}>{inc.certainty === 'guaranteed' ? 'Included in both the conservative and optimistic forecasts.' : 'Only included in the optimistic forecast — your conservative plan doesn’t count on it.'}</div>
+        <div className="kv"><span className="k">Confidence</span><span className="v">{inc.certainty === 'guaranteed' ? 'Guaranteed' : 'Anticipated'}</span></div>
+        <div className="small muted" style={{ margin: '6px 0 10px' }}>{inc.certainty === 'guaranteed' ? 'Included in both the conservative and optimistic forecasts.' : 'Only included in the optimistic forecast — your conservative plan doesn’t count on it.'}</div>
       </div>
       <div style={{ marginTop: 14 }}>
                 <div className="kv"><span className="k">Repeats</span><span className="v">{REPEATS.find((r) => r.v === inc.repeat)?.label}</span></div>

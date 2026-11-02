@@ -52,6 +52,8 @@ interface Store {
   skipIncome: (incomeId: string) => Promise<boolean>;
   addIncome: (i: Omit<Income, 'id' | 'status'>) => Promise<boolean>;
   setCertainty: (id: string, c: Income['certainty']) => Promise<boolean>;
+  updateIncome: (id: string, p: db.IncomePatch, scope?: 'future' | 'this') => Promise<boolean>;
+  deleteIncome: (id: string, scope: 'this' | 'series') => Promise<boolean>;
   reconcile: (accountId: string, actual: number, note?: string) => Promise<Opt<{ diff: number; adjustmentTxnId?: string }>>;
   setCutover: (accountId: string, date: string, opening: number) => Promise<boolean>;
   setCutovers: (date: string, items: { accountId: string; opening: number }[]) => Promise<boolean>;
@@ -169,6 +171,26 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
     return (await run(() => db.skipIncome(id, inc?.date ?? todayISO()))).ok;
   }, [run, data.incomes]);
   const addIncome: Store['addIncome'] = useCallback(async (i) => (await run(() => db.addIncomeRow(i))).ok, [run]);
+  const updateIncome: Store['updateIncome'] = useCallback(async (id, p, scope = 'future') => {
+    const inc = data.incomes.find((i) => i.id === id);
+    if (scope === 'this' && inc && inc.repeat !== 'none') {
+      // Only this occurrence changes: it's skipped (the series carries on unchanged) and a one-time entry holds the edited values.
+      return (await run(async () => { await db.skipOccurrence(id, inc.date); await db.addIncomeRow({ ...p, repeat: 'none', who: 'Household' }); })).ok;
+    }
+    return (await run(() => db.updateIncomeRow(id, p))).ok;
+  }, [run, data.incomes]);
+  const deleteIncome: Store['deleteIncome'] = useCallback(async (id, scope) => {
+    const inc = data.incomes.find((i) => i.id === id);
+    if (!inc) return false;
+    if (scope === 'this' && inc.repeat !== 'none') {
+      const r = await run(() => db.skipOccurrence(id, inc.date));
+      if (r.ok) toast(`${inc.label} · this one removed`, () => { void run(() => db.undoSkipOccurrence(id, inc.date, r.value)); });
+      return r.ok;
+    }
+    const r = await run(() => db.cancelIncomeRow(id));
+    if (r.ok) toast(inc.repeat !== 'none' ? `${inc.label} · series removed` : `${inc.label} removed`, () => { void run(() => db.restoreIncomeRow(id)); });
+    return r.ok;
+  }, [run, toast, data.incomes]);
   const setCertainty: Store['setCertainty'] = useCallback(async (id, c) => (await run(() => db.setIncomeCertainty(id, c))).ok, [run]);
 
   const reconcile: Store['reconcile'] = useCallback(async (id, actual, note) => {
@@ -204,7 +226,7 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
 
   const value = useMemo<Store>(() => ({
     data, status, loadError, refresh, busy, email, signOut, modal, openModal: setModal, closeModal: () => setModal(null), toasts, toast, theme, setTheme,
-    addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported,
+    addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, updateIncome, deleteIncome, reconcile, setCutover, setCutovers, addAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported,
   }), [data, status, loadError, busy, email, modal, toasts, theme, refresh, signOut, toast, setTheme, addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported]);
 
   return (
