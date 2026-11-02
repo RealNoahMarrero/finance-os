@@ -36,9 +36,7 @@ export function Accounts() {
     const series = balanceSeries(data, a.id, 30);
     const util = credit && a.limit ? a.balance / a.limit : 0;
     return (
-      <div key={a.id} style={{ position: 'relative' }}>
-      <button className="btn icon sm" aria-label={`Edit ${a.name}`} title="Rename, edit or archive" style={{ position: 'absolute', top: 10, right: 38, zIndex: 1 }} onClick={() => openModal({ type: 'account-edit', id: a.id })}><Pencil size={14} /></button>
-      <button className="card acct-card" onClick={() => (location.hash = `/accounts/${a.id}`)} aria-label={`${a.name}, ${money(a.balance)}`}>
+      <button key={a.id} className="card acct-card" onClick={() => (location.hash = `/accounts/${a.id}`)} aria-label={`${a.name}, ${money(a.balance)}`}>
         <div className="row between">
           <div className="row gap12"><div className="li-ico"><AccountIcon type={a.type} /></div>
             <div><div className="li-title">{a.name}</div><div className="li-sub">{typeLabel(a)}</div></div></div>
@@ -54,7 +52,6 @@ export function Accounts() {
         ) : null}
         <StaleBadge a={a} today={data.today} />
       </button>
-      </div>
     );
   };
 
@@ -164,7 +161,10 @@ export function AccountDetail({ id }: { id: string }) {
             </div>
             <div className="stack gap12" style={{ alignItems: 'flex-end' }}>
               <Spark values={s30} width={200} height={64} color={credit ? 'var(--ink-3)' : 'var(--actual)'} />
-              <button className="btn primary" onClick={() => openModal({ type: 'reconcile', id: a.id })}><Scale />Reconcile</button>
+              <div className="row gap8" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                <button className="btn" data-testid="edit-account" onClick={() => openModal({ type: 'account-edit', id: a.id })}><Pencil />{a.archived ? 'Restore account…' : 'Edit account'}</button>
+                <button className="btn primary" onClick={() => openModal({ type: 'reconcile', id: a.id })}><Scale />Reconcile</button>
+              </div>
             </div>
           </div>
         </section>
@@ -201,7 +201,7 @@ export function AccountDetail({ id }: { id: string }) {
             ))}
           </section>
           <section className="card pad">
-            <div className="sect-head"><h2 className="sect-title">Account details</h2><button className="btn sm" onClick={() => openModal({ type: 'account-edit', id: a.id })}><Pencil size={13} />{a.archived ? 'Restore…' : 'Edit'}</button></div>
+            <div className="sect-head"><h2 className="sect-title">Account details</h2></div>
             {a.archived && <div className="pill" style={{ marginBottom: 8 }}>Archived</div>}
             <div className="kv"><span className="k">Type</span><span className="v">{typeLabel(a)}</span></div>
             {credit && a.limit && <div className="kv"><span className="k">Credit limit</span><span className="v num">{money(a.limit, { cents: false })}</span></div>}

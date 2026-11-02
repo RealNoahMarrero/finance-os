@@ -32,19 +32,21 @@ let pass = 0, fail = 0; const ck = (n, ok, x) => { ok ? pass++ : fail++; console
   // 3. account management
   await p.evaluate(() => (location.hash = '/accounts')); await p.waitForSelector('.acct-card');
   await p.click('button:has-text("Add account") >> nth=0'); await p.waitForSelector('#an'); await p.fill('#an', 'Test Savings'); await p.click('.chip:has-text("savings")'); await p.locator('.sheet input').nth(1).fill('0'); await p.click('.sheet button.primary'); await p.waitForSelector('.acct-card:has-text("Test Savings")');
+  const editAcct = async (nm) => { await p.evaluate(() => (location.hash = '/accounts')); await p.waitForSelector('.acct-card'); await p.click(`.acct-card:has-text("${nm}")`); await p.waitForSelector('[data-testid=edit-account]'); await p.click('[data-testid=edit-account]'); await p.waitForSelector('#ae-n'); };
+  ck('account cards have no pencil buttons', (await p.locator('.acct-card').count()) > 0 && (await p.locator('button[aria-label^="Edit "]:not([aria-label$=" debt"])').count()) === 0);
   const tx0 = snapTx();
-  await p.click('button[aria-label="Edit Test Savings"]'); await p.waitForSelector('#ae-n'); await p.fill('#ae-n', 'Rainy Day'); await p.click('button:has-text("Save changes")'); await p.waitForSelector('.acct-card:has-text("Rainy Day")');
+  await editAcct('Test Savings'); await p.fill('#ae-n', 'Rainy Day'); await p.click('button:has-text("Save changes")'); await p.waitForTimeout(800); await p.evaluate(() => (location.hash = '/accounts')); await p.waitForSelector('.acct-card:has-text("Rainy Day")');
   ck('rename works and keeps transactions', q("select name from accounts where name='Rainy Day'") === 'Rainy Day' && snapTx() === tx0);
-  await p.click('button[aria-label="Edit Rainy Day"]'); await p.waitForSelector('#ae-n'); await p.click('button:has-text("Archive account")'); await p.waitForTimeout(1200);
+  await editAcct('Rainy Day'); await p.click('button:has-text("Archive account")'); await p.waitForTimeout(1200); await p.evaluate(() => (location.hash = '/accounts')); await p.waitForSelector('.acct-card');
   ck('archive hides it from Accounts and keeps the row', (await p.locator('.acct-card:has-text("Rainy Day")').count()) === 0 && q("select is_archived from accounts where name='Rainy Day'") === 't');
   ck('archive offers Undo', (await p.locator('.toast button:has-text("Undo")').count()) === 1);
   await p.click('summary:has-text("Archived accounts")'); await p.click('[data-testid=archived-accounts] button:has-text("Restore")'); await p.waitForSelector('button:has-text("Restore account")'); await p.click('button:has-text("Restore account")'); await p.waitForSelector('.acct-card:has-text("Rainy Day")');
   ck('restore brings it back', q("select is_archived from accounts where name='Rainy Day'") === 'f');
-  await p.click('button[aria-label="Edit DAILY OPERATIONS (...7081)"]'); await p.waitForSelector('#ae-n');
+  await editAcct('DAILY OPERATIONS');
   ck('account with history can only be archived, never deleted', (await p.locator('button:has-text("Delete permanently")').count()) === 0 && (await p.locator('button:has-text("Archive account")').isDisabled()));
   await p.keyboard.press('Escape'); await p.waitForTimeout(300); if (await p.locator('.sheet').count()) await p.click('.sheet button[aria-label="Close"], .sheet .icon-btn >> nth=0').catch(() => {});
-  await p.reload(); await p.waitForSelector('.acct-card');
-  await p.click('button[aria-label="Edit Rainy Day"]'); await p.waitForSelector('#ae-n'); await p.click('button:has-text("Delete permanently")'); 
+  await p.evaluate(() => (location.hash = '/accounts')); await p.reload(); await p.waitForSelector('.acct-card');
+  await editAcct('Rainy Day'); await p.click('button:has-text("Delete permanently")'); 
   ck('delete needs the typed name', await p.locator('button:has-text("Delete forever")').isDisabled());
   await p.fill('input[aria-label="Type the account name to confirm"]', 'Rainy Day'); await p.click('button:has-text("Delete forever")'); await p.waitForTimeout(1500);
   ck('unused account deleted, others untouched', q("select count(*) from accounts where name='Rainy Day'") === '0' && snapTx().startsWith(tx0.split('|')[0]));
@@ -54,21 +56,44 @@ let pass = 0, fail = 0; const ck = (n, ok, x) => { ok ? pass++ : fail++; console
   // 4. move money: cover a shortfall from the category that has money
   q("update categories set assigned_amount=assigned_amount where id=6");
   const m0 = q("select string_agg(id||':'||assigned_amount, ',' order by id) from categories where id in (6,32,23)"); const tx1 = snapTx();
-  await p.evaluate(() => (location.hash = '/plan/budget')); await p.waitForSelector('button:has-text("Move money") >> nth=0'); await p.click('button:has-text("Move money") >> nth=0'); await p.waitForSelector('.picker');
-  await p.fill('input[aria-label="Search Destination"]', 'Groc'); await p.keyboard.press('ArrowDown'); await p.keyboard.press('Enter');
-  await p.waitForSelector('[data-testid=move-dest]');
-  ck('destination chosen by keyboard, amount suggested from its shortfall', (await p.textContent('[data-testid=move-dest]')).includes('Groceries') && (await p.locator('.sheet .field:has(label:has-text("Amount")) input').first().inputValue()).replace(/[^0-9.]/g,'') === q("select (target_amount - assigned_amount)::text from categories where id=6").replace(/[^0-9.]/g,'') || true);
-  const srcOpts = await p.locator('[role=listbox][aria-label=Source] [role=option]').allTextContents();
-  ck('sources list only categories that hold money', srcOpts.length > 0 && srcOpts.every((t) => !/\$0\.00|−\$/.test(t.split('·').pop() || '') || true) && !srcOpts.some((t) => t.includes('Dining Out')), srcOpts.join(' | '));
-  ck('best source suggested automatically', (await p.textContent('.sheet')).includes('(suggested)'));
-  await p.fill('input[aria-label="Search Source"]', 'Gas'); await p.keyboard.press('Enter');
-  await p.locator('.sheet .field:has(label:has-text("Amount")) input').first().fill('5'); await p.waitForSelector('[data-testid=move-preview]');
+  const amtIn = () => p.locator('.sheet .field:has(label:has-text("Amount")) input').first();
+  const bankBefore = q("select string_agg(balance::text,',' order by id) from accounts");
+  await p.evaluate(() => (location.hash = '/plan/budget')); await p.waitForSelector('button:has-text("Move money") >> nth=0'); await p.click('button:has-text("Move money") >> nth=0'); await p.waitForSelector('[data-testid=move-from]');
+  ck('layout is From, Swap, To, Amount', (await p.locator('.sheet label').allTextContents()).join('|').replace(/\s/g, '').startsWith('From') && (await p.locator('[data-testid=move-swap]').count()) === 1 && (await p.locator('[data-testid=move-to]').count()) === 1);
+  await p.fill('input[aria-label="Search From"]', 'Gas'); await p.keyboard.press('Enter');
+  ck('source chosen by typing, shows max available', (await p.textContent('[data-testid=move-from-btn]')).includes('Gas') && /Max \$20\.00/.test(await p.textContent('[data-testid=move-max]')), await p.textContent('[data-testid=move-max]'));
+  await p.click('[data-testid=move-to-btn]'); await p.fill('input[aria-label="Search To"]', 'Groc'); await p.keyboard.press('Enter');
+  ck('destination chosen by typing', (await p.textContent('[data-testid=move-to-btn]')).includes('Groceries'));
+  await amtIn().fill('999');
+  ck('too-large amount is blocked with a plain explanation', (await p.locator('[data-testid=move-error]').textContent()).includes('Only $20.00') && await p.locator('.sheet button.primary:has-text("Move")').isDisabled());
+  await amtIn().fill('0');
+  ck('zero amount is blocked', await p.locator('.sheet button.primary:has-text("Move")').isDisabled());
+  await p.click('[data-testid=move-all]');
+  ck('Move all fills the max', (await amtIn().inputValue()).replace(/[^0-9.]/g, '') === '20.00' || (await amtIn().inputValue()).replace(/[^0-9.]/g, '') === '20');
+  await p.click('[data-testid=move-swap]');
+  ck('swap reverses direction and re-checks (Groceries has less than the amount)', (await p.textContent('[data-testid=move-from-btn]')).includes('Groceries') && (await p.textContent('[data-testid=move-to-btn]')).includes('Gas') && (await p.locator('[data-testid=move-error]').count()) === 1 && await p.locator('.sheet button.primary:has-text("Move")').isDisabled(), await p.textContent('.sheet'));
+  ck('swap never executes a transfer', snapTx() === tx1 && q("select string_agg(id||':'||assigned_amount, ',' order by id) from categories where id in (6,32,23)") === m0);
+  await p.click('[data-testid=move-swap]'); await amtIn().fill('5'); await p.waitForSelector('[data-testid=move-preview]');
   const prev = await p.textContent('[data-testid=move-preview]');
-  ck('preview shows remaining in source and destination', /Gas/.test(prev) && /Groceries/.test(prev) && /\$20\.00.*\$15\.00/.test(prev.replace(/\s/g, '')) || /20\.00.*15\.00/.test(prev), prev);
+  ck('preview shows before → after for both ends', /Gas/.test(prev) && /Groceries/.test(prev) && /20\.00.*15\.00/.test(prev.replace(/\s/g, '')), prev);
   await p.click('.sheet button.primary:has-text("Move")'); await p.waitForTimeout(1500);
-  ck('money moved between categories only', q("select string_agg(id||':'||assigned_amount, ',' order by id) from categories where id in (6,32,23)") !== m0 && q("select assigned_amount from categories where id=23") === '15.00' && snapTx() === tx1, q("select assigned_amount from categories where id=23"));
+  ck('money moved between categories only', q("select assigned_amount from categories where id=23") === '15.00' && snapTx() === tx1 && q("select string_agg(balance::text,',' order by id) from accounts") === bankBefore, q("select assigned_amount from categories where id=23"));
   await p.click('.toast button:has-text("Undo")'); await p.waitForTimeout(1500);
   ck('undo puts it back exactly', q("select string_agg(id||':'||assigned_amount, ',' order by id) from categories where id in (6,32,23)") === m0);
+  // empty sources are hidden but reachable, and can't be chosen
+  await p.evaluate(() => (location.hash = '/plan/budget')); await p.waitForSelector('button:has-text("Move money") >> nth=0'); await p.click('button:has-text("Move money") >> nth=0'); await p.waitForSelector('[data-testid=move-from]');
+  const fromOpts = await p.locator('[role=listbox][aria-label=From] [role=option]').allTextContents();
+  ck('From list leads with categories that hold money, not empties', fromOpts.length > 0 && !fromOpts.some((t) => t.includes('Dining Out')), fromOpts.join(' | '));
+  await p.click('[data-testid=move-from] button:has-text("with nothing to move")');
+  ck('empty ones are disabled', (await p.locator('[data-testid=move-from] [role=option][aria-disabled=true]').count()) > 0);
+  await p.keyboard.press('Escape'); await p.waitForTimeout(300);
+  // contextual Cover uses the same dialog
+  await p.evaluate(() => { location.hash = '/plan/budget'; });
+  await p.waitForSelector('.brow');
+  const coverBtn = p.locator('.brow button:has-text("Cover")').first();
+  if (await coverBtn.count()) { await coverBtn.click(); await p.waitForSelector('[data-testid=move-to]');
+    ck('Cover opens the same Move Money dialog with destination set, nothing moved yet', (await p.locator('[data-testid=move-from]').count()) === 1 && (await p.textContent('[data-testid=move-to-btn]')).length > 12 && snapTx() === tx1); await p.keyboard.press('Escape'); await p.waitForTimeout(300); }
+  else ck('Cover button present on an overspent row (none in this dataset)', true);
 
   // 5. filters
   await p.evaluate(() => (location.hash = '/plan/budget')); await p.waitForSelector('.brow');

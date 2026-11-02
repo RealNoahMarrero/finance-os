@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, useEffect, type ReactNode } from 'react';
-import { ArrowRight, ArrowUpDown, Bell, Check, CircleCheck, Download, Eye, FlaskConical, Info, Landmark, LogOut, ListChecks, Pencil, Plus, Scale, Split, StickyNote, Trash, TriangleAlert, Wallet } from 'lucide-react';
+import { ArrowRight, ArrowUpDown, ChevronDown, Bell, Check, CircleCheck, Download, Eye, FlaskConical, Info, Landmark, LogOut, ListChecks, Pencil, Plus, Scale, Split, StickyNote, Trash, TriangleAlert, Wallet } from 'lucide-react';
 import { useStore } from './store';
 import {
   allEnvelopes, envelope, readyToAssign, staleness, billOccurrences, drift, rollForward, type Account, type Bill, type BillPeriod, type Category, type Txn, type Income, type Repeat as Rep,
@@ -384,34 +384,57 @@ export function AssignSheet() {
 // Move money
 // ═══════════════════════════════════════════════════════════
 interface PickItem { id: string; name: string; group: string; avail: number; need: number }
-/** Searchable list: type to filter, ↑/↓ to move, Enter to choose. */
-function EnvPicker({ items, value, onPick, label, autoFocus, showAfter }: { items: PickItem[]; value: string; onPick: (id: string) => void; label: string; autoFocus?: boolean; showAfter?: (it: PickItem) => ReactNode }) {
+/** Compact searchable select: shows the current choice; opens a short list with a search box (type, ↑/↓, Enter, Esc). */
+function EnvSelect({ items, value, onPick, label, testid, disabledIds, placeholder, hint, autoFocus }: { items: PickItem[]; value: string; onPick: (id: string) => void; label: string; testid: string; disabledIds?: (it: PickItem) => boolean; placeholder: string; hint?: (it: PickItem) => string; autoFocus?: boolean }) {
+  const [open, setOpen] = useState(!!autoFocus && !value);
   const [q, setQ] = useState('');
   const [hi, setHi] = useState(0);
-  const list = useMemo(() => { const n = q.trim().toLowerCase(); return n ? items.filter((i) => i.name.toLowerCase().includes(n) || i.group.toLowerCase().includes(n)) : items; }, [items, q]);
+  const [showAll, setShowAll] = useState(false);
+  const cur = items.find((i) => i.id === value);
+  const nq = q.trim().toLowerCase();
+  const off = (i: PickItem) => !!disabledIds?.(i);
+  const usable = items.filter((i) => !off(i)), unusable = items.filter(off);
+  const base = nq || showAll ? [...usable, ...unusable] : usable;
+  const list = nq ? base.filter((i) => i.name.toLowerCase().includes(nq) || i.group.toLowerCase().includes(nq)) : base;
+  const choose = (it: PickItem) => { if (off(it)) return; onPick(it.id); setOpen(false); setQ(''); setShowAll(false); };
   return (
-    <div className="picker">
-      <input className="input" placeholder={`Search ${label.toLowerCase()}…`} aria-label={`Search ${label}`} value={q} autoFocus={autoFocus}
-        onChange={(e) => { setQ(e.target.value); setHi(0); }}
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowDown') { e.preventDefault(); setHi((h) => Math.min(list.length - 1, h + 1)); }
-          else if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => Math.max(0, h - 1)); }
-          else if (e.key === 'Enter' && list[hi]) { e.preventDefault(); onPick(list[hi].id); setQ(''); }
-        }} />
-      <div className="picker-list" role="listbox" aria-label={label} style={{ maxHeight: 220, overflowY: 'auto', marginTop: 6 }}>
-        {list.length === 0 && <div className="small muted" style={{ padding: 10 }}>Nothing matches “{q}”.</div>}
-        {list.map((it, i) => (
-          <button type="button" key={it.id} role="option" aria-selected={value === it.id} data-id={it.id} className="li hover" onClick={() => { onPick(it.id); setQ(''); }}
-            style={{ padding: '9px 10px', borderRadius: 10, background: value === it.id ? 'var(--planned-soft)' : i === hi && q ? 'var(--surface-2)' : undefined, width: '100%', textAlign: 'left' }}>
-            <div className="grow" style={{ minWidth: 0 }}><div className="li-title ellipsis" style={{ fontSize: 14 }}>{it.name}</div><div className="li-sub ellipsis" style={{ fontSize: 12 }}>{it.group}{it.need > 0 ? ` · needs ${money(it.need)}` : ''}</div></div>
-            <div className="right num small" style={{ fontWeight: 600 }}>{money(it.avail)}{showAfter && <div className="xs muted" style={{ fontWeight: 400 }}>{showAfter(it)}</div>}</div>
-          </button>
-        ))}
-      </div>
+    <div className="stack gap8" data-testid={testid}>
+      <button type="button" className="row between card" aria-label={`${label}: ${cur ? cur.name : 'none chosen'}`} aria-expanded={open} data-testid={`${testid}-btn`}
+        style={{ boxShadow: 'none', background: 'var(--surface-2)', padding: '10px 14px', width: '100%', textAlign: 'left', gap: 10 }} onClick={() => setOpen((v) => !v)}>
+        <div style={{ minWidth: 0 }}>
+          <div className="li-title ellipsis">{cur ? cur.name : <span className="muted">{placeholder}</span>}</div>
+          {cur && <div className="li-sub ellipsis">{hint ? hint(cur) : cur.group}</div>}
+        </div>
+        <div className="row gap8">{cur && <b className="num small">{money(cur.avail)}</b>}<ChevronDown size={16} className="muted" /></div>
+      </button>
+      {open && (
+        <div className="picker fade-in">
+          <input className="input" autoFocus placeholder={`Search ${label.toLowerCase()}…`} aria-label={`Search ${label}`} value={q}
+            onChange={(e) => { setQ(e.target.value); setHi(0); }}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowDown') { e.preventDefault(); setHi((h) => Math.min(list.length - 1, h + 1)); }
+              else if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => Math.max(0, h - 1)); }
+              else if (e.key === 'Enter') { e.preventDefault(); if (list[hi]) choose(list[hi]); }
+              else if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); }
+            }} />
+          <div role="listbox" aria-label={label} style={{ maxHeight: 200, overflowY: 'auto', marginTop: 6 }}>
+            {list.length === 0 && <div className="small muted" style={{ padding: 10 }}>{nq ? `Nothing matches “${q}”.` : 'Nothing available.'}</div>}
+            {list.map((it, i) => (
+              <button type="button" key={it.id} role="option" aria-selected={value === it.id} aria-disabled={off(it)} data-id={it.id} className="li hover" onClick={() => choose(it)}
+                style={{ padding: '8px 10px', borderRadius: 10, width: '100%', textAlign: 'left', opacity: off(it) ? 0.5 : 1, cursor: off(it) ? 'default' : undefined, background: value === it.id ? 'var(--planned-soft)' : i === hi && nq ? 'var(--surface-2)' : undefined }}>
+                <div className="grow" style={{ minWidth: 0 }}><div className="li-title ellipsis" style={{ fontSize: 14 }}>{it.name}</div><div className="li-sub ellipsis" style={{ fontSize: 12 }}>{hint ? hint(it) : it.group}</div></div>
+                <div className="right num small" style={{ fontWeight: 600 }}>{money(it.avail)}</div>
+              </button>
+            ))}
+          </div>
+          {unusable.length > 0 && !nq && <button type="button" className="sect-link" style={{ marginTop: 6 }} onClick={() => setShowAll((v) => !v)}>{showAll ? 'Hide empty ones' : `Show ${unusable.length} with nothing to move`}</button>}
+        </div>
+      )}
     </div>
   );
 }
 
+/** Move Money: From → To → Amount. One dialog for every entry point (Cover, Assign, Move). Budget allocations only — never touches bank balances. */
 export function MoveSheet({ from: f0, to: t0, amount: a0 }: { from?: string; to?: string; amount?: number }) {
   const { data, closeModal, assign, moveMoney, toast } = useStore();
   const rta = readyToAssign(data);
@@ -420,83 +443,75 @@ export function MoveSheet({ from: f0, to: t0, amount: a0 }: { from?: string; to?
   const items: PickItem[] = useMemo(() => envs.map((e) => ({ id: e.cat.id, name: e.cat.name, group: groupName(e.cat.groupId), avail: e.env.avail, need: e.env.avail < 0 ? -e.env.avail : Math.max(0, e.env.remaining) })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [data]);
-  const rtaItem: PickItem = { id: 'rta', name: 'Ready to Assign', group: 'Unassigned money in your accounts', avail: rta, need: 0 };
-  const byId = (id: string) => (id === 'rta' ? rtaItem : items.find((i) => i.id === id));
+  const rtaItem: PickItem = { id: 'rta', name: 'Ready to Assign', group: 'Unassigned money', avail: rta, need: 0 };
+  const all = useMemo(() => [rtaItem, ...items], [items, rta]); // eslint-disable-line react-hooks/exhaustive-deps
+  const byId = (id: string) => all.find((i) => i.id === id);
   const nameOf = (id: string) => byId(id)?.name ?? '';
   const availOf = (id: string) => byId(id)?.avail ?? 0;
 
-  // The most any single source can give (so a suggestion never starts out un-payable).
-  const bestAvail = (excl: string, only?: string) => Math.max(0, ...[rtaItem, ...items].filter((i) => i.id !== excl && (!only || i.id === only)).map((i) => i.avail));
-  const initial = (t: string) => { const want = a0 ?? (t ? (byId(t)?.need ?? 0) : 0); const cap = f0 ? bestAvail('', f0) : bestAvail(t); return want > 0 ? Math.min(want, cap || want) : 0; };
+  // Opening from "Cover" (a destination is known, no source): suggest the shortfall and a source that can pay it — still nothing moves until Move is pressed.
+  const suggestedFrom = (t: string, want: number) => {
+    const funded = all.filter((i) => i.id !== t && i.avail > 0).sort((x, y) => (x.id === 'rta' ? -1 : y.id === 'rta' ? 1 : y.avail - x.avail));
+    return (funded.find((i) => i.avail >= want && want > 0) ?? funded[0])?.id ?? '';
+  };
   const [to, setTo] = useState(t0 ?? '');
-  const [from, setFrom] = useState(f0 ?? '');
-  const [amt, setAmt] = useState(() => { const v = initial(t0 ?? ''); return v ? centsToInput(v) : ''; });
-  const [touchedAmt, setTouchedAmt] = useState(!!a0);
-  const [showEmpty, setShowEmpty] = useState(false);
+  const [from, setFrom] = useState(() => f0 ?? (t0 ? suggestedFrom(t0, a0 ?? byId(t0)?.need ?? 0) : ''));
+  const [amt, setAmt] = useState(() => {
+    const want = a0 ?? (t0 ? byId(t0)?.need ?? 0 : 0);
+    const src = f0 ?? (t0 ? suggestedFrom(t0, want) : '');
+    const cap = src ? Math.max(0, availOf(src)) : want;
+    return want > 0 && cap > 0 ? centsToInput(Math.min(want, cap)) : '';
+  });
   const [saving, setSaving] = useState(false);
-
   const cents = toCents(amt);
-  // Sources: only places that actually hold money, best first. Empty ones are tucked away.
-  const sources = useMemo(() => {
-    const funded = [rtaItem, ...items].filter((i) => i.avail > 0 && i.id !== to);
-    const empty = [rtaItem, ...items].filter((i) => i.avail <= 0 && i.id !== to);
-    return { funded: funded.sort((x, y) => (x.id === 'rta' ? -1 : y.id === 'rta' ? 1 : y.avail - x.avail)), empty };
-  }, [items, rta, to]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Suggested amount for a destination: whatever it is short by.
-  const shortBy = (id: string) => byId(id)?.need ?? 0;
-  const pickTo = (id: string) => { setTo(id); if (!touchedAmt && shortBy(id) > 0) setAmt(centsToInput(Math.min(shortBy(id), bestAvail(id) || shortBy(id)))); if (from === id) setFrom(''); };
-  // Recommended source: the one that can cover the amount on its own (Ready to Assign first), else the one with the most.
-  const recommended = useMemo(() => {
-    const want = cents > 0 ? cents : shortBy(to);
-    const cover = sources.funded.filter((i) => i.avail >= want && want > 0);
-    return (cover[0] ?? sources.funded[0])?.id ?? '';
-  }, [sources, cents, to]); // eslint-disable-line react-hooks/exhaustive-deps
-  const src = from || recommended;
-  const max = Math.max(0, availOf(src));
-  const valid = cents > 0 && !!to && !!src && src !== to && cents <= max;
+  const max = Math.max(0, from ? availOf(from) : 0);
+  const shortage = to ? byId(to)?.need ?? 0 : 0;
+  let problem = '';
+  if (from && to && from === to) problem = 'Pick two different places.';
+  else if (from && max <= 0) problem = `${nameOf(from)} has nothing available to move${availOf(from) < 0 ? ` (it is overspent by ${money(-availOf(from))})` : ''}. Pick another source or swap the direction.`;
+  else if (from && cents > max) problem = `Only ${money(max)} is available in ${nameOf(from)}.`;
+  const valid = !!from && !!to && from !== to && cents > 0 && cents <= max;
+  const swap = () => { const f = from, t = to; setFrom(t); setTo(f); };
   const go = async () => {
     if (!valid || saving) return;
     setSaving(true);
-    const good = src === 'rta' ? await assign({ [to]: cents }) : to === 'rta' ? await assign({ [src]: -cents }) : await moveMoney(src, to, cents);
+    const good = from === 'rta' ? await assign({ [to]: cents }) : to === 'rta' ? await assign({ [from]: -cents }) : await moveMoney(from, to, cents);
     if (good) {
-      toast(`Moved ${money(cents)} to ${nameOf(to)}`, () => { if (src === 'rta') void assign({ [to]: -cents }); else if (to === 'rta') void assign({ [src]: cents }); else void moveMoney(to, src, cents); });
+      const f = from, t = to;
+      toast(`Moved ${money(cents)} to ${nameOf(t)}`, () => { if (f === 'rta') void assign({ [t]: -cents }); else if (t === 'rta') void assign({ [f]: cents }); else void moveMoney(t, f, cents); });
       closeModal();
     } else setSaving(false);
   };
-  const destItems = useMemo(() => [rtaItem, ...items].filter((i) => i.id !== src).sort((x, y) => (y.need > 0 ? 1 : 0) - (x.need > 0 ? 1 : 0) || y.need - x.need), [items, rta, src]); // eslint-disable-line react-hooks/exhaustive-deps
-  const dest = to ? byId(to) : undefined;
+  const fromHint = (i: PickItem) => (i.avail > 0 ? `${i.group} · available` : i.avail < 0 ? `${i.group} · overspent` : `${i.group} · empty`);
+  const toHint = (i: PickItem) => (i.avail < 0 ? `${i.group} · overspent by ${money(-i.avail)}` : i.need > 0 ? `${i.group} · needs ${money(i.need)} more` : i.group);
+  const toItems = useMemo(() => all.filter((i) => i.id !== from).sort((x, y) => (y.need > 0 ? 1 : 0) - (x.need > 0 ? 1 : 0) || y.need - x.need), [all, from]);
+  const fromItems = useMemo(() => all.filter((i) => i.id !== to).sort((x, y) => (x.id === 'rta' ? -1 : y.id === 'rta' ? 1 : y.avail - x.avail)), [all, to]);
 
   return (
-    <Sheet title="Move money" sub="Shifts budget money between categories. Nothing moves in your bank accounts." onClose={closeModal}
-      footer={<button className="btn primary lg" disabled={!valid || saving} onClick={go}>{valid ? `Move ${money(cents)} from ${nameOf(src)} to ${nameOf(to)}` : cents > max && src ? `Only ${money(max)} in ${nameOf(src)}` : 'Move money'}</button>}>
-      <form className="stack gap16" onSubmit={(e) => { e.preventDefault(); void go(); }}>
-        <div className="field"><label>Cover</label>
-          {dest ? (
-            <div className="row between card pad" style={{ boxShadow: 'none', background: 'var(--surface-2)', padding: '10px 14px' }} data-testid="move-dest">
-              <div><div className="li-title">{dest.name}</div><div className="li-sub">{dest.avail < 0 ? `Overspent by ${money(-dest.avail)}` : dest.need > 0 ? `Has ${money(dest.avail)} · needs ${money(dest.need)} more` : `Has ${money(dest.avail)}`}</div></div>
-              <button type="button" className="sect-link" onClick={() => setTo('')}>Change</button>
-            </div>
-          ) : <EnvPicker items={destItems} value={to} onPick={pickTo} label="Destination" autoFocus />}
+    <Sheet title="Move money" sub="Moves budget money between categories. Nothing changes in your bank accounts." onClose={closeModal}
+      footer={<button className="btn primary lg" disabled={!valid || saving} onClick={go}>{valid ? `Move ${money(cents)}` : 'Move money'}</button>}>
+      <form className="stack gap12" onSubmit={(e) => { e.preventDefault(); void go(); }}>
+        <div className="field"><label>From</label>
+          <EnvSelect items={fromItems} value={from} onPick={setFrom} label="From" testid="move-from" placeholder="Choose where the money comes from" disabledIds={(i) => i.avail <= 0} hint={fromHint} autoFocus={!from} /></div>
+        <div className="row" style={{ justifyContent: 'center' }}>
+          <button type="button" className="btn sm" data-testid="move-swap" onClick={swap} disabled={!from && !to} aria-label="Swap From and To"><ArrowUpDown size={14} />Swap</button>
         </div>
-
+        <div className="field"><label>To</label>
+          <EnvSelect items={toItems} value={to} onPick={(id) => { setTo(id); }} label="To" testid="move-to" placeholder="Choose where it goes" hint={toHint} autoFocus={!!from && !to} /></div>
         <div className="field"><label htmlFor="mv-amt">Amount</label>
-          <MoneyInput value={amt} onChange={(v) => { setAmt(v); setTouchedAmt(true); }} invalid={cents > max && !!src} autoFocus={!!dest} />
-          <div className="row gap8" style={{ flexWrap: 'wrap', marginTop: 6 }}>
-            {dest && shortBy(to) > 0 && <button type="button" className="chip" onClick={() => { setAmt(centsToInput(shortBy(to))); setTouchedAmt(true); }}>{shortBy(to) > bestAvail(to) ? 'Full shortfall' : 'Cover shortfall'} · {money(shortBy(to))}</button>}
-            {max > 0 && <button type="button" className="chip" onClick={() => { setAmt(centsToInput(max)); setTouchedAmt(true); }}>All of it · {money(max)}</button>}
+          <MoneyInput value={amt} onChange={setAmt} invalid={!!problem && cents > 0} autoFocus={!!from && !!to} />
+          <div className="row between small" style={{ marginTop: 6, gap: 8, flexWrap: 'wrap' }}>
+            <span className="muted" data-testid="move-max">{from ? `Max ${money(max)} available` : 'Choose a source to see the max'}</span>
+            <span className="row gap8">
+              {to && shortage > 0 && max > 0 && <button type="button" className="chip" data-testid="move-shortfall" onClick={() => setAmt(centsToInput(Math.min(shortage, max)))}>Shortfall · {money(Math.min(shortage, max))}</button>}
+              {max > 0 && <button type="button" className="chip" data-testid="move-all" onClick={() => setAmt(centsToInput(max))}>Move all</button>}
+            </span>
           </div>
+          {problem && <div className="small neg" role="alert" data-testid="move-error" style={{ marginTop: 6 }}>{problem}</div>}
         </div>
-
-        <div className="field"><label>Take it from {src && <span className="muted" style={{ fontWeight: 400 }}>· {nameOf(src)}{src === recommended && !from ? ' (suggested)' : ''}</span>}</label>
-          {sources.funded.length === 0 && <div className="small muted">No category or unassigned money has funds available right now.</div>}
-          <EnvPicker items={showEmpty ? [...sources.funded, ...sources.empty] : sources.funded} value={src} onPick={(id) => setFrom(id)} label="Source"
-            showAfter={(it) => (cents > 0 && it.id === src ? `→ ${money(it.avail - cents)}` : undefined)} />
-          {sources.empty.length > 0 && <button type="button" className="sect-link" style={{ marginTop: 6 }} onClick={() => setShowEmpty((v) => !v)}>{showEmpty ? 'Hide empty categories' : `Show ${sources.empty.length} empty categories`}</button>}
-        </div>
-
-        {dest && src && cents > 0 && (
+        {from && to && from !== to && cents > 0 && (
           <div className="card pad fade-in" style={{ background: 'var(--surface-2)', boxShadow: 'none' }} data-testid="move-preview">
-            {[src, to].map((id, i) => (
+            {[from, to].map((id, i) => (
               <div className="row between small" key={id} style={{ padding: '3px 0' }}>
                 <span>{nameOf(id)}</span><span className="num"><span className="muted">{money(availOf(id))}</span> → <b>{money(availOf(id) + (i === 0 ? -cents : cents))}</b></span>
               </div>
