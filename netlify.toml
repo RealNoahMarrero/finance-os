@@ -5,6 +5,9 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  # This is a Vite single-page app, not Next.js. The site once had Netlify's Next.js Runtime plugin switched on in the
+  # dashboard; this makes that plugin skip itself on every build so it can't fail the deploy.
+  NETLIFY_NEXT_PLUGIN_SKIP = "true"
 
 [[redirects]]
   from = "/*"
