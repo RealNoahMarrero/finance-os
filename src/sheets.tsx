@@ -4,7 +4,7 @@ import { useStore } from './store';
 import {
   allEnvelopes, envelope, readyToAssign, staleness, billOccurrences, drift, rollForward, type Account, type Bill, type BillPeriod, type Category, type Txn, type Income, type Repeat as Rep,
 } from './data';
-import { addDays, centsToInput, cn, diffDays, fmtDate, money, monthKey, relDay, sum, toCents, plural } from './lib';
+import { addDays, centsToInput, cn, diffDays, fmtDate, money, monthKey, relDay, sum, toCents, plural, todayISO } from './lib';
 import { CatIcon, Callout, Money, Seg, Sheet, StatusPill, ThemeSwitch } from './ui';
 import { exportEverything } from './db';
 import { CreditScoreSheet, CreditCardSheet, CreditReportedSheet } from './creditSheets';
@@ -605,7 +605,7 @@ export function IncomeSheet({ mode, id }: { mode: 'view' | 'add'; id?: string })
   const [step, setStep] = useState<'view' | 'confirm'>('view');
   const [label, setLabel] = useState(inc?.label ?? '');
   const [amt, setAmt] = useState(inc ? centsToInput(inc.amount) : '');
-  const [date, setDate] = useState(inc?.date ?? addDays(data.today, 7));
+  const [date, setDate] = useState(inc?.date ?? todayISO());
   const [cert, setCert] = useState<Income['certainty']>(inc?.certainty ?? 'anticipated');
   const [rep, setRep] = useState<Rep>(inc?.repeat ?? 'none');
   const [acctId, setAcctId] = useState(inc?.accountId ?? data.accounts.find((a) => a.type === 'checking')?.id ?? '');
