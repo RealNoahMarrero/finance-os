@@ -179,6 +179,10 @@ export function ReadyToAssignCard({ testid, compact: tight }: { testid: string; 
   const rta = readyToAssign(data);
   const over = rta < 0, zero = rta === 0;
   const needs = underfunded(data).length;
+  // Overspent categories are already counted in Ready to Assign (it is cash minus what the categories hold, negatives included), so the number is right —
+  // but it is not free money until those categories are covered, so say so and offer the shortcut.
+  const overs = overspent(data).sort((a, b) => a.env.avail - b.env.avail);
+  const overTotal = overs.reduce((n, e) => n - e.env.avail, 0);
   return (
     <section className={cn('card rta-card', tight && 'rta-compact')} aria-label="Ready to Assign" data-testid={testid}
       style={over ? { borderColor: 'color-mix(in srgb, var(--neg) 35%, var(--line))' } : undefined}>
@@ -187,14 +191,15 @@ export function ReadyToAssignCard({ testid, compact: tight }: { testid: string; 
         <div className={cn('amt-xl num', over ? 'neg' : zero ? '' : 'c-planned')} style={{ marginTop: 4 }} data-testid={`${testid}-value`}><Money v={rta} /></div>
         <div className="small muted" style={{ marginTop: 4, maxWidth: 420 }}>
           {over ? 'Your categories hold more than the cash in your accounts. Move money back to Ready to Assign to fix it.'
-            : zero ? <><b style={{ color: 'var(--ink-2)' }}>Everything is assigned.</b> Every dollar in your accounts has a job.</>
-            : <>Money waiting for a job.{needs > 0 && <> {needs === 1 ? '1 category still needs' : `${needs} categories still need`} funding.</>}</>}
+            : zero ? <><b style={{ color: 'var(--ink-2)' }}>Everything is assigned.</b> Every dollar in your accounts has a job.{overs.length > 0 && <> {overs.length === 1 ? '1 category is' : `${overs.length} categories are`} overspent by {money(overTotal)}.</>}</>
+            : <>Money waiting for a job.{overs.length > 0 ? <> But {overs.length === 1 ? '1 category is' : `${overs.length} categories are`} overspent by {money(overTotal)} — cover that first.</> : needs > 0 ? <> {needs === 1 ? '1 category still needs' : `${needs} categories still need`} funding.</> : null}</>}
         </div>
       </div>
       <div className="stack gap8 rta-actions">
         {over ? <button className="btn primary" data-testid={`${testid}-action`} onClick={() => openModal({ type: 'move', to: 'rta', amount: -rta })}><ArrowLeftRight />Review over-assignment</button>
           : zero ? <button className="btn" data-testid={`${testid}-action`} onClick={() => openModal({ type: 'move' })}><ArrowLeftRight />Move money</button>
-          : <button className="btn primary" data-testid={`${testid}-action`} onClick={() => openModal({ type: 'assign' })}><Sparkles />Assign money</button>}
+          : <button className={cn('btn', overs.length === 0 && 'primary')} data-testid={`${testid}-action`} onClick={() => openModal({ type: 'assign' })}><Sparkles />Assign money</button>}
+        {!over && rta > 0 && overs.length > 0 && <button className="btn primary" data-testid={`${testid}-cover`} onClick={() => openModal({ type: 'move', from: 'rta', to: overs[0].cat.id, amount: Math.min(rta, -overs[0].env.avail) })}><ArrowLeftRight />Cover overspending</button>}
       </div>
     </section>
   );

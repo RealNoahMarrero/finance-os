@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeftRight, ChevronDown, ChevronRight, CircleHelp, Plus, Sparkles, Wallet } from 'lucide-react';
+import { Archive, ArrowLeftRight, ChevronDown, ChevronRight, CircleHelp, Plus, Sparkles, Wallet } from 'lucide-react';
 import { useStore } from '../store';
 import { allEnvelopes, billOccurrences, readyToAssign, monthlyFlow, totalAvail, type Category, type Envelope } from '../data';
 import { addDays, cn, fmtDate, money, monthLabel, monthKey, sum } from '../lib';
@@ -10,7 +10,7 @@ const PRI = { 1: 'Essential', 2: 'Important', 3: 'Flexible' } as const;
 type Filter = 'all' | 'needs' | 'over' | 'money' | 'funded' | 'debts';
 
 export function Budget() {
-  const { data, openModal } = useStore();
+  const { data, openModal, setCategoryArchived, toast } = useStore();
   const [filter, setFilter] = useState<Filter>('all');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [help, setHelp] = useState(false);
@@ -154,9 +154,21 @@ export function Budget() {
             </div>
           );
         })}
-        {hiddenEnvs.length > 0 && filter === 'all' && <div className="xs muted" style={{ padding: '12px 20px', borderTop: '1px solid var(--line)' }}>{hiddenEnvs.length} archived {hiddenEnvs.length === 1 ? 'category holds' : 'categories hold'} {money(sum(hiddenEnvs, (e) => e.env.avail))} — old balances that are left out of Ready to Assign and your budget totals. Restore a category to include it again.</div>}
         {envs.every((e) => !matches(e)) && <Empty icon={<Sparkles />} title="Nothing here" text="No categories match this filter right now." />}
       </section>
+      {allEnvs.some((e) => e.cat.hidden) && (
+        <details className="card" style={{ marginTop: 16, overflow: 'hidden' }} data-testid="archived-categories">
+          <summary className="pad small" style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--ink-2)' }}><Archive size={14} style={{ verticalAlign: -2, marginRight: 6 }} />Archived categories · {allEnvs.filter((e) => e.cat.hidden).length}</summary>
+          <div className="xs muted" style={{ padding: '0 20px 8px' }}>Left out of Ready to Assign, budget totals and new transactions. History is kept. {hiddenEnvs.length > 0 && <>Old balances they still hold add up to {money(sum(hiddenEnvs, (e) => e.env.avail))}.</>}</div>
+          <div className="list">{allEnvs.filter((e) => e.cat.hidden).map((e) => (
+            <div key={e.cat.id} className="li" style={{ padding: '12px 20px' }}>
+              <div className="grow" style={{ minWidth: 0 }}><div className="li-title ellipsis">{e.cat.name}</div>
+                {e.env.avail !== 0 && <div className="xs muted">{e.env.avail < 0 ? `Restoring brings back its earlier overspent balance of ${money(e.env.avail)} — spending that exceeded what was set aside — and it counts in your totals again.` : `Restoring brings back the ${money(e.env.avail)} it still holds.`}</div>}</div>
+              <div className="right row gap8"><Money v={e.env.avail} className="amt-md" />
+                <button className="btn sm" onClick={async () => { if (await setCategoryArchived(e.cat.id, false)) toast(`${e.cat.name} restored`); }}>Restore</button></div>
+            </div>))}</div>
+        </details>
+      )}
     </div>
   );
 }

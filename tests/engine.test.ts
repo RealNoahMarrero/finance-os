@@ -206,3 +206,36 @@ describe('transfers show real amounts with direction', () => {
   });
   it('a genuine zero stays zero', () => { expect(Math.abs(txnDisplayAmount(dd, { ...t, amount: 0 }, 'a').v)).toBe(0); });
 });
+
+// ── backlog audit: Ready to Assign with overspending, and Conservative income windows ──
+import { overspent } from '../src/data';
+describe('Ready to Assign with overspent categories (B2)', () => {
+  const acct = (id: string, balance: number) => ({ id, name: id, type: 'checking' as const, mask: '', institution: '', balance, lastReconciled: '2026-10-31', baseline: '2026-10-31', openingBalance: balance });
+  const cat = (id: string, assigned: number) => ({ id, groupId: '1', name: id, icon: '', target: null, priority: 2 as const, carry: 0, assigned, hidden: false });
+  // The historical screenshot: cash $257.61, net left in categories $170.61, overspent total $88.11.
+  const d = { ...emptyData(), today: '2026-11-06', accounts: [acct('a', 25761)], categories: [cat('rent', -8811), cat('food', 25872)] };
+  it('equals cash minus net category money; overspending is counted once, not twice', () => {
+    expect(totalAvail(d)).toBe(17061);
+    expect(readyToAssign(d)).toBe(25761 - 17061); // $87.00
+    expect(overspent(d).reduce((n, e) => n - e.env.avail, 0)).toBe(8811);
+  });
+  it('does not depend on the month (no rollover side effects)', () => {
+    expect(readyToAssign({ ...d, today: '2026-12-01' })).toBe(readyToAssign(d));
+  });
+  it('moving money between categories never changes it', () => {
+    const moved = { ...d, categories: [cat('rent', -8811 + 5000), cat('food', 25872 - 5000)] };
+    expect(readyToAssign(moved)).toBe(readyToAssign(d));
+  });
+});
+describe('Conservative income windows (B1)', () => {
+  const inc = (id: string, amount: number, date: string, certainty: 'guaranteed' | 'anticipated', status: 'pending' | 'received' = 'pending') =>
+    ({ id, label: id, amount, date, certainty, repeat: 'none' as const, accountId: 'a', status, who: 'x' });
+  const d = { ...emptyData(), today: '2026-11-06', incomes: [inc('camera', 133100, '2026-11-10', 'guaranteed'), inc('refund', 19000, '2026-11-12', 'guaranteed'), inc('later', 50000, '2026-12-20', 'guaranteed'), inc('maybe', 30000, '2026-11-20', 'anticipated'), inc('done', 99900, '2026-11-08', 'guaranteed', 'received'), inc('late', 77700, '2026-11-02', 'guaranteed')] };
+  const g = (days: number) => incomeOccurrences(d, '2026-11-07', addDaysISO('2026-11-06', days), 'guaranteed').reduce((n, o) => n + o.amount, 0);
+  it('counts guaranteed pending entries by window; not received, anticipated, or past-due ones', () => {
+    expect(g(30)).toBe(133100 + 19000);
+    expect(g(60)).toBe(133100 + 19000 + 50000);
+    expect(g(90)).toBe(g(60));
+  });
+});
+function addDaysISO(iso: string, n: number) { const t = new Date(iso + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); }

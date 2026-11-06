@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState, useEffect, type ReactNode } from 'react';
-import { ArrowRight, ArrowUpDown, ChevronDown, Bell, Check, CircleCheck, Download, Eye, FlaskConical, Info, Landmark, LogOut, ListChecks, Pencil, Plus, Scale, Split, StickyNote, Trash, TriangleAlert, Wallet } from 'lucide-react';
+import { Archive, ArrowLeftRight, ArrowRight, ArrowUpDown, ChevronDown, Bell, Check, CircleCheck, Download, Eye, FlaskConical, Info, Landmark, LogOut, ListChecks, Pencil, Plus, Scale, Split, StickyNote, Trash, TriangleAlert, Wallet } from 'lucide-react';
 import { useStore } from './store';
 import {
-  allEnvelopes, envelope, readyToAssign, staleness, billOccurrences, drift, rollForward, type Account, type Bill, type BillPeriod, type Category, type Txn, type Income, type Repeat as Rep,
+  allEnvelopes, envelope, readyToAssign, staleness, billOccurrences, drift, rollForward, nextDueDate, type Account, type Bill, type BillPeriod, type Category, type Txn, type Income, type Repeat as Rep,
 } from './data';
 import { addDays, centsToInput, cn, diffDays, fmtDate, money, monthKey, relDay, sum, toCents, plural, todayISO } from './lib';
 import { CatIcon, Callout, Money, Seg, Sheet, StatusPill, ThemeSwitch } from './ui';
@@ -29,19 +29,26 @@ const groupCats = (cats: Category[], groups: { id: string; name: string }[]) => 
 // Transaction: add / view / edit
 // ═══════════════════════════════════════════════════════════
 export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'view' | 'edit'; id?: string; prefill?: Partial<Txn> }) {
-  const { data, closeModal, addTxn, updateTxn, deleteTxn, toast, openModal } = useStore();
+  const { data, closeModal, addTxn, updateTxn, deleteTxn, advanceBill, undoAdvanceBill, toast, openModal } = useStore();
   const existing = id ? data.txns.find((t) => t.id === id) : undefined;
   const [mode, setMode] = useState(initialMode);
   const [confirmDel, setConfirmDel] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [adv, setAdv] = useState<{ bill: Bill; id: string; t: Omit<Txn, 'id'>; next: string } | null>(null);
 
   const seed: Partial<Txn> = existing ?? prefill ?? {};
+  // Opened from an account's own page? Use that account (read once, when the sheet opens, so context never goes stale).
+  const [ctxAcct] = useState(() => {
+    if (initialMode !== 'add' || prefill?.accountId) return undefined;
+    const m = /^#\/accounts\/([^/?]+)/.exec(location.hash);
+    return m ? data.accounts.find((a) => a.id === decodeURIComponent(m[1]))?.id : undefined;
+  });
   const defaultAcct = data.accounts.find((a) => a.type === 'checking')?.id ?? data.accounts[0]?.id ?? '';
   const [type, setType] = useState<Txn['type']>(seed.type ?? 'expense');
   const [amount, setAmount] = useState(seed.amount ? centsToInput(seed.amount) : '');
   const [payee, setPayee] = useState(seed.payee ?? '');
   const [categoryId, setCategoryId] = useState(seed.categoryId ?? '');
-  const [accountId, setAccountId] = useState(seed.accountId ?? defaultAcct);
+  const [accountId, setAccountId] = useState(seed.accountId ?? ctxAcct ?? defaultAcct);
   const [toAccountId, setToAccountId] = useState(seed.toAccountId ?? '');
   const [date, setDate] = useState(seed.date ?? data.today);
   const [notes, setNotes] = useState(seed.notes ?? '');
@@ -83,7 +90,7 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
     const lc = p.last.splits?.length ? [...p.last.splits].sort((a, b) => b.amount - a.amount)[0].categoryId : p.last.categoryId;
     // Clicking/choosing a suggestion is an explicit request; an exact typed match only fills what you haven't chosen yourself.
     if (lc && (explicit || !catTouched)) { setCategoryId(lc); setAutoCat(true); if (explicit) setCatTouched(false); }
-    if (explicit || !acctTouched) setAccountId(p.last.accountId);
+    if (!ctxAcct && (explicit || !acctTouched)) setAccountId(p.last.accountId); // the account you opened this from stays
     setHint(`Filled in from your last ${p.name} purchase${p.last.splits?.length ? ' (it was split — you can split again below)' : ''}`);
   };
   const pickPayee = (p: typeof payeeStats[number]) => { setPayee(p.name); setFocusPayee(false); setHiSug(-1); applyPayee(p, true); };
@@ -108,7 +115,7 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
   const freq = useMemo(() => {
     const m = new Map<string, number>();
     for (const t of data.txns) if (t.type === 'expense' && t.categoryId && !t.adjustment) m.set(t.categoryId, (m.get(t.categoryId) || 0) + 1);
-    return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k).filter((k) => !catById(k)?.cardAccountId).slice(0, 6);
+    return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k).filter((k) => !catById(k)?.cardAccountId && !catById(k)?.hidden).slice(0, 6);
   }, [data.txns]); // eslint-disable-line react-hooks/exhaustive-deps
   const chipCats = categoryId && !freq.includes(categoryId) ? [categoryId, ...freq.slice(0, 5)] : freq;
 
@@ -122,6 +129,14 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
     ? sourceAcct.type === 'credit' ? sourceAcct.balance + (type === 'income' ? -cents : cents) : sourceAcct.balance + (type === 'income' ? cents : -cents)
     : null;
 
+  /** A recurring, active bill this new payment plausibly settles — only a full-or-larger payment close to the due date, never a debt or a paused bill. */
+  const billForNewTxn = (t: Omit<Txn, 'id'>): Bill | undefined => {
+    if (t.type === 'income' || t.splits?.length || !t.categoryId) return undefined;
+    const b = data.bills.find((x) => x.categoryId === t.categoryId);
+    if (!b || !b.recurring || b.paused || b.isDebt || !b.date || b.paid[b.date] || t.amount < b.amount) return undefined;
+    const early = b.period === 'Weekly' ? 3 : b.period === 'Bi-Weekly' ? 7 : b.period === 'Yearly' ? 45 : 15;
+    return t.date >= addDays(b.date, -early) ? b : undefined;
+  };
   const buildTxn = (): Omit<Txn, 'id'> => {
     const toAcct = acct(toAccountId);
     const autoCat = type === 'transfer' && toAcct?.type === 'credit' ? data.categories.find((c) => c.cardAccountId === toAcct.id)?.id : undefined;
@@ -142,10 +157,31 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
       if (await updateTxn(existing.id, t)) { toast('Transaction updated'); closeModal(); }
     } else {
       const newId = await addTxn(t);
-      if (newId) { toast(`${t.type === 'income' ? 'Income' : t.type === 'transfer' ? 'Transfer' : 'Expense'} added · ${money(t.amount)}`, () => { void deleteTxn(newId); }); closeModal(); }
+      if (newId) {
+        const added = () => toast(`${t.type === 'income' ? 'Income' : t.type === 'transfer' ? 'Transfer' : 'Expense'} added · ${money(t.amount)}`, () => { void deleteTxn(newId); });
+        const b = billForNewTxn(t);
+        if (b) { setAdv({ bill: b, id: newId, t, next: nextDueDate(b.period, b.anchor ?? b.date!, b.date!) }); setSaving(false); return; }
+        added(); closeModal();
+      }
     }
     setSaving(false);
   };
+
+  // ── optional: move a recurring bill to its next due date after paying it ──
+  if (adv) {
+    const { bill, t, next, id: newId } = adv;
+    const finish = () => { toast(`${t.type === 'transfer' ? 'Transfer' : 'Expense'} added · ${money(t.amount)}`, () => { void deleteTxn(newId); }); closeModal(); };
+    return (
+      <Sheet title={`Move ${bill.name} to its next due date?`} sub={`${money(t.amount)} recorded · ${bill.name} was due ${fmtDate(bill.date!)}`} onClose={finish}
+        footer={<><button className="btn" data-testid="keep-due" disabled={saving} onClick={finish}>Keep current due date</button>
+          <button className="btn primary" data-testid="advance-due" disabled={saving} onClick={async () => {
+            setSaving(true);
+            if (await advanceBill(bill.id, bill.date!, newId, t.date, t.amount, next)) { toast(`${bill.name} moved to ${fmtDate(next)}`, () => { void undoAdvanceBill(bill.id, bill.date!); }); closeModal(); } else setSaving(false);
+          }}>Advance to {fmtDate(next)}</button></>}>
+        <Callout icon={<Info />}>Advancing marks the {fmtDate(bill.date!)} payment as paid with this transaction and sets the next due date to <b>{fmtDate(next)}</b>. Your transaction is kept either way.</Callout>
+      </Sheet>
+    );
+  }
 
   // ── view mode ──
   if (mode === 'view' && existing) {
@@ -528,7 +564,7 @@ export function MoveSheet({ from: f0, to: t0, amount: a0 }: { from?: string; to?
 // Category detail
 // ═══════════════════════════════════════════════════════════
 export function CategorySheet({ id }: { id: string }) {
-  const { data, closeModal, openModal, setTarget, updateBill, removeBill, toast } = useStore();
+  const { data, closeModal, openModal, setTarget, updateBill, removeBill, setCategoryArchived, toast } = useStore();
   const cat = data.categories.find((c) => c.id === id)!;
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [busyBill, setBusyBill] = useState(false);
@@ -602,6 +638,7 @@ export function CategorySheet({ id }: { id: string }) {
               const ok = await updateBill(bill.id, { name: bill.name, amount: bill.amount, date, recurring: bill.recurring, period: bill.period, mode: bill.mode, groupId: cat.groupId, paused: !resume });
               setBusyBill(false); if (ok) toast(resume ? `${bill.name} resumed` : `${bill.name} paused · history and debt kept`);
             }}>{bill.paused ? 'Resume bill' : 'Pause bill'}</button>
+            <button className="btn sm" data-testid="archive-bill" onClick={() => openModal({ type: 'bill-archive', billId: bill.id })}><Archive />Archive bill</button>
             {!confirmRemove && <button className="btn sm danger" onClick={() => setConfirmRemove(true)}><Trash />Remove bill</button>}
           </div>
           {confirmRemove && <div className="fade-in" style={{ marginTop: 10 }}><Callout tone="warn">Remove the schedule from <b>{cat.name}</b>? The envelope, its money, transactions, past payments{cat.isDebt ? ' and the debt balance' : ''} all stay. Only the due date and reminders go away.
@@ -611,6 +648,20 @@ export function CategorySheet({ id }: { id: string }) {
           <button className="btn sm" style={{ marginTop: 10 }} onClick={() => openModal({ type: 'bill-schedule', categoryId: id })}><Plus />Add scheduled bill</button>
         </>}
       </div>
+      {!cat.cardAccountId && (
+        <div className="card pad" style={{ boxShadow: 'none', marginTop: 12 }} data-testid="category-archive">
+          <div className="eyebrow">Archive category</div>
+          {(() => {
+            const why = bill ? 'It still has an active scheduled bill — archive the bill first.' : env.avail !== 0 ? `It still holds ${money(env.avail)}. Move that money first so nothing is lost or silently reassigned.` : cat.isDebt && (cat.debtBalance ?? 0) > 0 ? 'It tracks a debt that is still owed.' : '';
+            return <>
+              <div className="small muted" style={{ marginTop: 6 }}>{why || 'Hides it from your budget and from new transactions. Its history, allocations and transactions are kept, and you can restore it any time.'}</div>
+              <div className="row gap8" style={{ marginTop: 10, flexWrap: 'wrap' }}>
+                {env.avail !== 0 && !bill && <button className="btn sm" onClick={() => openModal({ type: 'move', ...(env.avail > 0 ? { from: id } : { to: id, amount: -env.avail }) })}><ArrowLeftRight />Move money</button>}
+                <button className="btn sm" disabled={!!why || busyBill} onClick={async () => { setBusyBill(true); const ok = await setCategoryArchived(id, true); setBusyBill(false); if (ok) { toast(`${cat.name} archived · history kept`, () => { void setCategoryArchived(id, false); }); closeModal(); } }}><Archive />Archive category</button>
+              </div></>;
+          })()}
+        </div>
+      )}
       {recent.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <div className="eyebrow" style={{ marginBottom: 4 }}>Recent activity</div>
@@ -622,6 +673,45 @@ export function CategorySheet({ id }: { id: string }) {
           ))}
         </div>
       )}
+    </Sheet>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// Archive a bill (history kept)
+// ═══════════════════════════════════════════════════════════
+export function BillArchiveSheet({ billId }: { billId: string }) {
+  const { data, closeModal, openModal, archiveBill, restoreBill, toast } = useStore();
+  const bill = data.bills.find((b) => b.id === billId);
+  const cat = data.categories.find((c) => c.id === billId);
+  const [also, setAlso] = useState(false);
+  const [saving, setSaving] = useState(false);
+  if (!bill || !cat) return <Sheet title="Bill not found" onClose={closeModal}><div className="small muted">This bill no longer exists or is already archived.</div></Sheet>;
+  const env = envelope(data, billId);
+  // Transactions in this category that are not payments of this bill (another payee, not confirmed through the bill).
+  const others = data.txns.filter((t) => !t.billId && (t.categoryId === billId || t.splits?.some((s) => s.categoryId === billId)) && t.payee.trim().toLowerCase() !== bill.payee.trim().toLowerCase());
+  const owes = cat.isDebt && (cat.debtBalance ?? 0) > 0;
+  const blocker = env.avail !== 0 ? `${cat.name} still holds ${money(env.avail)}. Move it first if you want to archive the category too.` : owes ? `${cat.name} tracks a debt that is still owed, so the category stays.` : others.length > 0 ? `${others.length} other ${others.length === 1 ? 'transaction uses' : 'transactions use'} this category, so it stays.` : '';
+  const go = async () => {
+    setSaving(true);
+    const withCat = also && !blocker;
+    if (await archiveBill(billId, withCat)) { toast(`${bill.name} archived · history kept`, () => { void restoreBill(billId, withCat); }); closeModal(); } else setSaving(false);
+  };
+  return (
+    <Sheet title="Archive bill" sub={bill.name} onClose={closeModal}
+      footer={<><button className="btn" onClick={closeModal}>Cancel</button><button className="btn primary" disabled={saving} onClick={go}>{saving ? 'Archiving…' : 'Archive bill'}</button></>}>
+      <div className="stack gap12">
+        <Callout icon={<Info />}>Archived bills leave your bill lists, reminders and forecasts. Every past payment, transaction and the original name are kept, and you can restore it from <b>Bills → Archived bills</b>. Nothing is deleted.</Callout>
+        {bill.recurring && <div className="small muted">Its repeating schedule stops while archived. Restoring moves it to its next unpaid due date.</div>}
+        {!bill.recurring && bill.date && !bill.paid[bill.date] && <div className="small muted">{bill.name} has an unpaid due date ({fmtDate(bill.date)}). It will stop counting as upcoming or overdue until you restore it.</div>}
+        <div className="card pad" style={{ boxShadow: 'none' }} data-testid="archive-category-option">
+          <label className="row gap12" style={{ alignItems: 'flex-start', cursor: blocker ? 'default' : 'pointer' }}>
+            <input type="checkbox" checked={also && !blocker} disabled={!!blocker} onChange={(e) => setAlso(e.target.checked)} style={{ marginTop: 3 }} />
+            <span><b>Also archive the “{cat.name}” category</b><div className="small muted" style={{ marginTop: 2 }}>{blocker || 'Nothing else uses it and it holds no money. It leaves your budget and new-transaction choices; its history stays.'}</div></span>
+          </label>
+          {env.avail !== 0 && <button type="button" className="btn sm" style={{ marginTop: 8 }} onClick={() => openModal({ type: 'move', ...(env.avail > 0 ? { from: billId } : { to: billId, amount: -env.avail }) })}><ArrowLeftRight />Move money</button>}
+        </div>
+      </div>
     </Sheet>
   );
 }
@@ -1270,6 +1360,7 @@ export function SheetHost() {
     case 'category-add': return <CategoryAddSheet />;
     case 'category-edit': return <CategoryEditSheet key={modal.id} id={modal.id} />;
     case 'bill-schedule': return <BillScheduleSheet key={modal.categoryId} categoryId={modal.categoryId} />;
+    case 'bill-archive': return <BillArchiveSheet key={modal.billId} billId={modal.billId} />;
     case 'bill-edit': return <BillEditSheet key={modal.billId} billId={modal.billId} />;
     case 'bill': return <BillSheet key={`${modal.billId}-${modal.date}`} billId={modal.billId} date={modal.date} />;
     case 'income': return <IncomeSheet key={`${modal.mode}-${modal.id}`} mode={modal.mode} id={modal.id} />;

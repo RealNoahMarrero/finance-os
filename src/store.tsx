@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { emptyData, type DataState, type Txn, type Income, type Account, type Bill } from './data';
+import { emptyData, rollForward, type DataState, type Txn, type Income, type Account, type Bill } from './data';
 import * as db from './db';
 import { supabase } from './supabase';
 import { todayISO } from './lib';
@@ -15,6 +15,7 @@ export type Modal =
   | { type: 'bill-schedule'; categoryId: string }
   | { type: 'bill'; billId: string; date: string }
   | { type: 'bill-edit'; billId: string }
+  | { type: 'bill-archive'; billId: string }
   | { type: 'income'; mode: 'view' | 'add'; id?: string; date?: string }
   | { type: 'reconcile'; id: string }
   | { type: 'cutover'; id?: string }
@@ -46,6 +47,13 @@ interface Store {
   updateCategory: (id: string, p: { name: string; emoji: string; groupId: string }) => Promise<boolean>;
   scheduleBill: (categoryId: string, s: db.ScheduleInput) => Promise<boolean>;
   removeBill: (categoryId: string) => Promise<boolean>;
+  /** Retire / restore a bill (history kept). `alsoCategory` also archives its budget category. */
+  archiveBill: (billId: string, alsoCategory?: boolean) => Promise<boolean>;
+  restoreBill: (billId: string, alsoCategory?: boolean) => Promise<boolean>;
+  setCategoryArchived: (categoryId: string, archived: boolean) => Promise<boolean>;
+  /** Confirms an already-recorded transaction as the payment for a bill occurrence and moves the bill to its next due date. */
+  advanceBill: (billId: string, due: string, txnId: string, paidOn: string, amount: number, next: string) => Promise<boolean>;
+  undoAdvanceBill: (billId: string, due: string) => Promise<boolean>;
   payBill: (billId: string, date: string, opts: { post: boolean; amount?: number; accountId?: string }) => Promise<boolean>;
   setBillMode: (billId: string, mode: Bill['mode']) => Promise<boolean>;
   updateBill: (billId: string, patch: db.BillPatch) => Promise<boolean>;
@@ -167,6 +175,19 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
   const updateCategory: Store['updateCategory'] = useCallback(async (id, p) => (await run(() => db.updateCategory(id, p))).ok, [run]);
   const scheduleBill: Store['scheduleBill'] = useCallback(async (id, s) => (await run(() => db.scheduleBill(id, s))).ok, [run]);
   const removeBill: Store['removeBill'] = useCallback(async (id) => (await run(() => db.removeBill(id))).ok, [run]);
+  const archiveBill: Store['archiveBill'] = useCallback(async (id, alsoCat) => {
+    const r = await run(async () => { await db.setBillArchived(id, true); if (alsoCat) await db.setCategoryHidden(id, true); });
+    return r.ok;
+  }, [run]);
+  const restoreBill: Store['restoreBill'] = useCallback(async (id, alsoCat) => {
+    const b = data.archivedBills.find((x) => x.id === id);
+    const resume = b?.date && b.recurring ? rollForward({ recurring: true, period: b.period, anchor: b.anchor, date: b.date, paid: b.paid }, b.date, todayISO()) : b?.date;
+    const r = await run(async () => { if (alsoCat) await db.setCategoryHidden(id, false); await db.setBillArchived(id, false, resume); });
+    return r.ok;
+  }, [run, data.archivedBills]);
+  const setCategoryArchived: Store['setCategoryArchived'] = useCallback(async (id, a) => (await run(() => db.setCategoryHidden(id, a))).ok, [run]);
+  const advanceBill: Store['advanceBill'] = useCallback(async (id, due, tid, on, amt, next) => (await run(() => db.linkBillPayment(id, due, tid, on, amt, next))).ok, [run]);
+  const undoAdvanceBill: Store['undoAdvanceBill'] = useCallback(async (id, due) => (await run(() => db.unlinkBillPayment(id, due))).ok, [run]);
   const setBillMode: Store['setBillMode'] = useCallback(async (id, m) => (await run(() => db.setBillMode(id, m))).ok, [run]);
   const updateBill: Store['updateBill'] = useCallback(async (id, p) => (await run(() => db.updateBill(id, p))).ok, [run]);
 
@@ -240,8 +261,8 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
 
   const value = useMemo<Store>(() => ({
     data, status, loadError, refresh, busy, email, signOut, modal, openModal: setModal, closeModal: () => setModal(null), toasts, toast, theme, setTheme,
-    addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, updateIncome, deleteIncome, reconcile, setCutover, setCutovers, addAccount, updateAccount, archiveAccount, restoreAccount, deleteAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported,
-  }), [data, status, loadError, busy, email, modal, toasts, theme, refresh, signOut, toast, setTheme, addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported]);
+    addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, archiveBill, restoreBill, setCategoryArchived, advanceBill, undoAdvanceBill, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, updateIncome, deleteIncome, reconcile, setCutover, setCutovers, addAccount, updateAccount, archiveAccount, restoreAccount, deleteAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported,
+  }), [data, status, loadError, busy, email, modal, toasts, theme, refresh, signOut, toast, setTheme, addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, archiveBill, restoreBill, setCategoryArchived, advanceBill, undoAdvanceBill, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported]);
 
   return (
     <Ctx.Provider value={value}>

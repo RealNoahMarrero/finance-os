@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Bell, ChevronLeft, ChevronRight, Info, Pencil, Plus, Receipt, TrendingDown } from 'lucide-react';
+import { Archive, Bell, ChevronLeft, ChevronRight, Info, Pencil, Plus, Receipt, TrendingDown } from 'lucide-react';
 import { useStore } from '../store';
+import { envelope } from '../data';
 import {
   billOccurrences, buildForecast, incomeOccurrences, shortfall, upcomingBills, type BillOcc, type DataState,
 } from '../data';
@@ -58,6 +59,30 @@ function AllBills() {
     </section>
   );
 }
+/** Retired bills. Everything about them is kept; Restore puts one back on its next unpaid due date. */
+function ArchivedBills() {
+  const { data, restoreBill, toast } = useStore();
+  const [busy, setBusy] = useState('');
+  if (data.archivedBills.length === 0) return null;
+  return (
+    <details className="card" style={{ margin: '16px 0', overflow: 'hidden' }} data-testid="archived-bills">
+      <summary className="pad small" style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--ink-2)' }}><Archive size={14} style={{ verticalAlign: -2, marginRight: 6 }} />Archived bills · {data.archivedBills.length}</summary>
+      <div className="list">{data.archivedBills.map((b) => {
+        const cat = data.categories.find((c) => c.id === b.categoryId);
+        const lastPaid = Object.keys(b.paid).sort().pop();
+        const held = cat?.hidden ? envelope(data, b.id).avail : 0;
+        return (
+          <div key={b.id} className="li" style={{ padding: '12px 20px' }}>
+            <div className="grow" style={{ minWidth: 0 }}><div className="li-title ellipsis">{b.name}</div>
+              <div className="li-sub">{b.recurring ? b.period : 'One time'} · {lastPaid ? `last paid ${fmtDate(lastPaid)}` : 'no payments recorded'}{cat?.hidden ? ' · its category is archived too' : ''}</div>
+              {held !== 0 && <div className="xs muted">Restoring also brings back the category with its earlier balance of {money(held)}.</div>}</div>
+            <div className="right row gap8"><Money v={b.amount} className="amt-md" />
+              <button className="btn sm" disabled={busy === b.id} onClick={async () => { setBusy(b.id); const ok = await restoreBill(b.id, !!cat?.hidden); setBusy(''); if (ok) toast(`${b.name} restored`); }}>Restore</button></div>
+          </div>);
+      })}</div>
+    </details>
+  );
+}
 function BillsTab() {
   const { data } = useStore();
   const occ = upcomingBills(data, 45);
@@ -72,7 +97,7 @@ function BillsTab() {
       <div className="pad" style={{ paddingBottom: 6 }}><div className="sect-head" style={{ marginBottom: 0 }}><h2 className="sect-title" style={{ color: tone }}>{title}</h2><span className="small muted num">{money(sum(items, (o) => o.bill.amount), { cents: false })}</span></div></div>
       <div className="list">{items.map((o) => <BillCard key={o.bill.id + o.date} o={o} />)}</div>
     </section>) : null;
-  if (data.bills.length === 0) return <div className="card"><Empty icon={<Bell />} title="No bills yet" text="Give a category a due date and amount to see it here." /></div>;
+  if (data.bills.length === 0) return <><div className="card"><Empty icon={<Bell />} title="No bills yet" text="Give a category a due date and amount to see it here." /></div><ArchivedBills /></>;
   return (
     <div className="fade-in">
       <div className="grid g12 keep2" style={{ marginBottom: 16, gap: 12 }}>
@@ -86,6 +111,7 @@ function BillsTab() {
       {grp('Later this month', later)}
       {grp('Next month', next)}
       <AllBills />
+      <ArchivedBills />
       <Callout icon={<Info />}>Bills never post a transaction on their own. If a bill is set to <b>Prepares</b>, Finances fills in the transaction when you mark it paid — you review and confirm before anything is recorded.</Callout>
     </div>
   );
@@ -108,7 +134,7 @@ function IncomeTab() {
       </div>
       <div className="grid g12" style={{ marginBottom: 16 }}>
         <div className="card pad" style={{ gridColumn: 'span 4', borderColor: 'color-mix(in srgb, var(--proj) 35%, var(--line))' }}>
-          <div className="eyebrow">Conservative · guaranteed only</div><div className="amt-xl num c-proj" style={{ marginTop: 4 }}><Money v={g} cents={false} /></div><div className="small muted" style={{ marginTop: 2 }}>Paychecks you can count on</div></div>
+          <div className="eyebrow">Conservative · guaranteed only</div><div className="amt-xl num c-proj" style={{ marginTop: 4 }}><Money v={g} cents={false} /></div><div className="small muted" style={{ marginTop: 2 }}>{g === 0 && waiting.length > 0 ? `Nothing guaranteed ahead — ${waiting.length} past-due ${waiting.length === 1 ? 'entry is' : 'entries are'} waiting below, not counted until confirmed` : g === 0 ? `No guaranteed income in the next ${days} days` : 'Paychecks you can count on'}</div></div>
         <div className="card pad" style={{ gridColumn: 'span 4', borderStyle: 'dashed', borderColor: 'color-mix(in srgb, var(--proj) 55%, var(--line))' }}>
           <div className="eyebrow">Plus anticipated</div><div className="amt-xl num c-proj" style={{ marginTop: 4, opacity: 0.85 }}><Money v={a} cents={false} /></div><div className="small muted" style={{ marginTop: 2 }}>Invoices &amp; side income, if they land</div></div>
         <div className="card pad" style={{ gridColumn: 'span 4' }}>

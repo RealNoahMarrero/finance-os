@@ -21,7 +21,7 @@ export interface Category {
   id: string; groupId: string; name: string; icon: string; target: number | null;
   priority: 1 | 2 | 3; carry: number;
   assigned: number; // the envelope's Available balance as stored (budgeted minus activity)
-  cardAccountId?: string; hidden: boolean; billPaused?: boolean;
+  cardAccountId?: string; hidden: boolean; billPaused?: boolean; billArchived?: boolean;
   isDebt?: boolean; debtBalance?: number; // a standalone amount owed (cents), independent of envelope funding, bills and credit cards
 }
 export interface Txn {
@@ -49,14 +49,14 @@ export interface Debt { id: string; name: string; balance: number; payment: numb
 export interface Planned { id: string; label: string; amount: number; dayOfMonth?: number; date?: string }
 export interface Reconciliation { id: string; accountId: string; date: string; recorded: number; actual: number; diff: number; adjustmentTxnId?: string; note?: string }
 export interface DataState {
-  accounts: Account[]; allAccounts: Account[]; groups: Group[]; categories: Category[]; txns: Txn[]; bills: Bill[];
+  accounts: Account[]; allAccounts: Account[]; groups: Group[]; categories: Category[]; txns: Txn[]; bills: Bill[]; archivedBills: Bill[];
   incomes: Income[]; debts: Debt[]; planned: Planned[]; reconciliations: Reconciliation[]; today: string;
   hiddenBusiness: { accounts: number; categories: number; transactions: number };
   credit: CreditState;
 }
 
 export function emptyData(): DataState {
-  return { accounts: [], allAccounts: [], groups: [], categories: [], txns: [], bills: [], incomes: [], debts: [], planned: [], reconciliations: [], today: todayISO(), hiddenBusiness: { accounts: 0, categories: 0, transactions: 0 }, credit: { scores: [], meta: {}, reported: [], ready: false } };
+  return { accounts: [], allAccounts: [], groups: [], categories: [], txns: [], bills: [], archivedBills: [], incomes: [], debts: [], planned: [], reconciliations: [], today: todayISO(), hiddenBusiness: { accounts: 0, categories: 0, transactions: 0 }, credit: { scores: [], meta: {}, reported: [], ready: false } };
 }
 
 // ═════════ selectors ═════════

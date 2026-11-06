@@ -95,7 +95,7 @@ export function toDataState(raw: RawData, today = todayISO()): DataState {
     return {
       id: S(c.id), groupId: S(c.group_id), name: c.name, icon: c.emoji || '', target: Number(c.target_amount) > 0 ? cents(c.target_amount) : null,
       priority: kind === 'bills' ? 1 : kind === 'everyday' ? 2 : 3, carry: 0, assigned: cents(c.assigned_amount),
-      cardAccountId: cardOf.get(S(c.id)), hidden: !!c.is_hidden, billPaused: !!c.bill_paused, isDebt: !!c.is_debt, debtBalance: cents(c.balance),
+      cardAccountId: cardOf.get(S(c.id)), hidden: !!c.is_hidden, billPaused: !!c.bill_paused, billArchived: !!c.bill_archived, isDebt: !!c.is_debt, debtBalance: cents(c.balance),
     };
   });
 
@@ -119,11 +119,14 @@ export function toDataState(raw: RawData, today = todayISO()): DataState {
   const paidBy = new Map<string, Record<string, string>>();
   for (const p of raw.billPayments) { const k = S(p.category_id); if (!paidBy.has(k)) paidBy.set(k, {}); paidBy.get(k)![p.due_date] = p.transaction_id ? S(p.transaction_id) : 'manual'; }
   const billAmt = (c: Row) => (c.bill_amount != null ? cents(c.bill_amount) : cents(c.target_amount)); // one payment; falls back to the funding target for older bills
-  const bills: Bill[] = cats.filter((c) => !c.is_hidden && c.due_date && billAmt(c) > 0).map((c) => ({
+  const toBill = (c: Row): Bill => ({
     id: S(c.id), name: c.name, payee: c.name, categoryId: S(c.id), amount: billAmt(c), dueDay: Number(String(c.due_date).slice(8, 10)),
     recurring: !!c.is_repeating, date: c.due_date, period: PERIOD(c.target_period), mode: c.bill_mode === 'prepare' ? 'prepare' : 'reminder',
     accountId: defaultAcct, toAccountId: cardOf.get(S(c.id)), paid: paidBy.get(S(c.id)) ?? {}, isDebt: !!c.is_debt, anchor: c.bill_anchor ?? undefined, paused: !!c.bill_paused,
-  }));
+  });
+  // Archived bills leave every active list, reminder and forecast; they are kept (with all history) in archivedBills.
+  const bills: Bill[] = cats.filter((c) => !c.is_hidden && !c.bill_archived && c.due_date && billAmt(c) > 0).map(toBill);
+  const archivedBills: Bill[] = cats.filter((c) => c.bill_archived && c.due_date).map(toBill);
   const billIds = new Set(bills.map((b) => b.id));
   const debts: Debt[] = cats.filter((c) => c.is_debt && Number(c.balance) > 0).map((c) => ({
     id: S(c.id), name: c.name + (c.is_hidden ? ' (archived)' : ''), balance: cents(c.balance), payment: cents(c.target_amount),
@@ -149,7 +152,7 @@ export function toDataState(raw: RawData, today = todayISO()): DataState {
     reported: (raw.creditReported ?? []).filter((r) => acctIds.has(S(r.account_id))).map((r): ReportedBalance => ({ id: S(r.id), accountId: S(r.account_id), balance: cents(r.balance), reportedOn: r.reported_on, bureau: bureau(r.bureau), notes: r.notes ?? undefined })),
   };
   return {
-    credit, accounts, allAccounts, groups, categories, txns, bills, incomes, debts, planned: [], reconciliations, today,
+    credit, accounts, allAccounts, groups, categories, txns, bills, archivedBills, incomes, debts, planned: [], reconciliations, today,
     hiddenBusiness: {
       accounts: raw.accounts.filter((a) => !personal(a)).length, categories: raw.categories.filter((c) => !personal(c)).length,
       transactions: raw.transactions.filter((t) => !personal(t)).length,
@@ -267,6 +270,24 @@ export const scheduleBill = async (id: string, s: ScheduleInput) => {
 /** Removes the schedule only. The category, its funding target and balance, transactions, payment history and any debt balance stay exactly as they are. */
 export const removeBill = async (id: string) => {
   ok(await supabase.from('categories').update({ due_date: null, bill_anchor: null, is_repeating: false, bill_paused: false, bill_amount: null, bill_mode: 'reminder' }).eq('id', Number(id)));
+};
+/** Retires a bill. Only bill flags change (it is also paused so forecasts/reminders ignore it); the category, its money, transactions and payment history are untouched. */
+export const setBillArchived = async (id: string, archived: boolean, resumeDate?: string) => {
+  ok(await supabase.from('categories').update(archived
+    ? { bill_archived: true, bill_archived_at: new Date().toISOString(), bill_paused: true }
+    : { bill_archived: false, bill_archived_at: null, bill_paused: false, ...(resumeDate ? { due_date: resumeDate } : {}) }).eq('id', Number(id)));
+};
+/** Archive / restore a budget category. History, allocations and transactions are never touched. */
+export const setCategoryHidden = async (id: string, hidden: boolean) => { ok(await supabase.from('categories').update({ is_hidden: hidden }).eq('id', Number(id))); };
+/** Links an already-recorded transaction to a bill occurrence and moves the bill to its next due date. The unique (bill, due date) record stops a second advance for the same occurrence. */
+export const linkBillPayment = async (cat: string, due: string, txnId: string, paidOn: string, amount: number, nextDate: string) => {
+  ok(await supabase.from('bill_payments').insert({ category_id: Number(cat), due_date: due, paid_on: paidOn, amount: dollars(amount), transaction_id: Number(txnId), mode: 'prepare' }));
+  const r = await supabase.from('categories').update({ due_date: nextDate }).eq('id', Number(cat)).eq('due_date', due);
+  if (r.error) { await supabase.from('bill_payments').delete().eq('category_id', Number(cat)).eq('due_date', due); throw new DbError(r.error.message); }
+};
+export const unlinkBillPayment = async (cat: string, due: string) => {
+  ok(await supabase.from('categories').update({ due_date: due }).eq('id', Number(cat)));
+  ok(await supabase.from('bill_payments').delete().eq('category_id', Number(cat)).eq('due_date', due));
 };
 export const addAccountRow = async (a: { name: string; type: AccountType; limit?: number }): Promise<string> => {
   const r = ok(await supabase.from('accounts').insert({ name: a.name, type: DB_ACCT_TYPE[a.type], balance: 0, credit_limit: a.limit ? dollars(a.limit) : 0, entity_id: 'personal' }).select('id').single()) as Row;
