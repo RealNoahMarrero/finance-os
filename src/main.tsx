@@ -6,7 +6,7 @@ import './styles.css';
 import { StoreProvider } from './store';
 import { App } from './App';
 import { Login, Notice } from './Login';
-import { configured, supabase } from './supabase';
+import { blockedRemote, configured, supabase } from './supabase';
 
 type Gate = { state: 'loading' } | { state: 'out' } | { state: 'denied'; email: string } | { state: 'in'; email: string } | { state: 'offline' };
 
@@ -29,6 +29,7 @@ function Root() {
     return () => { alive = false; sub.subscription.unsubscribe(); };
   }, []);
 
+  if (blockedRemote) return <Notice title="Development safety stop">This is a development build pointed at a remote database. To protect real data it will not start. Run <code>npm run demo</code> for synthetic data, or set <code>VITE_ALLOW_REMOTE=1</code> if you really mean it.</Notice>;
   if (!configured) return <Notice title="Not configured">This build is missing its Supabase address or public key. Add <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> in the Netlify site settings and redeploy.</Notice>;
   switch (gate.state) {
     case 'loading': return <div className="boot" aria-busy="true"><span className="boot-dot" /></div>;

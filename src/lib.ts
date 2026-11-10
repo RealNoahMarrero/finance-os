@@ -11,7 +11,8 @@ export const parse = (s: string) => {
 };
 export const iso = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-export const todayISO = () => iso(new Date());
+/** VITE_DEMO_TODAY pins the clock for the synthetic demo and browser tests; it is never set in production builds. */
+export const todayISO = () => (import.meta.env.VITE_DEMO_TODAY as string | undefined) || iso(new Date());
 export const addDays = (s: string, n: number) => {
   const d = parse(s);
   d.setDate(d.getDate() + n);

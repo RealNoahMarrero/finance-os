@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Finances 2.0 — design proposal (synthetic data)</title>
+<style>
+@font-face{font-family:"Inter";src:url(fonts/inter-latin-wght-normal.woff2) format("woff2");font-weight:100 900}
+@font-face{font-family:"Newsreader";src:url(fonts/newsreader-latin-wght-normal.woff2) format("woff2");font-weight:200 800;font-style:normal}
+@font-face{font-family:"Newsreader";src:url(fonts/newsreader-latin-wght-italic.woff2) format("woff2");font-weight:200 800;font-style:italic}
+:root{
+  --bg:#F4F1EA;--surface:#FBF9F4;--raised:#FFFFFF;--line:#E7E2D7;--line2:#D9D3C6;
+  --ink:#1A1814;--ink2:#5F5A4F;--ink3:#8A8477;
+  --accent:#0F4C5C;--on-accent:#fff;--accent-soft:#E2EDEF;
+  --brass:#9A6F1F;--brass-soft:#F3EAD5;
+  --pos:#2D6A4C;--pos-soft:#E1EFE7;--neg:#A63F2D;--neg-soft:#F6E3DE;--warn:#8F6310;--warn-soft:#F5EBD3;
+  --shadow:0 1px 0 rgba(26,24,20,.04),0 8px 24px -12px rgba(26,24,20,.12);
+  --serif:"Newsreader",Georgia,"Times New Roman",serif;--sans:"Inter",system-ui,sans-serif;
+}
+[data-theme=dark]{
+  --bg:#0B1113;--surface:#111A1D;--raised:#172327;--line:#202E32;--line2:#2C3D42;
+  --ink:#EDE9E0;--ink2:#A9A59A;--ink3:#76746B;
+  --accent:#74C6CE;--on-accent:#06191C;--accent-soft:#12333A;
+  --brass:#DDB466;--brass-soft:#2A2417;
+  --pos:#72CDA2;--pos-soft:#14301F;--neg:#EC8C77;--neg-soft:#32191480;--warn:#E0B65A;--warn-soft:#2C2412;
+  --shadow:0 1px 0 rgba(255,255,255,.03),0 10px 28px -14px rgba(0,0,0,.6);
+}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--sans);font-feature-settings:"cv11","ss01";-webkit-font-smoothing:antialiased}
+.num{font-variant-numeric:tabular-nums lining-nums}
+.serif{font-family:var(--serif)}
+.eyebrow{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink3);font-weight:600}
+.muted{color:var(--ink2)}.faint{color:var(--ink3)}.pos{color:var(--pos)}.neg{color:var(--neg)}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+/* frames */
+.frame{position:relative;background:var(--bg);overflow:hidden;border:1px solid var(--line);border-radius:14px}
+.desktop{width:1360px;min-height:880px;display:grid;grid-template-columns:232px 1fr}
+.mobile{width:390px;min-height:844px;display:flex;flex-direction:column}
+/* sidebar */
+.rail{padding:22px 14px;display:flex;flex-direction:column;gap:4px;border-right:1px solid var(--line);background:var(--surface)}
+.brand{display:flex;align-items:center;gap:10px;padding:0 10px 18px}
+.mark{width:30px;height:30px;border-radius:9px;background:var(--accent);display:grid;place-items:center}
+.mark i{display:block;width:12px;height:2px;background:var(--on-accent);box-shadow:0 -5px 0 var(--on-accent),0 5px 0 -0px var(--on-accent);opacity:.95;border-radius:2px;width:12px}
+.brand b{font:600 19px var(--serif);letter-spacing:-.01em}
+.add{display:flex;align-items:center;gap:8px;justify-content:center;height:40px;border-radius:12px;background:var(--accent);color:var(--on-accent);font-weight:600;margin:0 4px 16px}
+.add kbd{font:600 10px var(--sans);border:1px solid color-mix(in srgb,var(--on-accent) 40%,transparent);padding:1px 5px;border-radius:5px;opacity:.85}
+.nav a{display:flex;align-items:center;gap:11px;height:38px;padding:0 12px;border-radius:10px;color:var(--ink2);font-weight:520;text-decoration:none}
+.nav a svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.6}
+.nav a[aria-current]{background:var(--raised);color:var(--ink);box-shadow:var(--shadow)}
+.nav a[aria-current] svg{color:var(--accent)}
+.rail .sp{flex:1}.rail .sep{height:1px;background:var(--line);margin:8px 6px}
+/* main */
+.main{padding:28px 40px 36px;display:flex;flex-direction:column;gap:22px}
+.mobile .main{padding:14px 18px 96px;gap:18px;flex:1}
+.head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px}
+.head h1{font:500 34px/1.05 var(--serif);letter-spacing:-.02em}
+.mobile .head h1{font-size:30px}
+.head .sub{color:var(--ink2);margin-top:6px}
+.seg{display:inline-flex;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:3px;gap:2px}
+.seg button{padding:6px 13px;border-radius:8px;color:var(--ink2);font-weight:560;font-size:13px}
+.seg button[aria-pressed=true]{background:var(--raised);color:var(--ink);box-shadow:var(--shadow)}
+.btn{height:36px;padding:0 14px;border-radius:10px;border:1px solid var(--line2);background:var(--raised);font-weight:580;display:inline-flex;align-items:center;gap:7px}
+.btn.primary{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.btn.sm{height:30px;padding:0 11px;font-size:13px;border-radius:9px}
+.btn.quiet{border-color:transparent;background:transparent;color:var(--accent)}
+.card{background:var(--raised);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
+.pad{padding:20px 22px}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:600;background:var(--surface);color:var(--ink2);border:1px solid var(--line)}
+.pill.neg{background:var(--neg-soft);color:var(--neg);border-color:transparent}.pill.warn{background:var(--warn-soft);color:var(--warn);border-color:transparent}
+.pill.pos{background:var(--pos-soft);color:var(--pos);border-color:transparent}.pill.acc{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+.pill.brass{background:var(--brass-soft);color:var(--brass);border-color:transparent}
+.row{display:flex;align-items:center;gap:12px}.between{justify-content:space-between}.grow{flex:1;min-width:0}
+.ell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sec-h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+.sec-h h2{font:550 19px var(--serif);letter-spacing:-.01em}
+.sec-h a{color:var(--accent);font-weight:580;font-size:13px;text-decoration:none}
+.li{display:flex;align-items:center;gap:14px;padding:13px 0;border-top:1px solid var(--line)}
+.li:first-child{border-top:0}
+.li .t{font-weight:580}.li .s{color:var(--ink2);font-size:13px}
+.ico{width:36px;height:36px;border-radius:11px;background:var(--surface);border:1px solid var(--line);display:grid;place-items:center;color:var(--ink2);font-size:15px;flex:none}
+.ico.neg{background:var(--neg-soft);color:var(--neg);border-color:transparent}.ico.acc{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+.date{width:40px;text-align:center;flex:none;line-height:1.1}.date b{display:block;font:500 20px var(--serif)}.date span{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);font-weight:600}
+.date.late b,.date.late span{color:var(--neg)}
+.amt{font-weight:620;text-align:right}
+.hero-n{font:300 58px/1 var(--serif);letter-spacing:-.03em;white-space:nowrap}.hero-n small{font-size:.5em;color:var(--ink3);letter-spacing:0}
+.mobile .hero-n{font-size:46px}
+.grid2{display:grid;grid-template-columns:1.25fr 1fr;gap:20px}
+.strip{display:flex;gap:10px;flex-wrap:wrap}
+.acct{padding:12px 16px;border:1px solid var(--line);background:var(--surface);border-radius:14px;min-width:132px;white-space:nowrap}
+.acct .n{font:500 22px var(--serif);margin-top:4px}
+.bar{height:5px;border-radius:9px;background:var(--line);overflow:hidden}.bar i{display:block;height:100%;background:var(--accent);border-radius:9px}
+.bar.over i{background:var(--neg)}
+.attn{display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:12px;background:var(--surface);border:1px solid var(--line)}
+.attn.neg{background:var(--neg-soft);border-color:transparent}.attn.warn{background:var(--warn-soft);border-color:transparent}
+/* mobile chrome */
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:14px 18px 0}
+.tabs{position:absolute;left:0;right:0;bottom:0;height:84px;background:color-mix(in srgb,var(--surface) 94%,transparent);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(5,1fr);align-items:start;padding-top:8px;backdrop-filter:blur(14px)}
+.tabs a{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;font-weight:580;color:var(--ink3);text-decoration:none;padding-top:4px}
+.tabs a svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.6}
+.tabs a[aria-current]{color:var(--accent)}
+.fab{width:54px;height:54px;border-radius:18px;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;margin-top:-18px;box-shadow:0 10px 24px -8px color-mix(in srgb,var(--accent) 70%,transparent)}
+.fab svg{stroke:var(--on-accent);width:24px;height:24px}
+/* budget */
+.split{display:grid;grid-template-columns:1fr 360px;gap:20px;min-height:0}
+.grp{display:flex;justify-content:space-between;padding:14px 0 6px;font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink3);font-weight:650}
+.brow{display:flex;align-items:center;gap:14px;padding:11px 12px;margin:0 -12px;border-radius:12px}
+.brow[aria-selected=true]{background:var(--accent-soft)}
+.brow .st{font-size:12.5px;color:var(--ink2)}
+.brow .st.neg{color:var(--neg);font-weight:600}.brow .st.pos{color:var(--pos)}
+.kv{display:flex;justify-content:space-between;padding:9px 0;border-top:1px solid var(--line);color:var(--ink2)}.kv b{color:var(--ink);font-weight:600}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--raised)}
+.cal>div{min-height:74px;padding:7px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);font-size:12px;color:var(--ink3)}
+.cal .ev{display:block;margin-top:3px;padding:2px 6px;border-radius:6px;background:var(--surface);color:var(--ink);font-weight:560;font-size:11.5px}
+.cal .ev.late{background:var(--neg-soft);color:var(--neg)}.cal .ev.inc{background:var(--accent-soft);color:var(--accent)}
+.sched{border:1.5px dashed var(--line2);border-radius:12px;background:transparent}
+.desktop .section-tx .txrow{padding:11px 0}
+.txrow{display:grid;grid-template-columns:36px 1fr 150px 130px 110px;gap:14px;align-items:center;padding:11px 14px;border-top:1px solid var(--line)}
+.txrow.sel{background:var(--accent-soft)}
+.mobile .txrow,.txrow.c3{grid-template-columns:36px 1fr auto;padding:11px 0}
+.daylab{display:flex;justify-content:space-between;padding:10px 14px;background:var(--surface);font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);font-weight:650;border-top:1px solid var(--line)}
+.mobile .daylab{padding:10px 0;background:none}
+/* ---- review page chrome ---- */
+body.review{padding:36px;display:flex;flex-direction:column;gap:56px;align-items:flex-start}
+body.review h2.sheet{font:500 28px var(--serif)}
+.swatches{display:grid;grid-template-columns:repeat(6,120px);gap:10px}
+.sw{height:84px;border-radius:12px;border:1px solid var(--line);padding:10px;font-size:11px;display:flex;flex-direction:column;justify-content:flex-end}
+</style>
+</head>
+<body class="review">
+
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="i-home" viewBox="0 0 24 24"><path d="M4 11 12 4l8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/></symbol>
+<symbol id="i-act" viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h9"/></symbol>
+<symbol id="i-acc" viewBox="0 0 24 24"><path d="M3 9 12 4l9 5M5 10v8M10 10v8M14 10v8M19 10v8M3 20h18"/></symbol>
+<symbol id="i-bill" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></symbol>
+<symbol id="i-bud" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9h-9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/></symbol>
+<symbol id="i-ins" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+<symbol id="i-set" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></symbol>
+</defs></svg>
+
+<div id="root" style="display:contents"></div>
+
+<script>
+const ic = (n) => `<svg><use href="#i-${n}"/></svg>`;
+const $ = (n, d = 2) => '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+const hero = (n) => { const [a, b] = Number(n).toFixed(2).split('.'); return `<span class="hero-n num">${n < 0 ? '−' : ''}$${Math.abs(Number(a)).toLocaleString('en-US')}<small>.${b}</small></span>`; };
+const NAV = [['home', 'Home', 'Home'], ['act', 'Activity', 'Activity'], ['acc', 'Accounts', 'Accounts'], ['bill', 'Bills', 'Bills'], ['bud', 'Budget', 'Budget'], ['ins', 'Insights', 'Insights']];
+
+const rail = (cur) => `<aside class="rail"><div class="brand"><div class="mark"><i></i></div><b>Finances</b></div>
+ <a class="add">${ic('plus').replace('<svg', '<svg width="16" height="16" style="stroke:currentColor;fill:none;stroke-width:2"')}Add transaction <kbd>N</kbd></a>
+ <nav class="nav">${NAV.map(([k, l]) => `<a ${k === cur ? 'aria-current="page"' : ''}>${ic(k)}${l}</a>`).join('')}</nav><div class="sp"></div><div class="sep"></div>
+ <nav class="nav"><a ${cur === 'set' ? 'aria-current="page"' : ''}>${ic('set')}Settings</a></nav></aside>`;
+const tabs = (cur) => `<nav class="tabs"><a ${cur === 'home' ? 'aria-current' : ''}>${ic('home')}Home</a><a ${cur === 'act' ? 'aria-current' : ''}>${ic('act')}Activity</a>
+ <a style="padding-top:0"><span class="fab">${ic('plus')}</span></a><a ${cur === 'bill' ? 'aria-current' : ''}>${ic('bill')}Bills</a><a ${cur === 'bud' ? 'aria-current' : ''}>${ic('bud')}Budget</a></nav>`;
+const topbar = (title) => `<div class="topbar"><div class="row"><div class="mark" style="width:26px;height:26px;border-radius:8px"><i style="width:10px"></i></div><b class="serif" style="font-size:17px">Finances</b></div>
+ <button class="btn sm" aria-label="More: Accounts, Insights, Settings" style="gap:6px">${ic('more').replace('<svg', '<svg width="16" height="16" style="fill:currentColor"')}More</button></div>`;
+
+/* ---------- data (synthetic) ---------- */
+const bills = [
+ { n: 'Car Loan', d: '27', m: 'Sep', rel: '2 payments missed · since Sep 27', amt: 320, late: 2, ico: '🚗' },
+ { n: 'Streaming', d: '27', m: 'Oct', rel: 'Was due 14 days ago', amt: 30, late: 1, ico: '▶' },
+ { n: 'Electric', d: '14', m: 'Nov', rel: 'In 4 days · $38 short', amt: 118.4, soon: true, ico: '⚡' },
+ { n: 'Phone', d: '22', m: 'Nov', rel: 'In 12 days · funded', amt: 85, ico: '☎' },
+ { n: 'Rent', d: '1', m: 'Dec', rel: 'In 21 days · funded', amt: 1500, ico: '⌂' },
+];
+const billRow = (b, pay) => `<div class="li"><div class="date ${b.late ? 'late' : ''}"><b>${b.d}</b><span>${b.m}</span></div><div class="grow"><div class="t">${b.n} ${b.late > 1 ? `<span class="pill neg">${b.late} missed</span>` : b.late ? '<span class="pill neg">Overdue</span>' : b.soon ? '<span class="pill warn">Due soon</span>' : ''}</div><div class="s ell">${b.rel}</div></div>
+ <div class="amt num">${$(b.amt)}</div>${pay ? `<button class="btn sm ${b.late || b.soon ? 'primary' : ''}">Pay</button>` : ''}</div>`;
+const tx = [
+ ['🛒', 'Trader Joe’s', 'Groceries · Everyday Checking', -62.4, 'Today'], ['⛽', 'Shell', 'Gas · Rewards Visa', -42.2, 'Today'], ['🎯', 'Target', 'Split · 2 categories', -120, 'Yesterday'],
+ ['↙', 'Acme Payroll', 'Income · Everyday Checking', 2410, 'Nov 7'], ['🌯', 'Chipotle', 'Dining Out · Rewards Visa', -16.8, 'Nov 7'], ['⇄', 'Transfer to Rewards Visa', 'Card payment · $600.00', -600, 'Nov 5'],
+];
+const txRow = (t, i, sel) => `<div class="txrow ${sel ? 'sel' : ''}"><div class="ico">${t[0]}</div><div class="grow"><div class="t ell">${t[1]}</div><div class="s ell muted">${t[2]}</div></div><div class="muted ell" style="font-size:13px">${t[2].split(' · ')[0]}</div><div class="faint" style="font-size:13px">${t[4]}</div><div class="amt num ${t[3] > 0 ? 'pos' : ''}">${t[3] > 0 ? '+' : '−'}${$(Math.abs(t[3]))}</div></div>`;
+const mTx = (t) => `<div class="txrow c3"><div class="ico">${t[0]}</div><div class="grow"><div class="t ell">${t[1]}</div><div class="s ell muted">${t[2]}</div></div><div class="amt num ${t[3] > 0 ? 'pos' : ''}">${t[3] > 0 ? '+' : '−'}${$(Math.abs(t[3]))}</div></div>`;
+
+/* ---------- HOME ---------- */
+const attention = (compact) => `<div style="display:grid;gap:8px">
+ <div class="attn neg"><div class="ico neg">!</div><div class="grow"><div class="t" style="font-weight:600">Car Loan · 2 payments missed</div><div class="s muted">$640.00 total · oldest Sep 27</div></div><button class="btn sm primary">Pay</button></div>
+ <div class="attn warn"><div class="grow"><div class="t" style="font-weight:600">Gas is over by $35.00</div><div class="s muted">Cover it from Ready to Assign</div></div><button class="btn sm">Cover</button></div>
+ <div class="attn"><div class="grow"><div class="t" style="font-weight:600">Client refund hasn’t arrived</div><div class="s muted">Expected Nov 5 · $150.00</div></div><button class="btn sm">Review</button></div></div>`;
+const acctStrip = `<div class="strip">${[['Everyday Checking', 4820.15], ['High-Yield Savings', 2400], ['Cash Wallet', 140]].map(([n, v]) => `<div class="acct"><div class="faint" style="font-size:12.5px">${n}</div><div class="n num">${$(v)}</div></div>`).join('')}
+ ${[['Rewards Visa', 1240.5, '16% of $8k'], ['Travel Card', 3900, '78% of $5k']].map(([n, v, u]) => `<div class="acct" style="border-style:dashed"><div class="faint" style="font-size:12.5px">${n} · owed</div><div class="n num">${$(v)}</div><div class="faint" style="font-size:11.5px">${u}</div></div>`).join('')}</div>`;
+const homeDesktop = `<div class="frame desktop" id="home-d">${rail('home')}<main class="main">
+ <div class="head"><div><div class="eyebrow">Tuesday, November 10</div><h1 style="margin-top:6px">Where you stand</h1></div><div class="row"><span class="pill">2 of 5 accounts not yet verified</span></div></div>
+ <section class="card pad" style="display:grid;grid-template-columns:auto 1fr;gap:56px;align-items:center">
+  <div><div class="eyebrow" style="margin-bottom:10px">Net position</div>${hero(-6180.35)}<div class="muted" style="margin-top:8px">Cash & savings <b class="num" style="color:var(--ink)">$7,360.15</b> · cards owed <b class="num" style="color:var(--ink)">$5,140.50</b></div></div>
+  <div>${acctStrip}</div></section>
+ <div class="grid2" style="flex:1;min-height:0">
+  <div style="display:grid;gap:20px;align-content:start">
+   <section class="card pad"><div class="sec-h"><h2>Coming up</h2><a>All bills →</a></div>${bills.slice(0, 4).map((b) => billRow(b)).join('')}</section>
+   <section class="card pad"><div class="sec-h"><h2>Recent activity</h2><a>All activity →</a></div>${tx.slice(0, 3).map(mTx).join('')}</section>
+  </div>
+  <div style="display:grid;gap:20px;align-content:start">
+   <section class="card pad"><div class="sec-h"><h2>Needs attention</h2></div>${attention()}</section>
+   <section class="card pad"><div class="sec-h"><h2>Budget</h2><a>Open budget →</a></div>
+    <div class="eyebrow">Ready to assign</div><div class="row between" style="margin-top:6px"><span class="serif num" style="font-size:36px;font-weight:400;color:var(--accent)">$3,645.15</span><button class="btn sm primary">Move money</button></div>
+    <div class="muted" style="margin-top:10px;font-size:13px">5 categories still need funding · 1 over</div></section>
+  </div></div></main></div>`;
+const homeMobile = `<div class="frame mobile" id="home-m">${topbar()}<main class="main">
+ <div><div class="eyebrow">Tuesday, November 10</div><h1 class="serif" style="font:500 30px/1.1 var(--serif);margin-top:6px;letter-spacing:-.02em">Where you stand</h1></div>
+ <section class="card pad"><div class="eyebrow" style="margin-bottom:8px">Net position</div>${hero(-6180.35)}<div class="muted" style="margin-top:8px;font-size:13px">Cash & savings <b class="num" style="color:var(--ink)">$7,360</b> · cards owed <b class="num" style="color:var(--ink)">$5,141</b></div>
+  <div class="strip" style="margin:14px -22px 0;padding:0 22px">${[['Checking', 4820.15], ['Savings', 2400], ['Rewards Visa', 1240.5]].map(([n, v]) => `<div class="acct" style="min-width:128px;padding:10px 12px"><div class="faint" style="font-size:12px">${n}</div><div class="n num" style="font-size:19px">${$(v)}</div></div>`).join('')}</div></section>
+ <section><div class="sec-h"><h2>Needs attention</h2></div>${attention()}</section>
+ <section class="card pad"><div class="sec-h"><h2>Coming up</h2><a>All →</a></div>${bills.slice(0, 3).map((b) => billRow(b)).join('')}</section>
+ <section class="card pad"><div class="eyebrow">Ready to assign</div><div class="row between" style="margin-top:6px"><span class="serif num" style="font-size:32px;color:var(--accent)">$3,645.15</span><button class="btn sm primary">Move money</button></div></section>
+ <section class="card pad"><div class="sec-h"><h2>Recent</h2><a>All →</a></div>${tx.slice(0, 3).map(mTx).join('')}</section>
+ </main>${tabs('home')}</div>`;
+
+/* ---------- BILLS ---------- */
+const billsDesktop = `<div class="frame desktop" id="bills-d">${rail('bill')}<main class="main">
+ <div class="head"><div><h1>Bills</h1><div class="sub">$670 overdue · $118 due this week</div></div>
+  <div class="row"><div class="seg"><button aria-pressed="true">Upcoming</button><button>Income</button><button>Paused & archived</button></div><div class="seg"><button aria-pressed="true">List</button><button>Calendar</button></div><button class="btn primary">New bill</button></div></div>
+ <div class="grid2" style="grid-template-columns:1.5fr 1fr;flex:1;min-height:0;align-items:start">
+  <section class="card pad"><div class="eyebrow" style="color:var(--neg);margin-bottom:4px">Overdue</div>
+   ${billRow(bills[0], 1)}
+   <div style="margin:-4px 0 6px 54px;padding:10px 14px;border-radius:12px;background:var(--surface);font-size:13px"><div class="row between"><span class="muted">Sep 27 · 44 days late</span><b class="num">$320.00</b></div><div class="row between" style="margin-top:6px"><span class="muted">Oct 27 · 14 days late</span><b class="num">$320.00</b></div><div class="faint" style="margin-top:8px;font-size:12px">Pay the oldest first. Your Car Loan category holds $320 — enough for one payment.</div></div>
+   ${billRow(bills[1], 1)}
+   <div class="eyebrow" style="margin:18px 0 4px">This week</div>${billRow(bills[2], 1)}
+   <div class="eyebrow" style="margin:18px 0 4px">Later</div>${billRow(bills[3], 1)}${billRow(bills[4], 1)}</section>
+  <div style="display:grid;gap:20px"><section class="card pad"><div class="sec-h"><h2>Guided payment</h2></div>
+    <div class="muted" style="font-size:13px;margin-bottom:12px">Electric · due Nov 14</div>
+    <div class="kv"><span>Amount</span><b class="num">$118.40</b></div><div class="kv"><span>From</span><b>Everyday Checking</b></div><div class="kv"><span>Date</span><b>Nov 10</b></div><div class="kv"><span>Budget</span><b>Electric −$80.00 · Ready to assign −$38.40</b></div>
+    <div class="row" style="margin-top:14px"><button class="btn primary" style="flex:1;justify-content:center">Confirm payment</button></div>
+    <button class="btn quiet" style="margin-top:6px;padding:0">Already paid? Link an existing transaction</button></section>
+   <section class="card pad"><div class="sec-h"><h2>Expected income</h2><a>View all →</a></div><div class="li" style="padding-top:4px"><div class="grow"><div class="t">Acme Payroll</div><div class="s">Nov 13 · repeats</div></div><div class="amt num pos">+$2,410.00</div></div><div class="li"><div class="grow"><div class="t">Client refund <span class="pill warn">Waiting</span></div><div class="s">Expected Nov 5</div></div><div class="amt num">$150.00</div></div></section></div></div></main></div>`;
+const calCells = (() => { let h = ''; const ev = { 1: ['Rent', ''], 5: ['+$150 Refund', 'inc'], 13: ['+$2.4k Payroll', 'inc'], 14: ['Electric', ''], 20: ['+$900 Invoice', 'inc'], 22: ['Phone', ''], 27: ['Car Loan', 'late'] }; for (let i = 1; i <= 14; i++) h += `<div>${i}${ev[i] ? `<span class="ev ${ev[i][1]}">${ev[i][0]}</span>` : ''}</div>`; return h; })();
+const billsMobile = `<div class="frame mobile" id="bills-m">${topbar()}<main class="main">
+ <div class="head"><h1>Bills</h1><button class="btn sm primary">${ic('plus').replace('<svg', '<svg width="14" height="14" style="stroke:currentColor;fill:none;stroke-width:2"')}New</button></div>
+ <div class="seg" style="display:flex"><button style="flex:1" aria-pressed="true">Upcoming</button><button style="flex:1">Income</button><button style="flex:1">Paused</button></div>
+ <div class="row between"><span class="muted" style="font-size:13px"><b class="neg">$670</b> overdue · $118 this week</span><div class="seg"><button aria-pressed="true">List</button><button>Calendar</button></div></div>
+ <section class="card pad">${bills.slice(0, 3).map((b) => billRow(b, 1)).join('')}</section>
+ <section class="card pad">${bills.slice(3).map((b) => billRow(b, 1)).join('')}</section></main>${tabs('bill')}</div>`;
+const billsCalendar = `<div class="frame desktop" id="bills-cal-d">${rail('bill')}<main class="main"><div class="head"><div><h1>Bills</h1><div class="sub">November 2026</div></div><div class="row"><div class="seg"><button aria-pressed="true">Upcoming</button><button>Income</button><button>Paused & archived</button></div><div class="seg"><button>List</button><button aria-pressed="true">Calendar</button></div></div></div><div class="cal">${calCells}</div></main></div>`;
+
+/* ---------- BUDGET ---------- */
+const cats = [['Bills & subscriptions', [['⌂', 'Rent', 'Funded · due Dec 1', 1500, ''], ['⚡', 'Electric', 'Needs $40 · due Nov 14', 80, ''], ['☎', 'Phone', 'Funded · due Nov 22', 85, 'pos'], ['🚗', 'Car Loan', 'Owes $8,400 · 2 missed', 320, '']]], ['Everyday', [['🛒', 'Groceries', 'Needs $390', 210, ''], ['⛽', 'Gas', 'Overspent by $35', -35, 'neg']]], ['Fun & goals', [['🍽', 'Dining out', 'Needs $145', 55, ''], ['✈', 'Vacation fund', 'On track', 900, 'pos']]]];
+const catRows = (compactM) => cats.map(([g, rows]) => `<div class="grp"><span>${g}</span></div>${rows.map(([i, n, st, a, tone], k) => `<div class="brow" ${n === 'Groceries' && !compactM ? 'aria-selected="true"' : ''}><div class="ico ${tone === 'neg' ? 'neg' : ''}">${i}</div><div class="grow"><div class="t" style="font-weight:580">${n}</div><div class="st ${tone}">${st}</div></div><div class="amt num ${tone === 'neg' ? 'neg' : ''}" style="font-size:15px">${a < 0 ? '−' : ''}${$(Math.abs(a))}</div></div>`).join('')}`).join('');
+const budgetDesktop = `<div class="frame desktop" id="budget-d">${rail('bud')}<main class="main">
+ <div class="head"><div><h1>Budget</h1><div class="sub">November 2026</div></div><div class="row"><button class="btn">New category</button><button class="btn primary">Move money</button></div></div>
+ <div class="split" style="flex:1"><div><div class="card pad row between" style="margin-bottom:6px;background:var(--accent-soft);border-color:transparent;box-shadow:none"><div><div class="eyebrow" style="color:var(--accent)">Ready to assign</div><div class="serif num" style="font-size:38px;color:var(--accent)">$3,645.15</div></div><div class="muted" style="max-width:210px;font-size:13px;text-align:right">Cover Gas ($35) first, then fund Groceries and Electric.</div></div>
+  <div class="seg" style="margin:12px 0 0"><button aria-pressed="true">All</button><button>Needs funding · 5</button><button>Overspent · 1</button></div>${catRows()}</div>
+  <aside class="card pad" style="align-self:start"><div class="row"><div class="ico acc">🛒</div><div><div class="serif" style="font-size:24px;font-weight:500">Groceries</div><div class="muted" style="font-size:13px">Everyday</div></div></div>
+   <div style="margin:18px 0 6px" class="eyebrow">Available</div><div class="serif num" style="font-size:40px">$210.00</div><div class="bar" style="margin:10px 0 6px"><i style="width:35%"></i></div><div class="muted" style="font-size:13px">35% of $600 monthly target</div>
+   <div style="margin-top:14px"><div class="kv"><span>Spent this month</span><b class="num">$377.55</b></div><div class="kv"><span>Monthly target</span><b class="num">$600.00</b></div><div class="kv"><span>Schedule</span><b>None <a style="color:var(--accent)">Add</a></b></div></div>
+   <div class="row" style="margin-top:16px"><button class="btn primary" style="flex:1;justify-content:center">Move money</button><button class="btn">Edit</button></div><div class="faint" style="margin-top:12px;font-size:12px">Pause, archive and debt settings are in Edit.</div></aside></div></main></div>`;
+const budgetMobile = `<div class="frame mobile" id="budget-m">${topbar()}<main class="main"><div class="head"><h1>Budget</h1><button class="btn sm primary">Move money</button></div>
+ <div class="card pad row between" style="background:var(--accent-soft);border-color:transparent;box-shadow:none"><div><div class="eyebrow" style="color:var(--accent)">Ready to assign</div><div class="serif num" style="font-size:32px;color:var(--accent)">$3,645.15</div></div><button class="btn sm">Assign</button></div>
+ <div class="seg" style="display:flex"><button style="flex:1" aria-pressed="true">All</button><button style="flex:1">Needs · 5</button><button style="flex:1">Over · 1</button></div><div>${catRows(true)}</div></main>${tabs('bud')}</div>`;
+
+/* ---------- ACTIVITY ---------- */
+const actDesktop = `<div class="frame desktop" id="activity-d">${rail('act')}<main class="main">
+ <div class="head"><div><h1>Activity</h1><div class="sub">Last 90 days · 44 transactions</div></div><div class="row"><div style="width:280px;height:36px;border:1px solid var(--line2);border-radius:10px;padding:7px 12px;color:var(--ink3);background:var(--raised)">Search payee, notes, category</div><div class="seg"><button aria-pressed="true">All</button><button>Spending</button><button>Income</button><button>Transfers</button></div></div></div>
+ <div class="row" style="gap:36px"><div><div class="eyebrow">Income</div><div class="serif num" style="font-size:26px">$7,230</div></div><div><div class="eyebrow">Spending</div><div class="serif num" style="font-size:26px">$2,086</div></div><div><div class="eyebrow">Net</div><div class="serif num pos" style="font-size:26px">+$5,144</div></div><div class="grow"></div><div class="seg"><button>All accounts ▾</button><button>All categories ▾</button><button>30D</button></div></div>
+ <div class="split" style="grid-template-columns:1fr 340px;flex:1;min-height:0"><section class="card" style="overflow:hidden"><div class="daylab"><span>Scheduled · not yet posted</span><span>2</span></div>
+  <div class="txrow sched" style="margin:8px 12px;border-top:1.5px dashed var(--line2)"><div class="ico">⌁</div><div class="grow"><div class="t">Gym membership</div><div class="s muted">Posts Nov 15 · Dining Out</div></div><div class="muted" style="font-size:13px">Scheduled</div><div class="faint" style="font-size:13px">In 5 days</div><div class="amt num muted">−$29.00</div></div>
+  <div class="daylab"><span>Today</span><span class="num">−$104.60</span></div>${txRow(tx[0], 0, 1)}${txRow(tx[1], 1)}<div class="daylab"><span>Yesterday</span><span class="num">−$120.00</span></div>${txRow(tx[2], 2)}<div class="daylab"><span>Sat, Nov 7</span><span class="num">+$2,393.20</span></div>${txRow(tx[3], 3)}${txRow(tx[4], 4)}</section>
+  <aside class="card pad" style="align-self:start"><div class="eyebrow">Expense</div><div class="serif" style="font-size:22px;margin-top:4px">Trader Joe’s</div><div class="serif num" style="font-size:40px;margin:6px 0 12px">−$62.40</div>
+   <div class="kv"><span>Date</span><b>Nov 10, 2026</b></div><div class="kv"><span>Account</span><b>Everyday Checking</b></div><div class="kv"><span>Category</span><b>Groceries</b></div><div class="kv"><span>Notes</span><b class="faint">—</b></div>
+   <div class="row" style="margin-top:16px"><button class="btn primary" style="flex:1;justify-content:center">Edit</button><button class="btn">Delete</button></div></aside></div></main></div>`;
+const actMobile = `<div class="frame mobile" id="activity-m">${topbar()}<main class="main"><div class="head"><h1>Activity</h1><button class="btn sm">Filters · 1</button></div>
+ <div style="height:40px;border:1px solid var(--line2);border-radius:12px;padding:10px 14px;color:var(--ink3);background:var(--raised)">Search</div>
+ <div class="row between"><div><div class="eyebrow">Income</div><div class="serif num" style="font-size:20px">$7,230</div></div><div><div class="eyebrow">Spending</div><div class="serif num" style="font-size:20px">$2,086</div></div><div><div class="eyebrow">Net</div><div class="serif num pos" style="font-size:20px">+$5,144</div></div></div>
+ <section><div class="daylab" style="border:0"><span>Scheduled</span></div><div class="txrow sched" style="padding:11px 12px;border:1.5px dashed var(--line2)"><div class="ico">⌁</div><div class="grow"><div class="t">Gym membership</div><div class="s muted">Posts Nov 15</div></div><div class="amt num muted">−$29.00</div></div>
+ <div class="daylab"><span>Today</span></div>${tx.slice(0, 2).map(mTx).join('')}<div class="daylab"><span>Yesterday</span></div>${mTx(tx[2])}<div class="daylab"><span>Nov 7</span></div>${mTx(tx[3])}</section></main>${tabs('act')}</div>`;
+
+/* ---------- DESIGN SYSTEM ---------- */
+const sw = (n, v) => `<div class="sw" style="background:var(${v});color:${['--bg', '--surface', '--raised', '--line', '--accent-soft', '--brass-soft', '--pos-soft', '--neg-soft', '--warn-soft'].includes(v) ? 'var(--ink)' : 'var(--on-accent)'}"><b>${n}</b><span class="num">${v}</span></div>`;
+const system = `<div class="frame" id="system" style="width:1360px;padding:36px;display:grid;gap:30px;background:var(--bg)">
+ <div class="row between"><h2 class="sheet" style="font:500 30px var(--serif)">Design system · Finances 2.0</h2><span class="pill acc">Newsreader + Inter · warm paper / deep ink</span></div>
+ <div><div class="eyebrow" style="margin-bottom:10px">Color · roles, not decoration</div><div class="swatches">${[['Paper', '--bg'], ['Surface', '--surface'], ['Raised', '--raised'], ['Line', '--line'], ['Ink', '--ink'], ['Ink 2', '--ink2'], ['Accent · ink teal', '--accent'], ['Accent soft', '--accent-soft'], ['Brass · emphasis', '--brass'], ['Positive', '--pos'], ['Negative', '--neg'], ['Warning', '--warn']].map(([n, v]) => sw(n, v)).join('')}</div></div>
+ <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:30px">
+  <div><div class="eyebrow" style="margin-bottom:10px">Type</div><div class="serif" style="font-size:44px;font-weight:300;letter-spacing:-.03em">$4,820<span class="faint" style="font-size:24px">.15</span></div><div class="serif" style="font-size:26px;margin-top:6px">Page and section titles — Newsreader</div><div style="margin-top:8px">Interface, lists and forms — Inter, tabular figures for every amount.</div><div class="faint" style="font-size:12px;margin-top:6px">Minimum text 12px; body 14px; amounts never below 14px.</div></div>
+  <div><div class="eyebrow" style="margin-bottom:10px">Actions</div><div class="row" style="flex-wrap:wrap"><button class="btn primary">Primary</button><button class="btn">Secondary</button><button class="btn quiet">Quiet</button></div><div class="row" style="margin-top:14px;flex-wrap:wrap"><span class="pill neg">2 missed</span><span class="pill warn">Due soon</span><span class="pill pos">Funded</span><span class="pill acc">Scheduled</span><span class="pill brass">Paused</span></div><div class="faint" style="font-size:12px;margin-top:10px">Status is always text + color, never color alone. One primary action per view.</div></div>
+  <div><div class="eyebrow" style="margin-bottom:10px">Surfaces & motion</div><div class="card pad" style="font-size:13px" >Cards are for grouping, not decoration: one hairline border and a soft shadow. Sheets on mobile, side panels on desktop. Motion ≤180 ms and off under <i>prefers-reduced-motion</i>. Touch targets ≥44 px.</div></div></div></div>`;
+
+const frames = [['System', system], ['Home', homeDesktop + homeMobile], ['Bills', billsDesktop + billsCalendar + billsMobile], ['Budget', budgetDesktop + budgetMobile], ['Activity', actDesktop + actMobile]];
+document.getElementById('root').innerHTML = frames.map(([t, h]) => `<section style="display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap"><h2 class="sheet" style="width:100%">${t}</h2>${h}</section>`).join('');
+const q = new URLSearchParams(location.search); if (q.get('theme')) document.documentElement.dataset.theme = q.get('theme');
+</script>
+</body>
+</html>
