@@ -87,6 +87,9 @@ export function Overview() {
   const cards = data.accounts.filter((a) => a.type === 'credit');
   const unverified = data.accounts.filter((a) => !a.baseline);
   const groups = groupBills(upcomingBills(data, 30)).slice(0, 4);
+  const dueGroups = groupBills(upcomingBills(data, 14));
+  const dueTotal = sum(dueGroups, (g) => g.occs.filter((o) => diffDays(o.date, data.today) <= 14).reduce((n, o) => n + o.bill.amount, 0));
+  const overdueTotal = sum(dueGroups, (g) => g.total);
   const recent = data.txns.filter((t) => t.date <= data.today).slice(0, 5);
   const rta = cc.rta;
   const needs = underfunded(data).length;
@@ -100,15 +103,25 @@ export function Overview() {
           <button className="btn sm" onClick={() => openModal({ type: 'cutover' })}>Set opening balances</button>
         </div>
       )}
-      <section className="card hero2" aria-label="Where you stand" data-testid="ov-summary">
-        <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>Net position</div>
-          <div className="amt-hero num" data-testid="ov-position"><Money v={position} /></div>
-          <div className="small muted" style={{ marginTop: 10 }}>
-            Cash &amp; savings <b className="num" style={{ color: 'var(--ink)' }} data-testid="ov-cash">{money(cc.cash)}</b> · owed on cards <b className="num" style={{ color: 'var(--ink)' }} data-testid="ov-owed">{money(owed)}</b>{loans > 0 && <> · loans <b className="num" style={{ color: 'var(--ink)' }}>{money(loans)}</b></>}
+      <section className="card hero3" aria-label="Where you stand" data-testid="ov-summary">
+        <div className="hero3-stats">
+          <div className="hero-stat">
+            <div className="eyebrow">Cash &amp; savings</div>
+            <div className="amt-hero num" data-testid="ov-cash"><Money v={cc.cash} cents={false} /></div>
+            <div className="small muted">Ready to assign <b className="num" style={{ color: 'var(--ink)' }}>{money(rta, { cents: false })}</b></div>
+          </div>
+          <div className="hero-stat">
+            <div className="eyebrow">Due in the next 14 days</div>
+            <div className={`amt-hero num ${dueGroups.some((g) => g.missed) ? 'neg' : ''}`} data-testid="ov-due"><Money v={dueTotal} cents={false} /></div>
+            <div className="small muted">{dueGroups.length ? `${plural(dueGroups.length, 'bill')}${overdueTotal > 0 ? ` · ${money(overdueTotal, { cents: false })} overdue` : ''}` : 'Nothing due'}</div>
+          </div>
+          <div className="hero-stat">
+            <div className="eyebrow">Net position</div>
+            <div className="amt-hero num" data-testid="ov-position"><Money v={position} cents={false} /></div>
+            <div className="small muted">Cards owed <b className="num" style={{ color: 'var(--ink)' }} data-testid="ov-owed">{money(owed, { cents: false })}</b>{loans > 0 && <> · loans <b className="num" style={{ color: 'var(--ink)' }}>{money(loans, { cents: false })}</b></>}</div>
           </div>
         </div>
-        <div className="strip">{cash.map((a) => <Chip key={a.id} a={a} />)}{cards.map((a) => <Chip key={a.id} a={a} />)}</div>
+        <div className="strip hero3-accts">{cash.map((a) => <Chip key={a.id} a={a} />)}{cards.map((a) => <Chip key={a.id} a={a} />)}</div>
       </section>
 
       <div className="home-grid">

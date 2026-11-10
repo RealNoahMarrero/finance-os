@@ -56,10 +56,8 @@ export function Insights({ tab = 'overview' }: { tab?: 'overview' | 'forecast' |
   const wmax = Math.max(...weeks.map((w) => w.v), 1);
 
   const health = [
-    { l: 'Cash runway', v: runway == null ? '—' : `${runway} days`, s: runway == null ? 'not enough spending history yet' : 'at your usual monthly spending', pct: runway == null ? 0 : Math.min(100, (runway / 90) * 100), c: 'var(--actual)' },
-    { l: 'Savings rate', v: `${savingsRate}%`, s: 'of last month’s income kept', pct: Math.max(0, Math.min(100, savingsRate * 4)), c: 'var(--actual)' },
-    { l: 'Budget on track', v: `${adherence}%`, s: over.length ? `${over.length} envelope${over.length > 1 ? 's' : ''} overspent` : 'no envelopes overspent', pct: adherence, c: 'var(--planned)' },
-    { l: 'Bills handled', v: overdue ? `${overdue} overdue` : 'All on time', s: 'this month', pct: overdue ? 70 : 100, c: overdue ? 'var(--warn)' : 'var(--actual)' },
+    { l: 'Cash runway', v: runway == null ? '—' : `${runway} days`, s: runway == null ? 'not enough spending history yet' : 'estimate at your usual monthly spending', pct: runway == null ? 0 : Math.min(100, (runway / 90) * 100), c: 'var(--actual)' },
+    { l: 'Kept last month', v: `${savingsRate}%`, s: 'of last month’s income', pct: Math.max(0, Math.min(100, savingsRate * 4)), c: 'var(--actual)' },
   ];
 
   return (
@@ -69,7 +67,7 @@ export function Insights({ tab = 'overview' }: { tab?: 'overview' | 'forecast' |
 
       <div className="grid g12" style={{ marginBottom: 16, gap: 12 }}>
         {health.map((h) => (
-          <section key={h.l} className="card pad" style={{ gridColumn: 'span 3' }}>
+          <section key={h.l} className="card pad" style={{ gridColumn: 'span 6' }}>
             <div className="row between"><div className="eyebrow">{h.l}</div></div>
             <div className="amt-lg num" style={{ marginTop: 6 }}>{h.v}</div>
             <div className="xs muted" style={{ marginTop: 2 }}>{h.s}</div>

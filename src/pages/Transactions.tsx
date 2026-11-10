@@ -22,7 +22,7 @@ export function Transactions({ query }: { query: URLSearchParams }) {
   const cat = catFilter ? data.categories.find((c) => c.id === catFilter) : null;
   const wide = () => matchMedia('(min-width: 1101px)').matches;
 
-  const { posted, scheduled } = useMemo(() => {
+  const { posted, scheduled, counted } = useMemo(() => {
     const s = q.trim().toLowerCase();
     const ok = (t: Txn) => {
       if (kind !== 'all' && t.type !== kind) return false;
@@ -33,8 +33,10 @@ export function Transactions({ query }: { query: URLSearchParams }) {
     };
     const all = data.txns.filter(ok);
     return {
-      posted: all.filter((t) => t.date <= data.today && (range === 'all' || diffDays(data.today, t.date) <= Number(range))).sort((a, b) => b.date.localeCompare(a.date)),
-      scheduled: all.filter((t) => t.date > data.today).sort((a, b) => a.date.localeCompare(b.date)),
+      posted: all.filter((t) => !t.scheduled && t.date <= data.today && (range === 'all' || diffDays(data.today, t.date) <= Number(range))).sort((a, b) => b.date.localeCompare(a.date)),
+      scheduled: all.filter((t) => t.scheduled).sort((a, b) => a.date.localeCompare(b.date)),
+      // entered before scheduling existed: dated in the future but already counted in balances (left exactly as recorded)
+      counted: all.filter((t) => !t.scheduled && t.date > data.today).sort((a, b) => a.date.localeCompare(b.date)),
     };
   }, [data, q, kind, range, acct, catFilter]);
 
@@ -98,6 +100,10 @@ export function Transactions({ query }: { query: URLSearchParams }) {
             <div className="tx-day"><span>Scheduled · not yet posted</span><span>{scheduled.length}</span></div>
             {scheduled.map((t) => row(t, true))}
           </>)}
+          {counted.length > 0 && (<>
+            <div className="tx-day"><span>Future-dated · already counted in your balances</span><span>{counted.length}</span></div>
+            {counted.map((t) => row(t))}
+          </>)}
           {posted.length === 0 ? (
             <Empty icon={<Search />} title="No matches" text="Nothing fits those filters." action={filtering ? <button className="btn" onClick={() => { setQ(''); setKind('all'); setAcct('all'); setCatSel('all'); setRange('90'); }}>Clear filters</button> : undefined} />
           ) : days.map((d) => {
@@ -113,7 +119,7 @@ export function Transactions({ query }: { query: URLSearchParams }) {
         </section>
 
         <aside className="card pane" aria-label="Transaction details">
-          {!selTxn ? <div className="small muted" style={{ padding: '24px 4px', textAlign: 'center' }}>Select a transaction to see its details.</div> : (() => {
+          {!selTxn ? <ActivityOverview posted={posted} /> : (() => {
             const t = selTxn; const da = txnDisplayAmount(data, t); const locked = t.adjustment || t.billId || t.incomeId;
             const a = data.allAccounts.find((x) => x.id === t.accountId); const to = data.allAccounts.find((x) => x.id === t.toAccountId);
             return (<>
@@ -132,6 +138,34 @@ export function Transactions({ query }: { query: URLSearchParams }) {
           })()}
         </aside>
       </div>
+    </div>
+  );
+}
+
+/** What the side panel shows before anything is selected: where the money in this view went. */
+function ActivityOverview({ posted }: { posted: Txn[] }) {
+  const { data } = useStore();
+  const by = new Map<string, number>();
+  for (const t of posted) {
+    if (t.type !== 'expense' || t.adjustment) continue;
+    if (t.splits?.length) for (const s of t.splits) by.set(s.categoryId, (by.get(s.categoryId) ?? 0) + s.amount);
+    else by.set(t.categoryId ?? '', (by.get(t.categoryId ?? '') ?? 0) + t.amount);
+  }
+  const top = [...by.entries()].map(([id, v]) => ({ name: data.categories.find((c) => c.id === id)?.name ?? 'Uncategorized', v })).sort((a, b) => b.v - a.v).slice(0, 6);
+  const max = Math.max(1, ...top.map((x) => x.v));
+  const biggest = [...posted].filter((t) => t.type === 'expense' && !t.adjustment).sort((a, b) => b.amount - a.amount)[0];
+  return (
+    <div aria-label="This view at a glance">
+      <div className="eyebrow">Where it went</div>
+      {top.length === 0 ? <div className="small muted" style={{ marginTop: 8 }}>No spending in this view.</div> : (
+        <div className="stack gap12" style={{ marginTop: 12 }}>
+          {top.map((x) => (
+            <div key={x.name}><div className="row between small" style={{ marginBottom: 4 }}><span style={{ fontWeight: 560 }}>{x.name}</span><span className="num">{money(x.v, { cents: false })}</span></div><div className="bar planned" style={{ height: 6 }}><i style={{ width: `${(x.v / max) * 100}%` }} /></div></div>
+          ))}
+        </div>
+      )}
+      {biggest && <div className="kv" style={{ marginTop: 16 }}><span className="k">Largest</span><span className="v">{biggest.payee} · {money(biggest.amount, { cents: false })}</span></div>}
+      <div className="xs muted" style={{ marginTop: 14 }}>Select a transaction to see its details, edit or delete it.</div>
     </div>
   );
 }

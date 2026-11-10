@@ -6,7 +6,7 @@ import {
 } from './data';
 import { addDays, centsToInput, cn, diffDays, fmtDate, money, monthKey, relDay, sum, toCents, plural, todayISO } from './lib';
 import { CatIcon, Callout, Money, Seg, Sheet, StatusPill, ThemeSwitch } from './ui';
-import { exportEverything } from './db';
+import { exportEverything, newRequestId } from './db';
 import { CreditScoreSheet, CreditCardSheet, CreditReportedSheet } from './creditSheets';
 import { Gauge } from 'lucide-react';
 
@@ -29,12 +29,12 @@ const groupCats = (cats: Category[], groups: { id: string; name: string }[]) => 
 // Transaction: add / view / edit
 // ═══════════════════════════════════════════════════════════
 export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'view' | 'edit'; id?: string; prefill?: Partial<Txn> }) {
-  const { data, closeModal, addTxn, updateTxn, deleteTxn, advanceBill, undoAdvanceBill, toast, openModal } = useStore();
+  const { data, closeModal, addTxn, updateTxn, deleteTxn, payBill, unpayBill, toast, openModal } = useStore();
   const existing = id ? data.txns.find((t) => t.id === id) : undefined;
   const [mode, setMode] = useState(initialMode);
   const [confirmDel, setConfirmDel] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [adv, setAdv] = useState<{ bill: Bill; id: string; t: Omit<Txn, 'id'>; next: string } | null>(null);
+  const [adv, setAdv] = useState<{ bill: Bill; id: string; t: Omit<Txn, 'id'> } | null>(null);
 
   const seed: Partial<Txn> = existing ?? prefill ?? {};
   // Opened from an account's own page? Use that account (read once, when the sheet opens, so context never goes stale).
@@ -131,9 +131,9 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
 
   /** A recurring, active bill this new payment plausibly settles — only a full-or-larger payment close to the due date, never a debt or a paused bill. */
   const billForNewTxn = (t: Omit<Txn, 'id'>): Bill | undefined => {
-    if (t.type === 'income' || t.splits?.length || !t.categoryId) return undefined;
+    if (t.type === 'income' || t.splits?.length || !t.categoryId || t.scheduled || t.date > data.today) return undefined;
     const b = data.bills.find((x) => x.categoryId === t.categoryId);
-    if (!b || !b.recurring || b.paused || b.isDebt || !b.date || b.paid[b.date] || t.amount < b.amount) return undefined;
+    if (!b || b.paused || !b.date || b.paid[b.date] || t.amount < b.amount) return undefined;
     const early = b.period === 'Weekly' ? 3 : b.period === 'Bi-Weekly' ? 7 : b.period === 'Yearly' ? 45 : 15;
     return t.date >= addDays(b.date, -early) ? b : undefined;
   };
@@ -147,6 +147,7 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
       splits: type === 'expense' && splitOn ? lines.filter((l) => l.categoryId && toCents(l.amount) > 0).map((l) => ({ categoryId: l.categoryId, amount: toCents(l.amount) })) : undefined,
       notes: notes.trim() || undefined,
       adjustment: existing?.adjustment,
+      scheduled: date > data.today, // a future date is scheduled: it does not touch balances until that day
     };
   };
   const save = async () => {
@@ -158,27 +159,28 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
     } else {
       const newId = await addTxn(t);
       if (newId) {
-        const added = () => toast(`${t.type === 'income' ? 'Income' : t.type === 'transfer' ? 'Transfer' : 'Expense'} added · ${money(t.amount)}`, () => { void deleteTxn(newId); });
+        const added = () => toast(`${t.scheduled ? 'Scheduled' : t.type === 'income' ? 'Income added' : t.type === 'transfer' ? 'Transfer added' : 'Expense added'} · ${money(t.amount)}`, () => { void deleteTxn(newId); });
         const b = billForNewTxn(t);
-        if (b) { setAdv({ bill: b, id: newId, t, next: nextDueDate(b.period, b.anchor ?? b.date!, b.date!) }); setSaving(false); return; }
+        if (b) { setAdv({ bill: b, id: newId, t }); setSaving(false); return; }
         added(); closeModal();
       }
     }
     setSaving(false);
   };
 
-  // ── optional: move a recurring bill to its next due date after paying it ──
+  // ── a new expense that looks like a bill payment: offer to count it, never silently ──
   if (adv) {
-    const { bill, t, next, id: newId } = adv;
+    const { bill, t, id: newId } = adv;
     const finish = () => { toast(`${t.type === 'transfer' ? 'Transfer' : 'Expense'} added · ${money(t.amount)}`, () => { void deleteTxn(newId); }); closeModal(); };
     return (
-      <Sheet title={`Move ${bill.name} to its next due date?`} sub={`${money(t.amount)} recorded · ${bill.name} was due ${fmtDate(bill.date!)}`} onClose={finish}
-        footer={<><button className="btn" data-testid="keep-due" disabled={saving} onClick={finish}>Keep current due date</button>
+      <Sheet title={`Count this as your ${bill.name} payment?`} sub={`${money(t.amount)} recorded · ${bill.name} due ${fmtDate(bill.date!)}`} onClose={finish}
+        footer={<><button className="btn" data-testid="keep-due" disabled={saving} onClick={finish}>No, just the transaction</button>
           <button className="btn primary" data-testid="advance-due" disabled={saving} onClick={async () => {
             setSaving(true);
-            if (await advanceBill(bill.id, bill.date!, newId, t.date, t.amount, next)) { toast(`${bill.name} moved to ${fmtDate(next)}`, () => { void undoAdvanceBill(bill.id, bill.date!); }); closeModal(); } else setSaving(false);
-          }}>Advance to {fmtDate(next)}</button></>}>
-        <Callout icon={<Info />}>Advancing marks the {fmtDate(bill.date!)} payment as paid with this transaction and sets the next due date to <b>{fmtDate(next)}</b>. Your transaction is kept either way.</Callout>
+            const r = await payBill({ billId: bill.id, due: bill.date!, mode: 'link', transactionId: newId });
+            if (r) { toast(`${bill.name} marked paid`, () => { void unpayBill(bill.id, bill.date!, false); }); closeModal(); } else setSaving(false);
+          }}>Yes, mark it paid</button></>}>
+        <Callout icon={<Info />}>Your transaction is kept either way. Marking it paid {bill.isDebt ? 'also lowers what you owe and ' : ''}moves {bill.name} to its next due date.</Callout>
       </Sheet>
     );
   }
@@ -207,6 +209,7 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
           <div className="amt-hero"><Money v={sign * t.amount} sign tone={sign === 0 ? undefined : 'auto'} /></div>
           <div style={{ marginTop: 10, display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
             <StatusPill status="muted">{fmtDate(t.date, 'long')}</StatusPill>
+            {t.scheduled && <StatusPill status="proj">Scheduled · not posted yet</StatusPill>}
             {t.adjustment && <StatusPill status="planned"><Scale />Reconciliation adjustment</StatusPill>}
             {t.splits?.length ? <StatusPill status="planned"><Split />Split · {t.splits.length} categories</StatusPill> : null}
           </div>
@@ -230,7 +233,7 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
   const verb = type === 'expense' ? 'expense' : type === 'income' ? 'income' : 'transfer';
   return (
     <Sheet title={title} onClose={existing ? () => setMode('view') : closeModal} wide
-      footer={<button className="btn primary lg" disabled={!valid || saving} onClick={save}>{saving ? 'Saving…' : existing ? 'Save changes' : `Add ${verb}`}{cents > 0 ? ` · ${money(cents)}` : ''}</button>}>
+      footer={<button className="btn primary lg" disabled={!valid || saving} onClick={save}>{saving ? 'Saving…' : existing ? 'Save changes' : date > data.today ? `Schedule ${verb}` : `Add ${verb}`}{cents > 0 ? ` · ${money(cents)}` : ''}</button>}>
       <form onSubmit={(e) => { e.preventDefault(); save(); }}>
         <Seg block value={type} onChange={(v) => { setType(v); setHint(''); }} options={[{ v: 'expense', label: 'Expense' }, { v: 'income', label: 'Income' }, { v: 'transfer', label: 'Transfer' }]} />
         <div className="amount-input">
@@ -303,7 +306,8 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
           <div className="stack gap12 fade-in" style={{ marginTop: 6 }}>
             <div className="field"><label htmlFor="date">Date</label>
               <div className="row gap8"><input id="date" type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
-                {date !== data.today && <button type="button" className="btn sm" onClick={() => setDate(data.today)}>Today</button>}</div></div>
+                {date !== data.today && <button type="button" className="btn sm" onClick={() => setDate(data.today)}>Today</button>}</div>
+              {date > data.today && <div className="xs c-planned">Scheduled: it won’t change your balances or budget until {fmtDate(date)}.</div>}</div>
             <div className="field"><label htmlFor="notes"><StickyNote size={12} style={{ verticalAlign: -1, marginRight: 4 }} />Notes</label>
               <textarea id="notes" className="textarea" placeholder="Optional" value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
             {type === 'expense' && (
@@ -565,7 +569,7 @@ export function MoveSheet({ from: f0, to: t0, amount: a0 }: { from?: string; to?
 // Category detail
 // ═══════════════════════════════════════════════════════════
 export function CategorySheet({ id }: { id: string }) {
-  const { data, closeModal, openModal, setTarget, updateBill, removeBill, setCategoryArchived, toast } = useStore();
+  const { data, closeModal, openModal, setTarget, setBillPaused, removeBill, setCategoryArchived, toast } = useStore();
   const cat = data.categories.find((c) => c.id === id)!;
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [busyBill, setBusyBill] = useState(false);
@@ -629,14 +633,14 @@ export function CategorySheet({ id }: { id: string }) {
           {bill ? <StatusPill status={bill.paused ? 'muted' : 'planned'}>{bill.paused ? 'Paused' : 'Scheduled'}</StatusPill> : <StatusPill status="muted">Funding only</StatusPill>}
         </div>
         {bill ? <>
-          <div className="small" style={{ marginTop: 6 }}><b className="num">{money(bill.amount)}</b> {bill.recurring ? bill.period === 'Bi-Weekly' ? 'every 2 weeks' : bill.period.toLowerCase() : 'one time'} · {bill.paused ? 'paused — not in upcoming bills or forecasts' : bill.date ? `next due ${fmtDate(bill.date)}` : 'no due date'} · {bill.mode === 'prepare' ? 'prepares a transaction' : 'reminder only'}</div>
+          <div className="small" style={{ marginTop: 6 }}><b className="num">{money(bill.amount)}</b> {bill.recurring ? bill.period === 'Bi-Weekly' ? 'every 2 weeks' : bill.period.toLowerCase() : 'one time'} · {bill.paused ? 'paused — not in upcoming bills or forecasts' : bill.date ? `next due ${fmtDate(bill.date)}` : 'no due date'}</div>
           <div className="row gap8" style={{ marginTop: 10, flexWrap: 'wrap' }}>
             <button className="btn sm" onClick={() => openModal({ type: 'bill-edit', billId: bill.id })}><Pencil />Edit bill</button>
             <button className="btn sm" disabled={busyBill} onClick={async () => {
               setBusyBill(true);
               const resume = bill.paused;
-              const date = resume && bill.date && bill.recurring ? rollForward({ recurring: true, period: bill.period, anchor: bill.anchor, date: bill.date, paid: bill.paid }, bill.date, data.today) : bill.date!;
-              const ok = await updateBill(bill.id, { name: bill.name, amount: bill.amount, date, recurring: bill.recurring, period: bill.period, mode: bill.mode, groupId: cat.groupId, paused: !resume });
+              const date = resume && bill.date && bill.recurring ? rollForward({ recurring: true, period: bill.period, anchor: bill.anchor, date: bill.date, paid: bill.paid }, bill.date, data.today) : undefined;
+              const ok = await setBillPaused(bill.id, !resume, date); // changes only the paused flag (and the resume date), never the rest of the bill
               setBusyBill(false); if (ok) toast(resume ? `${bill.name} resumed` : `${bill.name} paused · history and debt kept`);
             }}>{bill.paused ? 'Resume bill' : 'Pause bill'}</button>
             <button className="btn sm" data-testid="archive-bill" onClick={() => openModal({ type: 'bill-archive', billId: bill.id })}><Archive />Archive bill</button>
@@ -721,73 +725,129 @@ export function BillArchiveSheet({ billId }: { billId: string }) {
 // Bill
 // ═══════════════════════════════════════════════════════════
 export function BillSheet({ billId, date }: { billId: string; date: string }) {
-  const { data, closeModal, openModal, payBill, setBillMode, toast } = useStore();
+  const { data, closeModal, openModal, payBill, unpayBill, toast } = useStore();
   const bill = data.bills.find((b) => b.id === billId)!;
-  const occ = billOccurrences(data, date, date).find((o) => o.bill.id === billId)!;
-  const [step, setStep] = useState<'view' | 'review'>('view');
-  const [amt, setAmt] = useState(centsToInput(bill.amount));
-  const [acctId, setAcctId] = useState(bill.accountId);
+  const occ = billOccurrences(data, date, date).find((o) => o.bill.id === billId);
+  const requestId = useRef(newRequestId()); // one id per sheet: a double-tap or retry can never record the payment twice
+  const liquid = data.accounts.filter((a) => a.type !== 'credit');
+  const [tab, setTab] = useState<'pay' | 'link' | 'outside'>('pay');
+  const [amt, setAmt] = useState(bill ? centsToInput(bill.amount) : '');
+  const [paidOn, setPaidOn] = useState(data.today);
+  const [acctId, setAcctId] = useState(liquid.find((a) => a.type === 'checking')?.id ?? liquid[0]?.id ?? '');
+  const [settle, setSettle] = useState(false);
+  const [linkId, setLinkId] = useState('');
   const [saving, setSaving] = useState(false);
+  const [undoing, setUndoing] = useState(false);
+  const [alsoDelete, setAlsoDelete] = useState(false);
+  if (!bill || !occ) return <Sheet title="Bill not found" onClose={closeModal}><div className="small muted">This bill is no longer scheduled.</div></Sheet>;
   const cat = data.categories.find((c) => c.id === bill.categoryId);
   const env = cat ? envelope(data, cat.id) : null;
   const n = diffDays(date, data.today);
   const paidTxnId = bill.paid[occ.key];
   const paidTxn = paidTxnId && paidTxnId !== 'manual' ? data.txns.find((t) => t.id === paidTxnId) : undefined;
+  const latestPaid = Object.keys(bill.paid).sort().pop();
+  const isOldest = !!bill.date && date === bill.date;
   const statusPill = occ.paid ? <StatusPill status="ok">Paid</StatusPill> : n < 0 ? <StatusPill status="late">{-n} days overdue</StatusPill> : n <= 3 ? <StatusPill status="warn">Due {relDay(date).toLowerCase()}</StatusPill> : <StatusPill status="muted">{relDay(date)}</StatusPill>;
+  const cents = toCents(amt);
+  const partial = tab !== 'link' && cents > 0 && cents < bill.amount;
+  const toCard = !!bill.toAccountId;
+  const a = data.accounts.find((x) => x.id === acctId);
+  const debtNow = cat?.isDebt ? cat.debtBalance ?? 0 : null;
+  const candidates = data.txns.filter((t) => !t.scheduled && !t.billId && !t.adjustment && (t.type === 'expense' || t.type === 'transfer') && t.categoryId === bill.categoryId && diffDays(data.today, t.date) <= 120).slice(0, 12);
+  const linked = data.txns.find((t) => t.id === linkId);
+  const payCents = tab === 'link' ? linked?.amount ?? 0 : cents;
+  const next = bill.recurring && bill.date ? nextDueDate(bill.period, bill.anchor ?? bill.date, bill.date) : null;
+  const valid = tab === 'pay' ? cents > 0 && !!a && paidOn <= data.today : tab === 'link' ? !!linked : cents > 0;
 
-  if (step === 'review') {
-    const a = data.accounts.find((x) => x.id === acctId)!;
-    const cents = toCents(amt);
+  const confirm = async () => {
+    if (!valid || saving) return;
+    setSaving(true);
+    const r = await payBill({ billId, due: date, mode: tab === 'pay' ? 'post' : tab === 'link' ? 'link' : 'external', amount: tab === 'link' ? undefined : cents, accountId: tab === 'pay' ? acctId : undefined, paidOn: tab === 'link' ? undefined : paidOn, transactionId: tab === 'link' ? linkId : undefined, settle: partial ? settle : true, requestId: requestId.current });
+    if (!r) { setSaving(false); return; }
+    toast(r.settled ? `${bill.name} paid · ${money(r.amount)}` : `${money(r.amount)} recorded toward ${bill.name} · still due`, () => { void unpayBill(billId, date, r.created && r.settled); });
+    closeModal();
+  };
+
+  // ── already paid: show it, offer an undo ──
+  if (occ.paid) {
+    if (undoing) {
+      return (
+        <Sheet title="Undo this payment?" sub={bill.name} onClose={closeModal}
+          footer={<><button className="btn" onClick={() => setUndoing(false)}>Keep it</button>
+            <button className="btn primary" disabled={saving} onClick={async () => { setSaving(true); if (await unpayBill(billId, date, !!paidTxn && alsoDelete)) { toast(`${bill.name} is due again on ${fmtDate(date)}`); closeModal(); } else setSaving(false); }}>Undo payment</button></>}>
+          <div className="stack gap12">
+            <div className="small">The due date goes back to {fmtDate(date)}{bill.isDebt ? ' and the amount owed is restored' : ''}.</div>
+            {paidTxn && <label className="row gap12" style={{ alignItems: 'flex-start' }}><input type="checkbox" checked={alsoDelete} onChange={(e) => setAlsoDelete(e.target.checked)} style={{ marginTop: 3 }} /><span>Also delete the {money(paidTxn.amount)} transaction<div className="small muted">Leave unticked if the money really was spent.</div></span></label>}
+          </div>
+        </Sheet>
+      );
+    }
     return (
-      <Sheet title="Review before posting" sub="Nothing is recorded until you confirm." onClose={closeModal}
-        footer={<><button className="btn" onClick={() => setStep('view')}>Back</button>
-          <button className="btn primary" disabled={cents <= 0 || saving || !a} onClick={async () => { setSaving(true); if (await payBill(billId, date, { post: true, amount: cents, accountId: acctId })) { toast(`${bill.name} paid · ${money(cents)} posted`); closeModal(); } else setSaving(false); }}>{saving ? 'Posting…' : 'Post transaction'}</button></>}>
-        <Callout tone="planned" icon={<Eye />}>Finances prepared this transaction from your bill. Edit anything, then post it.</Callout>
-        <div className="card pad" style={{ margin: '14px 0', boxShadow: 'none', background: 'var(--surface-2)' }}>
-          <div className="kv"><span className="k">Payee</span><span className="v">{bill.payee}</span></div>
-          <div className="kv"><span className="k">Date</span><span className="v">{fmtDate(data.today, 'long')}</span></div>
-          {bill.isDebt && <div className="kv"><span className="k">Balance owed</span><span className="v num">{money(data.debts.find((x) => x.billId === bill.id)?.balance ?? 0)} → {money(Math.max(0, (data.debts.find((x) => x.billId === bill.id)?.balance ?? 0) - cents))}</span></div>}
-          <div className="kv"><span className="k">Category</span><span className="v">{cat?.name}</span></div>
-          <div className="kv"><span className="k">Type</span><span className="v">{bill.toAccountId ? `Transfer to ${data.allAccounts.find((x) => x.id === bill.toAccountId)?.name}` : 'Expense'}</span></div>
-        </div>
-        <div className="field"><label>Amount paid</label><MoneyInput value={amt} onChange={setAmt} autoFocus /></div>
-        <div className="field" style={{ marginTop: 14 }}><label>Pay from</label>
-          <div className="chips">{data.accounts.filter((x) => x.type !== 'credit' || !bill.toAccountId).map((x) => <button key={x.id} className="chip" aria-pressed={acctId === x.id} onClick={() => setAcctId(x.id)}>{x.name}</button>)}</div>
-          <div className="xs muted num">{a.name} balance {money(a.balance)} → <b style={{ color: 'var(--ink-2)' }}>{money(a.balance - (a.type === 'credit' ? -cents : cents))}</b></div></div>
+      <Sheet title={bill.name} onClose={closeModal}
+        footer={<>{date === latestPaid && <button className="btn" onClick={() => setUndoing(true)}>Undo payment</button>}{paidTxn ? <button className="btn primary" onClick={() => openModal({ type: 'txn', mode: 'view', id: paidTxn.id })}>View transaction</button> : <button className="btn primary" onClick={closeModal}>Done</button>}</>}>
+        <div style={{ textAlign: 'center', padding: '4px 0 18px' }}><div className="amt-hero num"><Money v={bill.amount} /></div>
+          <div style={{ marginTop: 10, display: 'flex', gap: 6, justifyContent: 'center' }}>{statusPill}<StatusPill status="muted">{fmtDate(date, 'long')}</StatusPill></div></div>
+        <Callout icon={<CircleCheck />}>{paidTxn ? <>Paid {fmtDate(paidTxn.date)} from {data.allAccounts.find((x) => x.id === paidTxn.accountId)?.name}.</> : 'Marked paid outside your tracked accounts — no transaction was recorded.'}</Callout>
       </Sheet>
     );
   }
 
+  // ── older missed payments come first ──
+  if (!isOldest && bill.date) {
+    return (
+      <Sheet title={bill.name} sub={`Due ${fmtDate(date, 'long')}`} onClose={closeModal}
+        footer={<><button className="btn" onClick={closeModal}>Close</button><button className="btn primary" onClick={() => openModal({ type: 'bill', billId, date: bill.date! })}>Pay {fmtDate(bill.date)} first</button></>}>
+        <Callout tone="warn">{bill.name} has an earlier unpaid date ({fmtDate(bill.date)}). Payments are recorded oldest first so none is skipped.</Callout>
+      </Sheet>
+    );
+  }
+
+  const rows: { k: string; before: string; after: string }[] = [];
+  if (tab === 'pay' && a && cents > 0) rows.push({ k: a.name, before: money(a.balance), after: money(a.balance - cents) });
+  if (tab !== 'link' && env && cents > 0) rows.push({ k: `${cat?.name} set aside`, before: money(env.avail), after: money(tab === 'pay' ? env.avail - cents : env.avail) });
+  if (tab === 'link' && linked) rows.push({ k: 'Transaction', before: 'recorded', after: 'counted toward this bill' });
+  if (debtNow != null && payCents > 0) rows.push({ k: 'Amount owed', before: money(debtNow), after: money(Math.max(0, debtNow - payCents)) });
+  if (toCard && tab === 'pay' && cents > 0) { const card = data.allAccounts.find((x) => x.id === bill.toAccountId); if (card) rows.push({ k: card.name, before: money(card.balance), after: money(card.balance - cents) }); }
+  if ((!partial || settle) && next && valid) rows.push({ k: 'Next due', before: fmtDate(date), after: fmtDate(next) });
+
   return (
-    <Sheet title={bill.name} onClose={closeModal}
-      footer={occ.paid ? (paidTxn ? <button className="btn primary" onClick={() => openModal({ type: 'txn', mode: 'view', id: paidTxn.id })}>View transaction</button> : <button className="btn" onClick={closeModal}>Done</button>)
-        : <><button className="btn" onClick={closeModal}>Close</button>
-          <button className="btn primary" disabled={saving} onClick={async () => { if (bill.mode === 'prepare') setStep('review'); else { setSaving(true); if (await payBill(billId, date, { post: false })) { toast(`${bill.name} marked paid · no transaction posted`); closeModal(); } else setSaving(false); } }}>
-            {bill.mode === 'prepare' ? 'Mark paid & review' : 'Mark as paid'}</button></>}>
-      <div style={{ textAlign: 'center', padding: '4px 0 18px' }}>
+    <Sheet title={bill.name} sub={`Due ${fmtDate(date, 'long')}`} onClose={closeModal} wide
+      footer={<button className="btn primary lg" disabled={!valid || saving} onClick={confirm}>{saving ? 'Saving…' : tab === 'pay' ? `Pay ${cents > 0 ? money(cents) : ''}` : tab === 'link' ? 'Link this transaction' : 'Mark as paid'}</button>}>
+      <div style={{ textAlign: 'center', padding: '0 0 14px' }}>
         <div className="amt-hero num"><Money v={bill.amount} /></div>
-        <div style={{ marginTop: 10, display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>{statusPill}<StatusPill status="muted">{fmtDate(date, 'long')}</StatusPill></div>
+        <div style={{ marginTop: 8, display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>{statusPill}{!occ.future && env && occ.short > 0 && <StatusPill status="warn">{money(occ.short, { cents: false })} not set aside</StatusPill>}</div>
       </div>
-      {!occ.paid && env && !occ.future && (
-        <div className="card pad" style={{ boxShadow: 'none', background: 'var(--surface-2)', marginBottom: 14 }}>
-          <div className="row between small" style={{ marginBottom: 8 }}><span className="muted">Funded from {cat?.name}</span><b className="num">{money(occ.funded)} of {money(bill.amount)}</b></div>
-          <div className="bar planned"><i style={{ width: `${Math.min(100, (occ.funded / bill.amount) * 100)}%` }} /></div>
-          {occ.short > 0 && <div className="row between small" style={{ marginTop: 10 }}><span className="warn" style={{ fontWeight: 600 }}>{money(occ.short)} still to fund</span><button className="btn sm" onClick={() => openModal({ type: 'move', from: 'rta', to: cat!.id, amount: occ.short })}>Fund it</button></div>}
+      <Seg block value={tab} onChange={setTab} options={[{ v: 'pay', label: 'Record payment' }, { v: 'link', label: 'Already recorded' }, { v: 'outside', label: 'Paid elsewhere' }]} />
+
+      {tab === 'pay' && (
+        <div className="stack gap12" style={{ marginTop: 14 }}>
+          <div className="row gap12"><div className="field grow"><label htmlFor="pay-amt">Amount</label><MoneyInput id="pay-amt" value={amt} onChange={setAmt} autoFocus /></div>
+            <div className="field grow"><label htmlFor="pay-date">Date</label><input id="pay-date" type="date" className="input" value={paidOn} max={data.today} onChange={(e) => setPaidOn(e.target.value)} /></div></div>
+          <div className="field"><label>Pay from</label><div className="chips">{liquid.map((x) => <button key={x.id} className="chip" aria-pressed={acctId === x.id} onClick={() => setAcctId(x.id)}>{x.name}</button>)}</div></div>
         </div>
       )}
-      <div style={{ display: 'flex', justifyContent: 'center', margin: '-6px 0 14px' }}><button className="btn sm" onClick={() => openModal({ type: 'bill-edit', billId })}><Pencil />Edit bill</button></div>
-      {occ.paid && <Callout icon={<CircleCheck />}>{paidTxn ? <>Posted on {fmtDate(paidTxn.date)} from {data.allAccounts.find((a) => a.id === paidTxn.accountId)?.name}.</> : 'Marked paid without posting a transaction.'}</Callout>}
-      {!occ.paid && (
-        <div style={{ marginTop: 4 }}>
-          <div className="label" style={{ marginBottom: 8 }}>When you mark this paid…</div>
-          <Seg block value={bill.mode} onChange={(m) => { void setBillMode(billId, m); }} options={[{ v: 'reminder', label: 'Just a reminder' }, { v: 'prepare', label: 'Prepare a transaction' }]} />
-          <div className="small muted" style={{ marginTop: 8 }}>{bill.mode === 'reminder' ? 'Finances only tracks the due date. You record the payment yourself.' : 'Finances prepares the transaction for you to review. It is never posted without your confirmation.'}</div>
+      {tab === 'link' && (
+        <div className="stack" style={{ marginTop: 14 }}>
+          <div className="small muted" style={{ marginBottom: 6 }}>Pick the transaction you already recorded for this bill. Nothing new is created.</div>
+          {candidates.length === 0 ? <div className="card pad small muted" style={{ boxShadow: 'none' }}>No unlinked {cat?.name} transactions from the last 4 months. If you recorded it under another category, change its category first.</div> : candidates.map((t) => (
+            <label key={t.id} className="rowx" style={{ cursor: 'pointer' }}><input type="radio" name="lk" checked={linkId === t.id} onChange={() => setLinkId(t.id)} /><div className="grow"><div className="li-title">{t.payee}</div><div className="li-sub">{fmtDate(t.date)} · {data.allAccounts.find((x) => x.id === t.accountId)?.name}</div></div><Money v={t.amount} className="amt-md" /></label>
+          ))}
         </div>
       )}
-      <div style={{ marginTop: 14 }}>
-        <div className="kv"><span className="k">Pays from</span><span className="v">{data.allAccounts.find((a) => a.id === bill.accountId)?.name}</span></div>
-        <div className="kv"><span className="k">Repeats</span><span className="v">{bill.recurring ? bill.period : 'One time'}</span></div>
-      </div>
+      {tab === 'outside' && (
+        <div className="stack gap12" style={{ marginTop: 14 }}>
+          <div className="small muted">Use this if it was paid from an account you don’t track here. No transaction is recorded and your balances don’t change.</div>
+          <div className="row gap12"><div className="field grow"><label htmlFor="pay-amt">Amount paid</label><MoneyInput id="pay-amt" value={amt} onChange={setAmt} /></div>
+            <div className="field grow"><label htmlFor="pay-date">Date</label><input id="pay-date" type="date" className="input" value={paidOn} max={data.today} onChange={(e) => setPaidOn(e.target.value)} /></div></div>
+        </div>
+      )}
+      {partial && <label className="row gap12" style={{ alignItems: 'flex-start', marginTop: 12 }}><input type="checkbox" checked={settle} onChange={(e) => setSettle(e.target.checked)} style={{ marginTop: 3 }} /><span>Count this as the full payment<div className="small muted">Unticked, it is recorded but {bill.name} stays due for the rest ({money(bill.amount - cents)}).</div></span></label>}
+      {rows.length > 0 && (
+        <div className="card pad num" style={{ boxShadow: 'none', background: 'var(--surface-2)', marginTop: 14 }} data-testid="pay-preview">
+          {rows.map((r) => <div className="row between small" key={r.k} style={{ padding: '3px 0', gap: 10 }}><span>{r.k}</span><span><span className="muted">{r.before}</span> → <b>{r.after}</b></span></div>)}
+        </div>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}><button className="btn ghost sm" onClick={() => openModal({ type: 'bill-edit', billId })}><Pencil />Edit bill</button></div>
     </Sheet>
   );
 }
@@ -1127,9 +1187,6 @@ function ScheduleFields({ s, set }: { s: ScheduleState; set: (p: Partial<Schedul
       </div>
       <div className="field"><label>Repeats</label><div className="chips">{PERIODS.map((o) => <button key={o.v} className="chip" aria-pressed={s.period === o.v} onClick={() => set({ period: o.v })}>{o.label}</button>)}</div>
         {(s.period === 'Monthly' || s.period === 'Yearly') && day >= 29 && <div className="xs muted" style={{ marginTop: 6 }}>Anchored to the {day}th: shorter months use their last day, then it returns to the {day}th.</div>}</div>
-      <div className="field"><label>When you mark it paid…</label>
-        <Seg block value={s.mode} onChange={(m) => set({ mode: m })} options={[{ v: 'reminder', label: 'Just a reminder' }, { v: 'prepare', label: 'Prepare a transaction' }]} />
-        <div className="xs muted" style={{ marginTop: 6 }}>{s.mode === 'reminder' ? 'Finances only tracks the due date.' : 'Finances prepares the transaction for you to review. It is never posted without your confirmation.'}</div></div>
     </div>
   );
 }
@@ -1338,9 +1395,7 @@ export function BillEditSheet({ billId }: { billId: string }) {
         <div className="chips">{PERIODS.map((o) => <button key={o.v} className="chip" aria-pressed={period === o.v} onClick={() => setPeriod(o.v)}>{o.label}</button>)}</div></div>
       <div className="field" style={{ marginTop: 14 }}><label htmlFor="bt">Monthly funding target</label><MoneyInput id="bt" value={tgtShown} onChange={(v) => { setTgt(v); setTgtTouched(true); }} placeholder="No target" />
         <div className="xs muted" style={{ marginTop: 6 }}>What you set aside each month. Separate from the payment amount above.</div></div>
-      <div className="field" style={{ marginTop: 14 }}><label>When you mark it paid…</label>
-        <Seg block value={mode} onChange={setMode} options={[{ v: 'reminder', label: 'Just a reminder' }, { v: 'prepare', label: 'Prepare a transaction' }]} />
-        <div className="xs muted" style={{ marginTop: 6 }}>{mode === 'reminder' ? 'Finances only tracks the due date.' : 'Finances prepares the transaction for you to review. It is never posted without your confirmation.'}</div></div>
+      
       <div className="field" style={{ marginTop: 14 }}><label htmlFor="bg">Budget group</label>
         <select id="bg" className="input" value={groupId} onChange={(e) => setGroupId(e.target.value)}>{data.groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}</select>
         <div className="xs muted" style={{ marginTop: 6 }}>This bill is paid from its own budget envelope, <b>{name.trim() || bill.name}</b>. Renaming it renames that envelope everywhere; its history stays attached.</div></div>

@@ -26,7 +26,7 @@ export async function start(port = PORT, { readonly = process.env.DEMO_READONLY 
         const m = /^\/rest\/v1\/(rpc\/)?([a-z_0-9]+)$/.exec(u.pathname);
         if (!m) return send(404, {});
         const isRpc = !!m[1]; const name = m[2];
-        const write = isRpc ? name !== 'is_owner' : req.method !== 'GET';
+        const write = isRpc ? !['is_owner', 'fos_post_due'].includes(name) : req.method !== 'GET'; // fos_post_due only posts scheduled rows whose date has arrived (none in the read-only fixture)
         if (write) { writes.push(`${req.method} ${u.pathname}`); if (readonly) return send(400, { message: 'DEMO MODE: writes are disabled' }); }
         const accept = req.headers.accept || '';
         const r = await rest(db, { method: req.method, table: isRpc ? undefined : name, rpc: isRpc ? name : undefined, params: u.searchParams, body, prefer: req.headers.prefer || '', single: accept.includes('vnd.pgrst.object') });

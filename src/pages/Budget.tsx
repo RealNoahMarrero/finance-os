@@ -14,6 +14,7 @@ export function Budget() {
   const [filter, setFilter] = useState<Filter>('all');
   const [sel, setSel] = useState<string | null>(null);
   const rta = readyToAssign(data);
+  const liquid = sum(data.accounts.filter((a) => a.type !== 'credit'), (a) => a.balance);
   const allEnvs = allEnvelopes(data);
   const envs = allEnvs.filter((e) => !e.cat.hidden);
   const hiddenEnvs = allEnvs.filter((e) => e.cat.hidden && e.env.avail !== 0);
@@ -113,7 +114,20 @@ export function Budget() {
         </div>
 
         <aside className="card pane" aria-label="Category details">
-          {!selRow ? <div className="small muted" style={{ padding: '24px 4px', textAlign: 'center' }}>Select a category to see its details.</div> : (() => {
+          {!selRow ? (
+            <div aria-label="Budget at a glance">
+              <div className="eyebrow">Where your money stands</div>
+              <div className="kv"><span className="k">In your accounts</span><span className="v num">{money(liquid, { cents: false })}</span></div>
+              <div className="kv"><span className="k">Set aside in categories</span><span className="v num">{money(liquid - rta, { cents: false })}</span></div>
+              <div className="kv"><span className="k">Ready to assign</span><span className={cn('v num', rta < 0 && 'neg')}>{money(rta, { cents: false })}</span></div>
+              {(overs.length > 0 || needs.length > 0) && <div className="eyebrow" style={{ margin: '18px 0 4px' }}>{overs.length ? 'Cover first' : 'Needs funding'}</div>}
+              {[...overs, ...needs.filter((e) => e.env.avail >= 0)].slice(0, 5).map((e) => (
+                <button key={e.cat.id} className="rowx" style={{ padding: '9px 0' }} onClick={() => setSel(e.cat.id)}>
+                  <div className="grow"><div className="li-title" style={{ fontSize: 14 }}>{e.cat.name}</div><div className="li-sub">{e.env.avail < 0 ? `Over by ${money(-e.env.avail, { cents: false })}` : `Needs ${money(e.env.remaining, { cents: false })}`}</div></div><ChevronRight size={15} className="muted" /></button>
+              ))}
+              <div className="xs muted" style={{ marginTop: 12 }}>Select a category for its details, or use Move money to fund it.</div>
+            </div>
+          ) : (() => {
             const { cat, env } = selRow; const over = env.avail < 0; const bill = data.bills.find((b) => b.categoryId === cat.id);
             return (<>
               <div className="row gap12"><div className={cn('li-ico', over ? 'neg' : 'planned')}><CatIcon k={cat.icon} /></div>

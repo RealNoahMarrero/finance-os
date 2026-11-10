@@ -53,16 +53,16 @@
   color-scheme: light;
 }
 :root[data-theme='dark'] {
-  --bg: #0b1113;
-  --surface: #111a1d;
-  --surface-2: #172327;
-  --surface-3: #1e2c31;
-  --line: #202e32;
-  --line-2: #2c3d42;
+  --bg: #080d0f;
+  --surface: #121c20;
+  --surface-2: #1a272c;
+  --surface-3: #243439;
+  --line: #2c3c42;
+  --line-2: #3b4d54;
   --ink: #ede9e0;
   --ink-2: #b3afa4;
-  --ink-3: #8d8a80;
-  --ink-4: #62665f;
+  --ink-3: #9d9a8f;
+  --ink-4: #747872;
 
   --brand: #74c6ce;
   --brand-ink: #06191c;
@@ -85,7 +85,7 @@
   --proj-2: #416f8b;
   --proj-soft: #14283a;
 
-  --shadow-1: 0 1px 0 rgba(255, 255, 255, 0.03), 0 6px 20px -14px rgba(0, 0, 0, 0.7);
+  --shadow-1: inset 0 1px 0 rgba(255, 255, 255, 0.045), 0 8px 24px -14px rgba(0, 0, 0, 0.8);
   --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.4);
   --shadow-3: 0 24px 64px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.4);
   --overlay: rgba(0, 0, 0, 0.62);
@@ -137,7 +137,7 @@ h1, h2, h3, p { margin: 0; }
 .demo-links { display: flex; gap: 10px; margin-top: 6px; }
 .demo-links button { font-size: 12px; font-weight: 600; color: var(--planned); }
 .main { min-width: 0; }
-.page { max-width: 1240px; margin: 0 auto; padding: 28px 36px 64px; }
+.page { max-width: 1520px; margin: 0 auto; padding: 28px 36px 64px; }
 .topbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
 .page-title { font-family: var(--serif); font-size: 34px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.08; }
 .page-sub { color: var(--ink-3); font-size: 13.5px; margin-top: 2px; }
@@ -601,3 +601,35 @@ button.rowx:hover .li-title { text-decoration: underline; text-decoration-color:
   .topbar > div:first-child { min-width: 0; }
 }
 @media (hover: none) { .btn.sm { height: 36px; } .chip { height: 36px; } .seg button { height: 34px; } }
+
+/* ── Finances 2.0 polish pass ────────────────────────────────── */
+@media (min-width: 1500px) { .page { padding-left: 48px; padding-right: 48px; } }
+.hero3 { padding: 28px 30px 20px; }
+.hero3-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.hero-stat { padding: 2px 28px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.hero-stat:first-child { padding-left: 0; }
+.hero-stat + .hero-stat { border-left: 1px solid var(--line); }
+.hero3 .amt-hero { font-size: 46px; }
+.hero3-accts { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+.rail { display: grid; gap: 16px; align-content: start; min-width: 0; }
+.split-layout { grid-template-columns: minmax(0, 1fr) 400px; gap: 24px; }
+@media (max-width: 860px) {
+  .hero3 { padding: 20px 18px 16px; }
+  .hero3-stats { grid-template-columns: minmax(0, 1fr); }
+  .hero-stat { padding: 12px 0; border-left: 0 !important; border-top: 1px solid var(--line); }
+  .hero-stat:first-child { padding-top: 0; border-top: 0; }
+  .hero3 .amt-hero { font-size: 40px; }
+}
+.sheet-title { font-family: var(--serif); font-size: 23px; font-weight: 550; letter-spacing: -0.01em; }
+.sheet { border-radius: 22px; }
+.sheet.wide { max-width: 600px; }
+.chip[aria-pressed='true'] { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+.amount-input span, .amount-input input { font-family: var(--serif); font-weight: 400; }
+.picker { border: 1px solid var(--line-2); border-radius: 14px; padding: 8px; background: var(--surface-2); }
+.field > label, .label { text-transform: none; letter-spacing: 0; }
+.seg { background: var(--surface-3); }
+:root[data-theme='dark'] .card { border-color: var(--line-2); }
+:root[data-theme='dark'] .btn { border-color: var(--line-2); }
+:root[data-theme='dark'] .sidebar { background: var(--surface); }
+
+@media (max-width: 1100px) { .split-layout { grid-template-columns: minmax(0, 1fr); } }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { BarChart3, CalendarClock, Home, Landmark, Menu, PieChart, Plus, Receipt, Settings as Cog } from 'lucide-react';
 import { useStore } from './store';
 import { SheetHost } from './sheets';
@@ -6,11 +6,14 @@ import { Notice } from './Login';
 import { Overview } from './pages/Overview';
 import { Budget } from './pages/Budget';
 import { Transactions } from './pages/Transactions';
-import { Accounts, AccountDetail } from './pages/Accounts';
 import { Bills } from './pages/Bills';
-import { Insights } from './pages/Insights';
-import { Settings } from './pages/Settings';
 import { cn } from './lib';
+
+// Heavier, less-visited screens load on demand so the first paint is smaller.
+const Insights = lazy(() => import('./pages/Insights').then((m) => ({ default: m.Insights })));
+const Settings = lazy(() => import('./pages/Settings').then((m) => ({ default: m.Settings })));
+const Accounts = lazy(() => import('./pages/Accounts').then((m) => ({ default: m.Accounts })));
+const AccountDetail = lazy(() => import('./pages/Accounts').then((m) => ({ default: m.AccountDetail })));
 
 export interface Route { name: string; id?: string; query: URLSearchParams }
 /** Canonical routes: '', activity, accounts, bills, budget, insights, settings. Older saved links (#/transactions, #/plan/*, #/credit) still resolve. */
@@ -91,7 +94,7 @@ export function App() {
           <div className="brand"><div className="brand-mark"><div><i style={{ width: 14 }} /><i style={{ width: 10, opacity: 0.75 }} /><i style={{ width: 6, opacity: 0.5 }} /></div></div><div className="brand-name">Finances</div></div>
           <button className="more-btn" aria-label="More: Accounts, Insights, Settings" onClick={() => openModal({ type: 'menu' })}><Menu />More</button>
         </header>
-        {page}
+        <Suspense fallback={<div className="page" aria-busy="true"><div className="skeleton" style={{ height: 120 }} /></div>}>{page}</Suspense>
       </main>
 
       <nav className="tabbar" aria-label="Primary">

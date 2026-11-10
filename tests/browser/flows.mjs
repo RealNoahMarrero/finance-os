@@ -80,6 +80,71 @@ await test('settings export control and theme switch exist', async (page) => {
   await click(page, 'Dark', '.theme-seg button'); const th = await page.evaluate(() => document.documentElement.dataset.theme); if (th !== 'dark') throw new Error('theme did not switch');
 });
 
+const setVal = (page, sel, v) => page.evaluate((sel, v) => { const el = document.querySelector(sel); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); }, sel, v);
+const openCarLoan = async (page) => { await go(page, '/bills'); await click(page, 'Car Loan details'); };
+
+await test('PAY (record): one atomic payment — account, envelope, debt, due date; a double-click records it once', async (page) => {
+  await openCarLoan(page);
+  const before = await sql(`select (select balance from accounts where id=1) as b, (select count(*) from transactions) as n`);
+  await page.evaluate(() => { const b = [...document.querySelectorAll('button')].find((x) => /^Pay \$320/.test(x.innerText.trim())); b.click(); b.click(); });
+  await sleep(1200);
+  const [after] = await sql(`select (select balance from accounts where id=1) as b, (select count(*) from transactions) as n, (select balance from categories where id=5) as owed, (select due_date::text from categories where id=5) as due, (select assigned_amount from categories where id=5) as env, (select count(*) from bill_payments where category_id=5) as bp`);
+  if (Number(after.n) !== Number(before[0].n) + 1) throw new Error(`transactions went ${before[0].n} -> ${after.n}, expected +1`);
+  if (Math.abs(Number(after.b) - (Number(before[0].b) - 320)) > 0.001) throw new Error('checking did not drop by exactly $320');
+  if (Number(after.owed) !== 8080) throw new Error(`debt owed is ${after.owed}, expected 8080`);
+  if (after.due !== '2026-10-27') throw new Error(`next due ${after.due}`);
+  if (Number(after.env) !== 0) throw new Error(`envelope ${after.env}, expected 0`);
+});
+await test('PAY undo (toast): restores everything and removes the transaction it created', async (page) => {
+  await openCarLoan(page);
+  const [b0] = await sql(`select (select balance from accounts where id=1) as b, (select count(*) from transactions) as n`);
+  await click(page, 'Pay $320');
+  await click(page, 'Undo', '.toast button'); await sleep(800);
+  const [a] = await sql(`select (select balance from accounts where id=1) as b, (select count(*) from transactions) as n, (select balance from categories where id=5) as owed, (select due_date::text from categories where id=5) as due`);
+  if (Number(a.n) !== Number(b0.n) || Number(a.b) !== Number(b0.b) || Number(a.owed) !== 8400 || a.due !== '2026-09-27') throw new Error(JSON.stringify(a));
+});
+await test('PAY (already recorded): links the existing transaction and creates no duplicate', async (page) => {
+  await sql(`insert into transactions (date, amount, payee, category_id, account_id, type, entity_id, status) values ('2026-09-28', 320, 'Loan Co', 5, 1, 'Expense', 'personal', 'posted')`);
+  await openCarLoan(page); await click(page, 'Already recorded');
+  const n0 = (await sql('select count(*) as n from transactions'))[0].n;
+  await click(page, 'Loan Co', 'label'); await click(page, 'Link this transaction');
+  const [a] = await sql(`select (select count(*) from transactions) as n, (select balance from categories where id=5) as owed, (select count(*) from bill_payments where category_id=5) as bp`);
+  if (Number(a.n) !== Number(n0)) throw new Error('a duplicate transaction was created');
+  if (Number(a.owed) !== 8080 || Number(a.bp) !== 1) throw new Error(JSON.stringify(a));
+});
+await test('PAY (paid elsewhere): marks paid, no transaction, balances untouched', async (page) => {
+  await openCarLoan(page); await click(page, 'Paid elsewhere');
+  const [b0] = await sql(`select (select sum(balance) from accounts) as b, (select count(*) from transactions) as n`);
+  await click(page, 'Mark as paid');
+  const [a] = await sql(`select (select sum(balance) from accounts) as b, (select count(*) from transactions) as n, (select balance from categories where id=5) as owed`);
+  if (Number(a.n) !== Number(b0.n) || Number(a.b) !== Number(b0.b) || Number(a.owed) !== 8080) throw new Error(JSON.stringify([b0, a]));
+});
+await test('missed payments: one Car Loan row with a count, expandable, and Home shows one alert', async (page) => {
+  await go(page, '/bills');
+  const t = await page.evaluate(() => document.body.innerText); if (!/2 missed/.test(t)) throw new Error('no "2 missed" on Bills');
+  if ((t.match(/Car Loan/g) || []).length > 3) throw new Error('Car Loan appears as several rows');
+  await go(page, '/'); const h = await page.evaluate(() => document.querySelector('[aria-label="Needs attention"]').innerText);
+  if (!/Car Loan · 2 payments missed/.test(h)) throw new Error('Home attention row missing: ' + h.slice(0, 120));
+});
+await test('SCHEDULED: a future-dated expense changes no balance until its date', async (page) => {
+  await go(page, '/'); await click(page, 'Add transaction');
+  await page.type('input[aria-label=Amount]', '40'); await page.type('#payee', 'Future Cafe'); await click(page, 'Dining Out', '.chip');
+  await click(page, 'Date, notes, split'); await setVal(page, '#date', '2026-11-25'); await sleep(300);
+  const txt = await page.evaluate(() => document.querySelector('[role=dialog]').innerText); if (!/Scheduled: it won/.test(txt)) throw new Error('no scheduled hint');
+  const b0 = Number((await sql('select balance from accounts where id=1'))[0].balance);
+  await click(page, 'Schedule expense');
+  const [a] = await sql(`select (select balance from accounts where id=1) as b, (select assigned_amount from categories where id=9) as env, (select status from transactions where payee='Future Cafe') as st`);
+  if (Number(a.b) !== b0 || Number(a.env) !== 55 || a.st !== 'scheduled') throw new Error(JSON.stringify(a));
+  await go(page, '/activity'); const t = await page.evaluate(() => document.body.innerText); if (!/Scheduled · not yet posted/i.test(t) || !/Future Cafe/.test(t)) throw new Error('not shown in Activity');
+});
+await test('SCHEDULED: opening the app on/after the date posts it exactly once', async (page) => {
+  await sql(`insert into transactions (date, amount, payee, category_id, account_id, type, entity_id, status) values ('2026-11-10', 12.5, 'Due Today', 9, 1, 'Expense', 'personal', 'scheduled')`);
+  const b0 = Number((await sql('select balance from accounts where id=1'))[0].balance);
+  await go(page, '/'); await go(page, '/');
+  const [a] = await sql(`select (select balance from accounts where id=1) as b, (select status from transactions where payee='Due Today') as st`);
+  if (a.st !== 'posted' || Math.abs(Number(a.b) - (b0 - 12.5)) > 0.001) throw new Error(JSON.stringify([b0, a]));
+});
+
 await browser.close(); await new Promise((r) => pv.httpServer.close(r)); backend.close(); fs.rmSync(outDir, { recursive: true, force: true });
 for (const [n, ok, why] of results) console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${why ? '  — ' + why : ''}`);
 console.log(`${results.filter((r) => r[1]).length}/${results.length} passed`);

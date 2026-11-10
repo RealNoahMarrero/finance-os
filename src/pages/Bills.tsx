@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Bell, ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import { useStore } from '../store';
-import { groupBills, upcomingBills, type BillGroup } from '../data';
-import { cn, diffDays, fmtDate, mon, money, plural, relDay, sum } from '../lib';
+import { groupBills, upcomingBills, incomeOccurrences, type BillGroup } from '../data';
+import { addDays, cn, diffDays, fmtDate, mon, money, plural, relDay, sum } from '../lib';
 import { Empty, Money, Seg, StatusPill } from '../ui';
 import { PageHead } from '../shared';
 import { AllBills, ArchivedBills, CalendarTab, IncomeTab } from './Plan';
@@ -63,6 +63,7 @@ export function Bills({ query }: { query: URLSearchParams }) {
   const overdueTotal = sum(overdue, (g) => g.total);
   const due7 = sum(week, (g) => g.next.bill.amount);
   const paused = data.bills.filter((b) => b.paused);
+  const incomeSoon = [...data.incomes.filter((i) => i.date <= data.today).map((i) => ({ inc: i, date: i.date, amount: i.amount })), ...incomeOccurrences(data, addDays(data.today, 1), addDays(data.today, 30))].slice(0, 5);
 
   const section = (title: string, gs: BillGroup[], tone?: string) => gs.length ? (
     <section className="card pad" style={{ marginBottom: 16 }} aria-label={title}>
@@ -95,17 +96,28 @@ export function Bills({ query }: { query: URLSearchParams }) {
       {tab === 'upcoming' && (view === 'calendar' ? <CalendarTab /> : data.bills.length === 0 ? (
         <div className="card"><Empty icon={<Bell />} title="No bills yet" text="Add a bill with a due date and amount to see it here." action={<button className="btn primary" onClick={() => openModal({ type: 'category-add' })}><Plus />New bill</button>} /></div>
       ) : (
-        <div className="fade-in">
-          {groups.length === 0 && <div className="card pad small muted" style={{ marginBottom: 16 }}>Nothing is due in the next 45 days.</div>}
-          {section('Overdue', overdue, 'var(--neg)')}
-          {section('This week', week)}
-          {section('Later this month', later)}
-          {section('Next month', nextMonth)}
-          <details className="card" style={{ overflow: 'hidden' }}>
-            <summary className="pad small" style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--ink-2)' }}>All scheduled bills · {plural(data.bills.length, 'bill')}</summary>
-            <AllBills />
-          </details>
-          <ArchivedBills />
+        <div className="split-layout fade-in">
+          <div>
+            {groups.length === 0 && <div className="card pad small muted" style={{ marginBottom: 16 }}>Nothing is due in the next 45 days.</div>}
+            {section('Overdue', overdue, 'var(--neg)')}
+            {section('This week', week)}
+            {section('Later this month', later)}
+            {section('Next month', nextMonth)}
+          </div>
+          <aside className="rail" aria-label="Bills summary">
+            <section className="card pad">
+              <div className="sect-head"><h2 className="sect-title">Expected income</h2><a className="sect-link" href="#/bills?tab=income">All<ChevronRight size={14} /></a></div>
+              {incomeSoon.length === 0 ? <div className="small muted">No income expected in the next 30 days.</div> : incomeSoon.map((o) => (
+                <button key={o.inc.id + o.date} className="rowx" style={{ padding: '10px 0' }} onClick={() => openModal({ type: 'income', mode: 'view', id: o.inc.id })}>
+                  <div className="grow"><div className="li-title" style={{ fontSize: 14 }}>{o.inc.label}</div><div className="li-sub">{o.date <= data.today ? 'Waiting · ' : ''}{fmtDate(o.date)}{o.inc.certainty === 'anticipated' ? ' · anticipated' : ''}</div></div>
+                  <div className="amt-md num pos">+{money(o.amount, { cents: false })}</div></button>))}
+            </section>
+            <section className="card pad">
+              <div className="sect-head"><h2 className="sect-title">Manage</h2></div>
+              <div className="rowx" style={{ padding: '8px 0' }}><div className="grow small">{plural(data.bills.length, 'scheduled bill')}</div><a className="btn sm" href="#/bills?tab=paused">Paused &amp; archived</a></div>
+              <details style={{ marginTop: 8 }}><summary className="small" style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--ink-2)' }}>All scheduled bills</summary><AllBills /></details>
+            </section>
+          </aside>
         </div>
       ))}
     </div>

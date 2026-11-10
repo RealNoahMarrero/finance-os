@@ -17,7 +17,7 @@ Opens http://localhost:5180. Sign in with **any** email and password. The app ta
 | Command | What it covers |
 |---|---|
 | `npm run typecheck` | TypeScript |
-| `npm test` | Calculation unit tests (`tests/*.test.ts`) |
+| `npm test` | Calculation tests, Finances 2.0 model tests, and real-SQL tests of every migration (`tests/sql.test.mjs`, in-process Postgres) |
 | `npm run test:browser` | Every route at desktop and phone width on read-only synthetic data (errors, overflow, saved-link redirects, zero writes). `SHOTS=dir` also saves screenshots |
 | `npm run test:flows` | Click-through workflows against the live synthetic backend (add expense, cover overspending, bills, More menu, settings) |
 | `npm run build` | Production bundle (`dist/`) |

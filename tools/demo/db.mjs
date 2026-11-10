@@ -8,7 +8,7 @@ import { tables } from './fixture.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const DEMO_UID = '00000000-0000-0000-0000-0000000000d1';
-export const MIGRATIONS = ['000_supabase_stubs_and_base', '011a_additive_ledger_engine', '011b_lock_down_access', '012_sheets_sync_token', '013_bill_anchor_and_pause', '014_credit_tracker', '015_bill_amount', '016_account_management', '017_bill_archive'];
+export const MIGRATIONS = ['000_supabase_stubs_and_base', '011a_additive_ledger_engine', '011b_lock_down_access', '012_sheets_sync_token', '013_bill_anchor_and_pause', '014_credit_tracker', '015_bill_amount', '016_account_management', '017_bill_archive', '018_payments_scheduling_recurrence'];
 const EXTRA = (process.env.DEMO_EXTRA_MIGRATIONS || '').split(',').filter(Boolean);
 
 const q = (id) => { if (!/^[a-z_][a-z0-9_]*$/i.test(id)) throw new Error(`bad identifier ${id}`); return `"${id}"`; };
@@ -32,6 +32,7 @@ export async function seedDemo(db) {
   for (const [t] of [['accounts'], ['category_groups'], ['categories'], ['transactions'], ['transaction_splits'], ['projected_income'], ['account_baselines'], ['account_reconciliations'], ['bill_payments'], ['credit_scores'], ['credit_reported_balances']]) {
     await db.query(`select setval(pg_get_serial_sequence('${t}', 'id'), coalesce((select max(id) from ${q(t)}), 1))`);
   }
+  await db.exec(`update category_groups set kind = case when lower(name) like '%bill%' or lower(name) like '%subscription%' then 'bills' when lower(name) like '%need%' then 'everyday' when lower(name) like '%want%' then 'lifestyle' else 'goals' end where kind is null`);
   // make each opening balance agree with the recorded balance so the demo starts reconciled (no drift banners unless a test creates one)
   await db.exec(`update account_baselines b set opening_balance = round(a.balance - (fos_derived_balance(a.id) - b.opening_balance), 2) from accounts a where a.id = b.account_id`);
 }

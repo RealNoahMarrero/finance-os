@@ -51,11 +51,10 @@ interface Store {
   archiveBill: (billId: string, alsoCategory?: boolean) => Promise<boolean>;
   restoreBill: (billId: string, alsoCategory?: boolean) => Promise<boolean>;
   setCategoryArchived: (categoryId: string, archived: boolean) => Promise<boolean>;
-  /** Confirms an already-recorded transaction as the payment for a bill occurrence and moves the bill to its next due date. */
-  advanceBill: (billId: string, due: string, txnId: string, paidOn: string, amount: number, next: string) => Promise<boolean>;
-  undoAdvanceBill: (billId: string, due: string) => Promise<boolean>;
-  payBill: (billId: string, date: string, opts: { post: boolean; amount?: number; accountId?: string }) => Promise<boolean>;
-  setBillMode: (billId: string, mode: Bill['mode']) => Promise<boolean>;
+  /** The one payment path: records/links the payment, applies the budget and debt effects and advances the schedule, atomically. Undo reverses it. */
+  payBill: (input: Omit<db.PayInput, 'requestId'> & { requestId?: string }) => Promise<db.PayResult | undefined>;
+  unpayBill: (billId: string, due: string, deleteTxn: boolean) => Promise<boolean>;
+  setBillPaused: (billId: string, paused: boolean, resume?: string) => Promise<boolean>;
   updateBill: (billId: string, patch: db.BillPatch) => Promise<boolean>;
   receiveIncome: (incomeId: string, opts: { date: string; amount: number; accountId: string }) => Promise<boolean>;
   skipIncome: (incomeId: string) => Promise<boolean>;
@@ -121,6 +120,7 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
 
   const refresh = useCallback(async () => {
     try {
+      await db.postDue(todayISO()); // scheduled transactions whose date has arrived are posted by the database (idempotent)
       const { state } = await db.loadAll();
       setData(state); setStatus('ready'); setLoadError(''); loadedAt.current = Date.now();
     } catch (e) {
@@ -163,32 +163,24 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
   const setTarget: Store['setTarget'] = useCallback(async (id, t) => (await run(() => db.setCategoryTarget(id, t))).ok, [run]);
   const addCategory: Store['addCategory'] = useCallback(async (c) => (await run(() => db.addCategoryRow(c))).ok, [run]);
 
-  const payBill: Store['payBill'] = useCallback(async (billId, date, opts) => {
-    const bill = data.bills.find((b) => b.id === billId);
-    if (!bill) return false;
-    const txn: Omit<Txn, 'id'> | undefined = opts.post ? {
-      date: todayISO(), payee: bill.payee, amount: opts.amount ?? bill.amount, type: bill.toAccountId ? 'transfer' : 'expense',
-      accountId: opts.accountId ?? bill.accountId, toAccountId: bill.toAccountId, categoryId: bill.categoryId,
-    } : undefined;
-    return (await run(() => db.payBill(billId, date, todayISO(), opts.post ? 'prepare' : 'reminder', txn))).ok;
-  }, [run, data.bills]);
+  const payBill: Store['payBill'] = useCallback(async (i) => {
+    const r = await run(() => db.payBillV2({ ...i, requestId: i.requestId ?? db.newRequestId() }));
+    return r.ok ? r.value : undefined;
+  }, [run]);
+  const unpayBill: Store['unpayBill'] = useCallback(async (id, due, del) => (await run(() => db.unpayBill(id, due, del))).ok, [run]);
+  const setBillPaused: Store['setBillPaused'] = useCallback(async (id, paused, resume) => (await run(() => db.setBillPaused(id, paused, resume))).ok, [run]);
   const updateCategory: Store['updateCategory'] = useCallback(async (id, p) => (await run(() => db.updateCategory(id, p))).ok, [run]);
   const scheduleBill: Store['scheduleBill'] = useCallback(async (id, s) => (await run(() => db.scheduleBill(id, s))).ok, [run]);
   const removeBill: Store['removeBill'] = useCallback(async (id) => (await run(() => db.removeBill(id))).ok, [run]);
   const archiveBill: Store['archiveBill'] = useCallback(async (id, alsoCat) => {
-    const r = await run(async () => { await db.setBillArchived(id, true); if (alsoCat) await db.setCategoryHidden(id, true); });
-    return r.ok;
+    return (await run(() => db.archiveBillAtomic(id, true, !!alsoCat))).ok;
   }, [run]);
   const restoreBill: Store['restoreBill'] = useCallback(async (id, alsoCat) => {
     const b = data.archivedBills.find((x) => x.id === id);
     const resume = b?.date && b.recurring ? rollForward({ recurring: true, period: b.period, anchor: b.anchor, date: b.date, paid: b.paid }, b.date, todayISO()) : b?.date;
-    const r = await run(async () => { if (alsoCat) await db.setCategoryHidden(id, false); await db.setBillArchived(id, false, resume); });
-    return r.ok;
+    return (await run(() => db.archiveBillAtomic(id, false, !!alsoCat, resume))).ok;
   }, [run, data.archivedBills]);
   const setCategoryArchived: Store['setCategoryArchived'] = useCallback(async (id, a) => (await run(() => db.setCategoryHidden(id, a))).ok, [run]);
-  const advanceBill: Store['advanceBill'] = useCallback(async (id, due, tid, on, amt, next) => (await run(() => db.linkBillPayment(id, due, tid, on, amt, next))).ok, [run]);
-  const undoAdvanceBill: Store['undoAdvanceBill'] = useCallback(async (id, due) => (await run(() => db.unlinkBillPayment(id, due))).ok, [run]);
-  const setBillMode: Store['setBillMode'] = useCallback(async (id, m) => (await run(() => db.setBillMode(id, m))).ok, [run]);
   const updateBill: Store['updateBill'] = useCallback(async (id, p) => (await run(() => db.updateBill(id, p))).ok, [run]);
 
   const receiveIncome: Store['receiveIncome'] = useCallback(async (id, o) => (await run(() => db.receiveIncome(id, o.date, o.amount, o.accountId))).ok, [run]);
@@ -201,7 +193,11 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
     const inc = data.incomes.find((i) => i.id === id);
     if (scope === 'this' && inc && inc.repeat !== 'none') {
       // Only this occurrence changes: it's skipped (the series carries on unchanged) and a one-time entry holds the edited values.
-      return (await run(async () => { await db.skipOccurrence(id, inc.date); await db.addIncomeRow({ ...p, repeat: 'none', who: 'Household' }); })).ok;
+      return (await run(async () => {
+        const nextId = await db.skipOccurrence(id, inc.date);
+        try { await db.addIncomeRow({ ...p, repeat: 'none', who: 'Household' }); }
+        catch (e) { await db.undoSkipOccurrence(id, inc.date, nextId); throw e; } // never leave the occurrence skipped without its replacement
+      })).ok;
     }
     return (await run(() => db.updateIncomeRow(id, p))).ok;
   }, [run, data.incomes]);
@@ -224,11 +220,8 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
     return r.ok ? r.value : undefined;
   }, [run]);
   const setCutover: Store['setCutover'] = useCallback(async (id, date, opening) => (await run(() => db.setCutover(id, date, opening))).ok, [run]);
-  const setCutovers: Store['setCutovers'] = useCallback(async (date, items) => (await run(async () => { for (const it of items) await db.setCutover(it.accountId, date, it.opening); })).ok, [run]);
-  const addAccount: Store['addAccount'] = useCallback(async (a) => (await run(async () => {
-    const id = await db.addAccountRow({ name: a.name, type: a.type, limit: a.limit });
-    await db.setCutover(id, a.cutover, a.opening);
-  })).ok, [run]);
+  const setCutovers: Store['setCutovers'] = useCallback(async (date, items) => (await run(() => db.setCutoversAtomic(date, items))).ok, [run]);
+  const addAccount: Store['addAccount'] = useCallback(async (a) => (await run(() => db.addAccountAtomic(a))).ok, [run]);
 
   const updateAccount: Store['updateAccount'] = useCallback(async (id, a) => (await run(() => db.updateAccountRow(id, a))).ok, [run]);
   const archiveAccount: Store['archiveAccount'] = useCallback(async (id) => {
@@ -261,8 +254,8 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
 
   const value = useMemo<Store>(() => ({
     data, status, loadError, refresh, busy, email, signOut, modal, openModal: setModal, closeModal: () => setModal(null), toasts, toast, theme, setTheme,
-    addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, archiveBill, restoreBill, setCategoryArchived, advanceBill, undoAdvanceBill, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, updateIncome, deleteIncome, reconcile, setCutover, setCutovers, addAccount, updateAccount, archiveAccount, restoreAccount, deleteAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported,
-  }), [data, status, loadError, busy, email, modal, toasts, theme, refresh, signOut, toast, setTheme, addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, archiveBill, restoreBill, setCategoryArchived, advanceBill, undoAdvanceBill, payBill, setBillMode, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported]);
+    addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, archiveBill, restoreBill, setCategoryArchived, payBill, unpayBill, setBillPaused, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, updateIncome, deleteIncome, reconcile, setCutover, setCutovers, addAccount, updateAccount, archiveAccount, restoreAccount, deleteAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported,
+  }), [data, status, loadError, busy, email, modal, toasts, theme, refresh, signOut, toast, setTheme, addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, archiveBill, restoreBill, setCategoryArchived, payBill, unpayBill, setBillPaused, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported]);
 
   return (
     <Ctx.Provider value={value}>

@@ -44,6 +44,7 @@ export type Repeat = 'none' | 'weekly' | 'biweekly' | 'semimonthly' | 'monthly';
 export interface Income {
   id: string; label: string; amount: number; date: string; certainty: 'guaranteed' | 'anticipated';
   repeat: Repeat; accountId: string; status: 'pending' | 'received'; who: string;
+  anchor?: string; // the original day a monthly income repeats on (so month-end paydays never drift)
 }
 export interface Debt { id: string; name: string; balance: number; payment: number; dueDay: number; startBalance: number; billId?: string }
 export interface Planned { id: string; label: string; amount: number; dayOfMonth?: number; date?: string }
@@ -73,7 +74,7 @@ export function envelope(d: DataState, catId: string, month = monthKey(d.today))
   if (!k) return { assigned: 0, spent: 0, moved: 0, avail: 0, target: null, remaining: 0, fundedPct: 0 };
   let spent = 0;
   for (const t of d.txns) {
-    if (t.adjustment || monthKey(t.date) !== month) continue;
+    if (t.adjustment || t.scheduled || monthKey(t.date) !== month) continue;
     if (t.type === 'expense') {
       if (t.splits?.length) { for (const s of t.splits) if (s.categoryId === catId) spent += s.amount; }
       else if (t.categoryId === catId) spent += t.amount;
@@ -191,6 +192,20 @@ export const upcomingBills = (d: DataState, days = 21) => {
 
 // ── income occurrences ────────────────────────────────────────
 export interface IncomeOcc { inc: Income; date: string; amount: number }
+/** The next date a repeating income arrives after `date`. Mirrors the database function fos_next_income_date exactly:
+ *  monthly keeps the original day (anchor) clamped to the month's end; semimonthly = the 1st and 16th, moved off weekends (Sat → Fri, Sun → Mon). */
+export function nextIncomeDate(repeat: Repeat, date: string, anchor?: string): string | null {
+  if (repeat === 'weekly') return addDays(date, 7);
+  if (repeat === 'biweekly') return addDays(date, 14);
+  if (repeat === 'monthly') { const m = monthShift(monthKey(date), 1); return `${m}-${String(Math.min(Number((anchor ?? date).slice(8, 10)), daysInMonth(m))).padStart(2, '0')}`; }
+  if (repeat === 'semimonthly') {
+    const day = Number(date.slice(8, 10)); const m = monthKey(date);
+    const base = day >= 15 && day <= 25 ? `${monthShift(m, 1)}-01` : day >= 26 ? `${monthShift(m, 1)}-16` : `${m}-16`;
+    const dow = parse(base).getDay();
+    return dow === 6 ? addDays(base, -1) : dow === 0 ? addDays(base, 1) : base;
+  }
+  return null;
+}
 export function incomeOccurrences(d: DataState, from: string, to: string, certainty: 'all' | 'guaranteed' = 'all'): IncomeOcc[] {
   const out: IncomeOcc[] = [];
   for (const inc of d.incomes) {
@@ -202,17 +217,8 @@ export function incomeOccurrences(d: DataState, from: string, to: string, certai
     let guard = 0;
     while (date <= to && guard++ < 400) {
       push(date);
-      if (inc.repeat === 'weekly') date = addDays(date, 7);
-      else if (inc.repeat === 'biweekly') date = addDays(date, 14);
-      else if (inc.repeat === 'monthly') { const m = monthShift(monthKey(date), 1); date = `${m}-${String(Math.min(parse(inc.date).getDate(), daysInMonth(m))).padStart(2, '0')}`; }
-      else if (inc.repeat === 'semimonthly') {
-        // Pays near the 1st and 16th: next date alternates
-        const day = parse(date).getDate();
-        const m = monthKey(date);
-        if (day < 10) date = `${m}-16`; else date = `${monthShift(m, 1)}-02`;
-        const dow = parse(date).getDay();
-        if (dow === 0) date = addDays(date, 1); else if (dow === 6) date = addDays(date, -1);
-      }
+      const n = nextIncomeDate(inc.repeat, date, inc.anchor ?? inc.date);
+      if (!n) break; date = n;
     }
   }
   return out.sort((a, b) => a.date.localeCompare(b.date));
@@ -228,24 +234,40 @@ export function flexDailyAverage(d: DataState): number {
   const flexCats = new Set(d.categories.filter((k) => { const g = d.groups.find((x) => x.id === k.groupId); return !!g && (g.kind === 'everyday' || g.kind === 'lifestyle'); }).map((k) => k.id));
   let total = 0;
   for (const t of d.txns) {
-    if (t.type !== 'expense' || t.date < start || t.date >= end) continue;
+    if (t.type !== 'expense' || t.scheduled || t.date < start || t.date >= end) continue;
     if (t.splits?.length) total += sum(t.splits.filter((s) => flexCats.has(s.categoryId)), (s) => s.amount);
     else if (t.categoryId && flexCats.has(t.categoryId)) total += t.amount;
   }
   return Math.round(total / diffDays(end, start));
 }
 
+/** Everything that will move cash after today, in one place: unpaid bills (every missed one lands tomorrow), expected income and
+ *  scheduled transactions. The forecast chart and the event list both read this, so they can never disagree. */
+export interface CashEvent { date: string; label: string; amount: number; kind: 'bill' | 'income-g' | 'income-a' | 'scheduled' }
+export function cashEvents(d: DataState, from: string, to: string, spendIds?: Set<string>): CashEvent[] {
+  const ev: CashEvent[] = [];
+  for (const o of billOccurrences(d, from, to)) if (!o.paid) ev.push({ date: o.date <= d.today ? addDays(d.today, 1) : o.date, label: o.bill.name, amount: -o.bill.amount, kind: 'bill' });
+  for (const o of incomeOccurrences(d, from, to)) ev.push({ date: o.date, label: o.inc.label, amount: o.amount, kind: o.inc.certainty === 'guaranteed' ? 'income-g' : 'income-a' });
+  for (const t of d.txns) {
+    if (!t.scheduled || t.date < from || t.date > to || t.adjustment) continue;
+    const mine = (id?: string) => !!id && (!spendIds || spendIds.has(id));
+    const amount = t.type === 'income' ? (mine(t.accountId) ? t.amount : 0) : t.type === 'expense' ? (mine(t.accountId) ? -t.amount : 0) : (mine(t.toAccountId) ? t.amount : 0) - (mine(t.accountId) ? t.amount : 0);
+    if (amount !== 0) ev.push({ date: t.date, label: t.payee, amount, kind: 'scheduled' });
+  }
+  return ev.sort((a, b) => a.date.localeCompare(b.date));
+}
+
 export function buildForecast(d: DataState, horizon: number): Forecast {
   const today = d.today;
   const end = addDays(today, horizon);
   const flexDaily = flexDailyAverage(d);
-  // Actual history for the last 30 days (spending accounts)
+  // Actual history for the last 30 days (spending accounts); scheduled rows have not touched balances so they are not history
   const spendIds = new Set(d.accounts.filter((a) => a.type === 'checking' || a.type === 'cash').map((a) => a.id));
   const delta = (t: Txn) => {
+    if (t.scheduled) return 0;
     let x = 0;
     if (spendIds.has(t.accountId)) x += t.type === 'income' ? t.amount : -t.amount;
     if (t.type === 'transfer' && t.toAccountId && spendIds.has(t.toAccountId)) x += t.amount;
-    if (t.type === 'transfer' && spendIds.has(t.accountId)) x += 0; // already counted above as outflow
     return x;
   };
   const cur = spendingTotal(d);
@@ -255,25 +277,13 @@ export function buildForecast(d: DataState, horizon: number): Forecast {
     const after = sum(d.txns.filter((t) => t.date > date), delta);
     actual.push({ date, balance: cur - after });
   }
-  const bills = billOccurrences(d, today, end).filter((o) => !o.paid || o.date > today);
-  const overdue = billOccurrences(d, addDays(today, -30), addDays(today, -1)).filter((o) => !o.paid);
   const run = (cert: 'all' | 'guaranteed'): FPoint[] => {
-    const incomes = incomeOccurrences(d, addDays(today, 1), end, cert);
     const byDate = new Map<string, number>();
     const add = (dt: string, v: number) => byDate.set(dt, (byDate.get(dt) || 0) + v);
-    for (const o of bills) if (o.date > today) add(o.date, -o.bill.amount);
-    for (const o of overdue) add(addDays(today, 1), -o.bill.amount);
-    for (const i of incomes) add(i.date, i.amount);
-    for (const p of d.planned) {
-      if (p.date) { if (p.date > today && p.date <= end) add(p.date, -p.amount); }
-      else if (p.dayOfMonth) {
-        let m = monthKey(today);
-        while (m <= monthKey(end)) {
-          const dt = `${m}-${String(p.dayOfMonth).padStart(2, '0')}`;
-          if (dt > today && dt <= end) add(dt, -p.amount);
-          m = monthShift(m, 1);
-        }
-      }
+    for (const e of cashEvents(d, addDays(today, -400), end, spendIds)) {
+      if (e.date <= today) continue;
+      if (e.kind === 'income-a' && cert === 'guaranteed') continue;
+      add(e.date, e.amount);
     }
     const pts: FPoint[] = [{ date: today, balance: cur }];
     let bal = cur;
@@ -303,7 +313,7 @@ export function monthlyFlow(d: DataState) {
     const k = monthShift(cur, i);
     let income = 0, expense = 0;
     for (const t of d.txns) {
-      if (monthKey(t.date) !== k || t.adjustment) continue;
+      if (monthKey(t.date) !== k || t.adjustment || t.scheduled) continue;
       if (t.type === 'income') income += t.amount;
       if (t.type === 'expense') expense += t.amount; // card payments are transfers, so purchases are not counted twice
     }
@@ -320,7 +330,7 @@ export function netWorthSeries(d: DataState) {
     const k = monthShift(cur, i);
     out.unshift({ key: k, value: nw });
     for (const t of d.txns) {
-      if (monthKey(t.date) !== k) continue;
+      if (monthKey(t.date) !== k || t.scheduled) continue;
       if (t.type === 'income') nw -= t.amount; else if (t.type === 'expense') nw += t.amount;
     }
   }
@@ -343,7 +353,7 @@ export function balanceSeries(d: DataState, accountId: string, days = 30) {
     const date = addDays(d.today, i);
     let bal = a.balance;
     for (const t of d.txns) {
-      if (t.date <= date) continue;
+      if (t.date <= date || t.scheduled) continue;
       let delta = 0;
       const credit = a.type === 'credit';
       if (t.type === 'expense' && t.accountId === a.id) delta = credit ? t.amount : -t.amount;

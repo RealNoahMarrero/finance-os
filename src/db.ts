@@ -86,7 +86,7 @@ export function toDataState(raw: RawData, today = todayISO()): DataState {
   const defaultAcct = accounts.find((a) => a.type === 'checking')?.id ?? accounts[0]?.id ?? '';
   const cardOf = new Map(accounts.filter((a) => a.paymentCategoryId).map((a) => [a.paymentCategoryId!, a.id]));
 
-  const groups: Group[] = raw.groups.filter(personal).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)).map((g) => ({ id: S(g.id), name: g.name, kind: kindOf(g.name) }));
+  const groups: Group[] = raw.groups.filter(personal).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)).map((g) => ({ id: S(g.id), name: g.name, kind: (['bills', 'everyday', 'lifestyle', 'goals'] as const).find((k) => k === g.kind) ?? kindOf(g.name) })); // stored kind (migration 018) wins; the name guess is only a fallback
   const kindById = new Map(groups.map((g) => [g.id, g.kind]));
 
   const cats = raw.categories.filter(personal).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name));
@@ -113,7 +113,7 @@ export function toDataState(raw: RawData, today = todayISO()): DataState {
       id: S(t.id), date: t.date, payee: t.payee ?? '', amount: cents(t.amount), type: String(t.type).toLowerCase() as Txn['type'],
       accountId: S(t.account_id), toAccountId: t.to_account_id ? S(t.to_account_id) : undefined,
       categoryId: t.category_id ? S(t.category_id) : undefined, splits: splitsBy.get(S(t.id)), notes: t.notes ?? undefined,
-      adjustment: !!t.is_adjustment, billId: billOfTxn.get(S(t.id)), incomeId: incomeOfTxn.get(S(t.id)),
+      adjustment: !!t.is_adjustment, billId: billOfTxn.get(S(t.id)), incomeId: incomeOfTxn.get(S(t.id)), scheduled: t.status === 'scheduled',
     }));
 
   const paidBy = new Map<string, Record<string, string>>();
@@ -136,7 +136,7 @@ export function toDataState(raw: RawData, today = todayISO()): DataState {
   const incomes: Income[] = raw.income.filter((p) => personal(p) && p.status === 'pending').map((p) => ({
     id: S(p.id), label: p.label, amount: cents(p.amount), date: p.expected_date, certainty: p.certainty === 'guaranteed' ? 'guaranteed' : 'anticipated',
     repeat: p.is_repeating ? REPEAT[p.repeat_period] ?? 'none' : 'none', accountId: p.account_id && acctIds.has(S(p.account_id)) ? S(p.account_id) : defaultAcct,
-    status: 'pending', who: 'Household',
+    status: 'pending', who: 'Household', anchor: p.income_anchor ?? undefined,
   }));
 
   const reconciliations: Reconciliation[] = raw.recons.map((r) => ({
@@ -174,7 +174,7 @@ function txnPayload(t: Omit<Txn, 'id'>, requestId?: string) {
   return {
     date: t.date, amount: dollars(t.amount), payee: t.payee, type: TYPE_DB[t.type], account_id: num(t.accountId), to_account_id: num(t.toAccountId),
     category_id: t.splits?.length ? null : num(t.categoryId), notes: t.notes ?? null, entity_id: 'personal',
-    splits: (t.splits ?? []).map((s) => ({ category_id: Number(s.categoryId), amount: dollars(s.amount) })), client_request_id: requestId ?? null,
+    splits: (t.splits ?? []).map((s) => ({ category_id: Number(s.categoryId), amount: dollars(s.amount) })), client_request_id: requestId ?? null, scheduled: !!t.scheduled,
   };
 }
 export const createTxn = async (t: Omit<Txn, 'id'>, requestId = newRequestId()) => String(ok(await supabase.rpc('fos_create_transaction', { p: txnPayload(t, requestId) })));
@@ -203,7 +203,7 @@ export const payBill = async (cat: string, due: string, paidOn: string, mode: 'r
 };
 export const receiveIncome = async (pid: string, on: string, amt: number, acct: string, requestId = newRequestId()) =>
   String(ok(await supabase.rpc('fos_receive_income', { pid: Number(pid), received_on: on, amt: dollars(amt), acct: Number(acct), request_id: requestId })));
-export const skipIncome = async (pid: string, occ: string) => { ok(await supabase.rpc('fos_skip_income_occurrence', { pid: Number(pid), occ })); };
+export const skipIncome = async (pid: string, occ: string): Promise<string | undefined> => { const r = ok(await supabase.rpc('fos_skip_income_occurrence', { pid: Number(pid), occ })) as Row | null; return r?.next_id ? S(r.next_id) : undefined; };
 
 // ── plain row edits (no balance effect) ────────────────────────────────────
 export const addIncomeRow = async (i: Omit<Income, 'id' | 'status'>) => {
@@ -224,15 +224,10 @@ export const updateIncomeRow = async (id: string, p: IncomePatch) => {
 export const cancelIncomeRow = async (id: string) => { ok(await supabase.from('projected_income').update({ status: 'cancelled' }).eq('id', Number(id)).eq('status', 'pending')); };
 export const restoreIncomeRow = async (id: string) => { ok(await supabase.from('projected_income').update({ status: 'pending' }).eq('id', Number(id)).eq('status', 'cancelled')); };
 /** Skip one occurrence of a repeating income: the database cancels it and schedules the next. Returns the id of that next row so it can be undone. */
-export const skipOccurrence = async (id: string, occ: string) => {
-  await skipIncome(id, occ);
-  const r = ok(await supabase.from('projected_income').select('id').eq('status', 'pending').gt('id', Number(id)).order('id', { ascending: false }).limit(1)) as Row[];
-  return r[0] ? S(r[0].id) : undefined;
-};
+/** The database reports exactly which occurrence the skip created, so Undo removes that one and nothing else. */
+export const skipOccurrence = async (id: string, occ: string) => skipIncome(id, occ);
 export const undoSkipOccurrence = async (id: string, occ: string, nextId?: string) => {
-  if (nextId) ok(await supabase.from('projected_income').delete().eq('id', Number(nextId)).eq('status', 'pending'));
-  ok(await supabase.from('expected_income_skips').delete().eq('projected_income_id', Number(id)).eq('occurrence_date', occ));
-  await restoreIncomeRow(id);
+  ok(await supabase.rpc('fos_unskip_income_occurrence', { pid: Number(id), occ, next_id: nextId ? Number(nextId) : null }));
 };
 export const setIncomeCertainty = async (id: string, c: Income['certainty']) => { ok(await supabase.from('projected_income').update({ certainty: c }).eq('id', Number(id))); };
 export const setCategoryTarget = async (id: string, target: number | null) => { ok(await supabase.from('categories').update({ target_amount: target == null ? 0 : dollars(target) }).eq('id', Number(id))); };
@@ -331,4 +326,20 @@ export async function exportEverything() {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `finances-export-${iso(new Date())}.json`; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
+
+// ── Finances 2.0: atomic server operations (migration 018) ───────────────────
+export interface PayInput { billId: string; due: string; mode: 'post' | 'link' | 'external'; paidOn?: string; amount?: number; accountId?: string; transactionId?: string; settle?: boolean; requestId: string }
+export interface PayResult { settled: boolean; transactionId?: string; created: boolean; amount: number; nextDue?: string; duplicate: boolean }
+export const payBillV2 = async (i: PayInput): Promise<PayResult> => {
+  const r = ok(await supabase.rpc('fos_pay_bill_v2', { p: { category_id: Number(i.billId), due: i.due, mode: i.mode, paid_on: i.paidOn ?? todayISO(), amount: i.amount != null ? dollars(i.amount) : null, account_id: num(i.accountId), transaction_id: num(i.transactionId), settle: i.settle ?? true, request_id: i.requestId } })) as Row;
+  return { settled: !!r.settled, transactionId: r.transaction_id ? S(r.transaction_id) : undefined, created: !!r.created, amount: cents(r.amount), nextDue: r.next_due ?? undefined, duplicate: !!r.duplicate };
+};
+export const unpayBill = async (billId: string, due: string, deleteTxn: boolean) => { ok(await supabase.rpc('fos_unpay_bill', { cat: Number(billId), due, delete_txn: deleteTxn })); };
+/** Posts scheduled transactions whose date has arrived (idempotent; any signed-in device may call it). Tolerated as absent before migration 018. */
+export const postDue = async (today: string): Promise<number> => { const r = await supabase.rpc('fos_post_due', { today }); return r.error ? 0 : Number(r.data ?? 0); };
+export const setBillPaused = async (billId: string, paused: boolean, resume?: string) => { ok(await supabase.rpc('fos_set_bill_paused', { cat: Number(billId), paused, resume: resume ?? null })); };
+export const addAccountAtomic = async (a: { name: string; type: AccountType; limit?: number; opening: number; cutover: string }): Promise<string> =>
+  S(ok(await supabase.rpc('fos_add_account', { p: { name: a.name, type: DB_ACCT_TYPE[a.type], credit_limit: a.limit ? dollars(a.limit) : 0, opening: dollars(a.opening), cutover: a.cutover } })));
+export const setCutoversAtomic = async (date: string, items: { accountId: string; opening: number }[]) => { ok(await supabase.rpc('fos_set_cutovers', { cutover: date, items: items.map((x) => ({ account_id: Number(x.accountId), opening: dollars(x.opening) })) })); };
+export const archiveBillAtomic = async (billId: string, archived: boolean, alsoCategory: boolean, resume?: string) => { ok(await supabase.rpc('fos_archive_bill', { cat: Number(billId), archived, also_category: alsoCategory, resume: resume ?? null })); };
 void diffDays;

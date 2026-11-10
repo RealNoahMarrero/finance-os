@@ -3,7 +3,7 @@ import { Archive, Bell, ChevronLeft, ChevronRight, Info, Pencil, Plus, Receipt, 
 import { useStore } from '../store';
 import { envelope } from '../data';
 import {
-  billOccurrences, buildForecast, incomeOccurrences, shortfall, upcomingBills, type BillOcc, type DataState,
+  billOccurrences, buildForecast, cashEvents, incomeOccurrences, shortfall, upcomingBills, type BillOcc,
 } from '../data';
 import { addDays, cn, compact, daysInMonth, diffDays, fmtDate, mon, money, monthKey, monthLabel, monthShift, parse, relDay, sum } from '../lib';
 import { Callout, Empty, Money, Seg, StatusPill } from '../ui';
@@ -33,8 +33,7 @@ function BillCard({ o }: { o: BillOcc }) {
     <button className="li" style={{ padding: '14px 20px' }} onClick={() => openModal({ type: 'bill', billId: o.bill.id, date: o.date })}>
       <div className={cn('datebox', late && 'late')}><b className="num">{fmtDate(o.date, 'day')}</b><span>{mon(o.date)}</span></div>
       <div className="grow" style={{ minWidth: 0 }}>
-        <div className="row gap8"><span className="li-title ellipsis">{o.bill.name}</span>
-          <span className="pill" title={o.bill.mode === 'prepare' ? 'Prepares a transaction for you to confirm' : 'Reminder only'}>{o.bill.mode === 'prepare' ? <><Receipt />Prepares</> : <><Bell />Reminder</>}</span></div>
+        <div className="row gap8"><span className="li-title ellipsis">{o.bill.name}</span></div>
         {!o.paid && !o.future ? (
           <div style={{ marginTop: 7, maxWidth: 260 }}><div className="bar planned" style={{ height: 5 }}><i style={{ width: `${Math.min(100, (o.funded / o.bill.amount) * 100)}%` }} /></div>
             <div className="xs muted" style={{ marginTop: 4 }}>{money(o.funded, { cents: false })} of {money(o.bill.amount, { cents: false })} funded</div></div>
@@ -53,7 +52,7 @@ export function AllBills() {
       <div className="list">{rows.map((b) => (
         <button key={b.id} className="li" style={{ padding: '12px 20px', ...(b.paused ? { opacity: 0.6 } : {}) }} aria-label={`Edit ${b.name}`} onClick={() => openModal({ type: 'bill-edit', billId: b.id })}>
           <div className="grow" style={{ minWidth: 0 }}><div className="li-title ellipsis">{b.name}</div>
-            <div className="li-sub">{b.recurring ? b.period : 'One time'} · {b.paused ? 'Paused' : `next due ${b.date ? fmtDate(b.date) : '—'}`} · {b.mode === 'prepare' ? 'Prepares' : 'Reminder'}</div></div>
+            <div className="li-sub">{b.recurring ? b.period : 'One time'} · {b.paused ? 'Paused' : `next due ${b.date ? fmtDate(b.date) : '—'}`}</div></div>
           <div className="right row gap8">{b.paused && <StatusPill status="muted">Paused</StatusPill>}<Money v={b.amount} className="amt-md" /><Pencil size={15} style={{ color: 'var(--ink-4)' }} /></div>
         </button>))}</div>
     </section>
@@ -112,7 +111,6 @@ function BillsTab() {
       {grp('Next month', next)}
       <AllBills />
       <ArchivedBills />
-      <Callout icon={<Info />}>Bills never post a transaction on their own. If a bill is set to <b>Prepares</b>, Finances fills in the transaction when you mark it paid — you review and confirm before anything is recorded.</Callout>
     </div>
   );
 }
@@ -176,16 +174,6 @@ export function IncomeTab() {
 }
 
 // ── Forecast ────────────────────────────────────────────────
-export function cashEvents(d: DataState, from: string, to: string) {
-  const ev: { date: string; label: string; amount: number; kind: 'bill' | 'income-g' | 'income-a' | 'planned' }[] = [];
-  for (const o of billOccurrences(d, from, to)) if (!o.paid) ev.push({ date: o.date < d.today ? addDays(d.today, 1) : o.date, label: o.bill.name, amount: -o.bill.amount, kind: 'bill' });
-  for (const o of incomeOccurrences(d, from, to)) ev.push({ date: o.date, label: o.inc.label, amount: o.amount, kind: o.inc.certainty === 'guaranteed' ? 'income-g' : 'income-a' });
-  for (const p of d.planned) {
-    if (p.date && p.date >= from && p.date <= to) ev.push({ date: p.date, label: p.label, amount: -p.amount, kind: 'planned' });
-    if (p.dayOfMonth) { let m = monthKey(from); while (m <= monthKey(to)) { const dt = `${m}-${String(p.dayOfMonth).padStart(2, '0')}`; if (dt >= from && dt <= to) ev.push({ date: dt, label: p.label, amount: -p.amount, kind: 'planned' }); m = monthShift(m, 1); } }
-  }
-  return ev.sort((a, b) => a.date.localeCompare(b.date));
-}
 export function ForecastTab() {
   const { data } = useStore();
   const [horizon, setHorizon] = useState(90);
@@ -238,7 +226,7 @@ export function ForecastTab() {
               <div className="li" key={i} style={{ padding: '11px 20px' }}>
                 <div className={cn('datebox', e.kind.startsWith('income') && 'proj')}><b className="num">{fmtDate(e.date, 'day')}</b><span>{mon(e.date)}</span></div>
                 <div className="grow"><div className="li-title ellipsis" style={{ fontSize: 13.5 }}>{e.label}</div>
-                  <div className="li-sub" style={{ fontSize: 12 }}>{e.kind === 'income-g' ? 'Guaranteed income' : e.kind === 'income-a' ? 'Anticipated income · optimistic only' : e.kind === 'planned' ? 'Planned' : 'Bill'}</div></div>
+                  <div className="li-sub" style={{ fontSize: 12 }}>{e.kind === 'income-g' ? 'Guaranteed income' : e.kind === 'income-a' ? 'Anticipated income · optimistic only' : e.kind === 'scheduled' ? 'Scheduled transaction' : 'Bill'}</div></div>
                 <div className="right"><div className={cn('amt-md num', e.amount > 0 ? 'c-proj' : '')}>{money(e.amount, { sign: true, cents: false })}</div>
                   <div className={cn('xs num', bal < 0 ? 'neg' : 'muted')} style={{ fontWeight: bal < 0 ? 650 : 500 }}>{e.kind === 'income-a' ? 'not counted' : `bal ${money(bal, { cents: false })}`}</div></div>
               </div>
@@ -247,20 +235,9 @@ export function ForecastTab() {
         </div>
       </section>
       <p className="xs muted" style={{ marginTop: 10 }}>Assumes ~{money(f.flexDaily, { cents: false })}/day of everyday spending (your 2-month average), all bills on their due dates, and planned items below. Savings accounts are excluded.</p>
-      <PlannedItems />
     </div>
   );
 }
-function PlannedItems() {
-  const { data } = useStore();
-  return (
-    <section className="card pad" style={{ marginTop: 16 }}>
-      <div className="sect-head"><h2 className="sect-title">Planned one-offs in the forecast</h2></div>
-      {data.planned.map((p) => <div className="kv" key={p.id}><span className="k">{p.label}</span><span className="v num">{money(p.amount, { cents: false })} · {p.date ? fmtDate(p.date) : `monthly on the ${p.dayOfMonth}${p.dayOfMonth === 1 ? 'st' : 'th'}`}</span></div>)}
-    </section>
-  );
-}
-
 // ── Calendar ────────────────────────────────────────────────
 export function CalendarTab() {
   const { data, openModal } = useStore();
@@ -274,7 +251,7 @@ export function CalendarTab() {
   const from = cells[0], to = cells[cells.length - 1];
   const bills = billOccurrences(data, from, to);
   const incomes = incomeOccurrences(data, from, to);
-  const planned = cashEvents(data, from, to).filter((e) => e.kind === 'planned');
+  const planned = cashEvents(data, from, to).filter((e) => e.kind === 'scheduled');
   const evFor = (d: string) => ({
     bills: bills.filter((b) => b.date === d), income: incomes.filter((i) => i.date === d), planned: planned.filter((p) => p.date === d),
   });
@@ -327,7 +304,7 @@ export function CalendarTab() {
           <div className="list">
             {selEv.bills.map((b) => <button className="li" key={b.bill.id} onClick={() => openModal({ type: 'bill', billId: b.bill.id, date: b.date })}><div className="li-ico"><Bell /></div><div className="grow"><div className="li-title">{b.bill.name}</div><div className="li-sub">Bill</div></div><div className="right stack" style={{ alignItems: 'flex-end', gap: 4 }}><Money v={-b.bill.amount} className="amt-md" />{billStatusPill(b, data.today)}</div></button>)}
             {selEv.income.map((i) => <button className="li" key={i.inc.id} onClick={() => openModal({ type: 'income', mode: 'view', id: i.inc.id })}><div className="li-ico proj"><Receipt /></div><div className="grow"><div className="li-title">{i.inc.label}</div><div className="li-sub">Expected · {i.inc.certainty}</div></div><Money v={i.amount} sign className="amt-md c-proj" /></button>)}
-            {selEv.planned.map((p) => <div className="li" key={p.label}><div className="li-ico"><Info /></div><div className="grow"><div className="li-title">{p.label}</div><div className="li-sub">Planned in forecast</div></div><Money v={p.amount} className="amt-md" /></div>)}
+            {selEv.planned.map((p) => <div className="li" key={p.label}><div className="li-ico"><Info /></div><div className="grow"><div className="li-title">{p.label}</div><div className="li-sub">Scheduled transaction</div></div><Money v={p.amount} className="amt-md" /></div>)}
           </div>
         )}
       </section>
