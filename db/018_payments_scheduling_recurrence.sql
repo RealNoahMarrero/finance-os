@@ -10,7 +10,8 @@
 --   alter table public.transactions drop column if exists status;
 --   alter table public.projected_income drop column if exists income_anchor;
 --   alter table public.category_groups drop column if exists kind;
---   drop function if exists public.fos_pay_bill_v2(jsonb), public.fos_unpay_bill(bigint, date, boolean), public.fos_post_due(date),
+--   alter table public.bill_payments drop column if exists debt_applied;
+--   drop function if exists public.fos_pay_bill_v2(jsonb), public.fos_unpay_bill(bigint, date, boolean, bigint, numeric), public.fos_post_due(date),
 --     public.fos_set_bill_paused(bigint, boolean, date), public.fos_add_account(jsonb), public.fos_set_cutovers(date, jsonb),
 --     public.fos_archive_bill(bigint, boolean, boolean, date);
 --   then re-run 011a (restores the original ledger functions) and 013/015.
@@ -22,6 +23,8 @@ do $$ begin alter table public.transactions add constraint transactions_status_c
 exception when duplicate_object then null; end $$;
 alter table public.projected_income add column if not exists income_anchor date;
 alter table public.category_groups add column if not exists kind text;
+-- how much of a debt balance a payment actually removed (a payment larger than the balance only removes what is owed), so Undo restores exactly that.
+alter table public.bill_payments add column if not exists debt_applied numeric;
 update public.category_groups set kind = case
     when lower(name) like '%bill%' or lower(name) like '%subscription%' then 'bills'
     when lower(name) like '%need%' then 'everyday'
@@ -173,7 +176,7 @@ language plpgsql set search_path = public as $$
 declare cat bigint := (p->>'category_id')::bigint; due date := (p->>'due')::date; paid_on date := coalesce((p->>'paid_on')::date, current_date);
   mode text := coalesce(p->>'mode', 'post'); amt numeric := nullif(p->>'amount','')::numeric; settle boolean := coalesce((p->>'settle')::boolean, true);
   rid uuid := nullif(p->>'request_id','')::uuid; acct bigint := nullif(p->>'account_id','')::bigint; tid bigint := nullif(p->>'transaction_id','')::bigint;
-  c public.categories; t public.transactions; card public.accounts; full_amt numeric; created boolean := false; settled boolean; nxt date; ex public.transactions;
+  c public.categories; t public.transactions; card public.accounts; full_amt numeric; created boolean := false; settled boolean; nxt date; ex public.transactions; applied numeric := 0;
 begin
   perform fos_check_owner();
   if mode not in ('post','link','external') then raise exception 'unknown payment mode'; end if;
@@ -214,31 +217,43 @@ begin
   if amt is null or amt < 0 then raise exception 'invalid payment amount'; end if;
 
   settled := settle or amt >= coalesce(full_amt, 0);
-  if c.is_debt and amt > 0 then update categories set balance = round(greatest(0, coalesce(balance, 0) - amt), 2) where id = cat; end if;
+  if c.is_debt and amt > 0 then
+    applied := least(coalesce(c.balance, 0), amt);
+    update categories set balance = round(coalesce(balance, 0) - applied, 2) where id = cat;
+  end if;
   if settled then
-    insert into bill_payments (category_id, due_date, paid_on, amount, transaction_id, mode) values (cat, due, paid_on, amt, tid, case when mode = 'external' then 'reminder' else 'prepare' end);
+    insert into bill_payments (category_id, due_date, paid_on, amount, transaction_id, mode, debt_applied) values (cat, due, paid_on, amt, tid, case when mode = 'external' then 'reminder' else 'prepare' end, applied);
     if c.is_repeating then
       nxt := public.fos_bill_next(coalesce(c.bill_anchor, c.due_date), due, c.target_period);
       update categories set due_date = nxt, bill_anchor = coalesce(bill_anchor, c.due_date) where id = cat;
     end if;
   end if;
-  return jsonb_build_object('settled', settled, 'transaction_id', tid, 'created', created, 'amount', amt, 'next_due', nxt, 'duplicate', false);
+  return jsonb_build_object('settled', settled, 'transaction_id', tid, 'created', created, 'amount', amt, 'next_due', nxt, 'duplicate', false, 'debt_applied', applied);
 end $$;
 
--- Undo the most recent payment of a bill: puts the due date back, restores any debt reduction, optionally removes the transaction this payment created.
-create or replace function public.fos_unpay_bill(cat bigint, due date, delete_txn boolean default false) returns jsonb
+-- Undo the most recent payment of a bill: puts the due date back, restores exactly the debt reduction it made, optionally removes the transaction it created.
+-- A partial payment (no payment record) is undone by passing its transaction id and the debt it applied.
+drop function if exists public.fos_unpay_bill(bigint, date, boolean);
+create or replace function public.fos_unpay_bill(cat bigint, due date, delete_txn boolean default false, txn_id bigint default null, debt_restore numeric default 0) returns jsonb
 language plpgsql set search_path = public as $$
-declare c public.categories; bp public.bill_payments;
+declare c public.categories; bp public.bill_payments; restore numeric;
 begin
   perform fos_check_owner();
   select * into c from categories where id = cat for update;
   if not found then raise exception 'bill not found'; end if;
   select * into bp from bill_payments where category_id = cat and due_date = due;
-  if not found then raise exception 'no payment is recorded for that due date'; end if;
+  if not found then
+    if txn_id is null then raise exception 'no payment is recorded for that due date'; end if;
+    if c.is_debt and coalesce(debt_restore, 0) > 0 then update categories set balance = round(coalesce(balance, 0) + debt_restore, 2) where id = cat; end if;
+    if delete_txn then perform fos_delete_transaction(txn_id); end if;
+    return jsonb_build_object('transaction_id', txn_id, 'amount', 0);
+  end if;
   if exists (select 1 from bill_payments where category_id = cat and due_date > due) then raise exception 'undo the most recent payment first'; end if;
   delete from bill_payments where id = bp.id;
   update categories set due_date = due where id = cat;
-  if c.is_debt and bp.amount > 0 then update categories set balance = round(coalesce(balance, 0) + bp.amount, 2) where id = cat; end if;
+  -- payments made before migration 018 did not record how much debt they removed: best effort = the amount, as the old function applied it
+  restore := coalesce(bp.debt_applied, case when bp.mode = 'prepare' then bp.amount else 0 end);
+  if c.is_debt and restore > 0 then update categories set balance = round(coalesce(balance, 0) + restore, 2) where id = cat; end if;
   if delete_txn and bp.transaction_id is not null then perform fos_delete_transaction(bp.transaction_id); end if;
   return jsonb_build_object('transaction_id', bp.transaction_id, 'amount', bp.amount);
 end $$;
@@ -347,9 +362,9 @@ begin
   update projected_income set status = 'pending' where id = pid and status = 'cancelled';
 end $$;
 
-grant execute on function public.fos_pay_bill_v2(jsonb), public.fos_unpay_bill(bigint, date, boolean), public.fos_post_due(date),
+grant execute on function public.fos_pay_bill_v2(jsonb), public.fos_unpay_bill(bigint, date, boolean, bigint, numeric), public.fos_post_due(date),
   public.fos_set_bill_paused(bigint, boolean, date), public.fos_add_account(jsonb), public.fos_set_cutovers(date, jsonb),
   public.fos_archive_bill(bigint, boolean, boolean, date), public.fos_skip_income_occurrence(bigint, date), public.fos_unskip_income_occurrence(bigint, date, bigint) to authenticated;
-revoke execute on function public.fos_pay_bill_v2(jsonb), public.fos_unpay_bill(bigint, date, boolean), public.fos_post_due(date),
+revoke execute on function public.fos_pay_bill_v2(jsonb), public.fos_unpay_bill(bigint, date, boolean, bigint, numeric), public.fos_post_due(date),
   public.fos_set_bill_paused(bigint, boolean, date), public.fos_add_account(jsonb), public.fos_set_cutovers(date, jsonb),
   public.fos_archive_bill(bigint, boolean, boolean, date), public.fos_skip_income_occurrence(bigint, date), public.fos_unskip_income_occurrence(bigint, date, bigint) from public, anon;

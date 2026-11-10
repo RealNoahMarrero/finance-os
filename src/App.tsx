@@ -8,6 +8,7 @@ import { Budget } from './pages/Budget';
 import { Transactions } from './pages/Transactions';
 import { Bills } from './pages/Bills';
 import { cn } from './lib';
+import { READ_ONLY } from './supabase';
 
 // Heavier, less-visited screens load on demand so the first paint is smaller.
 const Insights = lazy(() => import('./pages/Insights').then((m) => ({ default: m.Insights })));
@@ -78,6 +79,7 @@ export function App() {
 
   return (
     <div className="app">
+      {READ_ONLY && <div role="status" style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 90, background: 'var(--brass-soft)', color: 'var(--brass)', textAlign: 'center', fontSize: 12.5, fontWeight: 650, padding: '5px 12px' }}>Read-only preview of your data — nothing you do here is saved</div>}
       <a href="#main" className="sr" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>Skip to content</a>
       <aside className="sidebar" aria-label="Main navigation">
         <div className="brand"><div className="brand-mark"><div><i style={{ width: 16 }} /><i style={{ width: 11, opacity: 0.75 }} /><i style={{ width: 7, opacity: 0.5 }} /></div></div><div className="brand-name">Finances</div></div>

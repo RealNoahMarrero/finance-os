@@ -126,6 +126,21 @@ describe('bill payments (one atomic path)', () => {
     expect(await num(tx, 'select count(*) from bill_payments where category_id=5')).toBe(0);
   }));
 
+  it('a payment larger than the debt only removes what is owed, and undo restores exactly that (was: undo over-restored)', () => sandbox(async (tx) => {
+    await tx.query(`update categories set balance = 100 where id = 5`);
+    await pay(tx, { category_id: 5, due: '2026-09-27', mode: 'external', amount: 320 });
+    expect(await owed(tx, 5)).toBe(0);
+    await tx.query(`select fos_unpay_bill(5, '2026-09-27', false)`);
+    expect(await owed(tx, 5)).toBe(100);
+  }));
+
+  it('a partial payment can be undone: transaction removed, debt restored', () => sandbox(async (tx) => {
+    const checking = await bal(tx, 1);
+    const r = await pay(tx, { category_id: 5, due: '2026-09-27', mode: 'post', account_id: 1, amount: 100, settle: false });
+    await tx.query(`select fos_unpay_bill(5, '2026-09-27', true, $1, $2)`, [r.transaction_id, r.debt_applied]);
+    expect(await owed(tx, 5)).toBe(8400); expect(await bal(tx, 1)).toBeCloseTo(checking, 2);
+  }));
+
   it('undo only the most recent payment', () => sandbox(async (tx) => {
     await pay(tx, { category_id: 5, due: '2026-09-27', mode: 'external', amount: 320 });
     await pay(tx, { category_id: 5, due: '2026-10-27', mode: 'external', amount: 320 });

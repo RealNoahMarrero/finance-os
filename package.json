@@ -12,6 +12,8 @@
     "typecheck": "tsc --noEmit",
     "demo": "node tools/demo/run.mjs",
     "test:browser": "node tests/browser/run.mjs",
+    "preview:real": "vite --mode realpreview --port 5181 --open",
+    "test:readonly": "node tests/browser/readonly.mjs",
     "test:flows": "node tests/browser/flows.mjs"
   },
   "dependencies": {

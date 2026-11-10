@@ -53,7 +53,7 @@ interface Store {
   setCategoryArchived: (categoryId: string, archived: boolean) => Promise<boolean>;
   /** The one payment path: records/links the payment, applies the budget and debt effects and advances the schedule, atomically. Undo reverses it. */
   payBill: (input: Omit<db.PayInput, 'requestId'> & { requestId?: string }) => Promise<db.PayResult | undefined>;
-  unpayBill: (billId: string, due: string, deleteTxn: boolean) => Promise<boolean>;
+  unpayBill: (billId: string, due: string, deleteTxn: boolean, partial?: { transactionId?: string; debtApplied: number }) => Promise<boolean>;
   setBillPaused: (billId: string, paused: boolean, resume?: string) => Promise<boolean>;
   updateBill: (billId: string, patch: db.BillPatch) => Promise<boolean>;
   receiveIncome: (incomeId: string, opts: { date: string; amount: number; accountId: string }) => Promise<boolean>;
@@ -167,7 +167,7 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
     const r = await run(() => db.payBillV2({ ...i, requestId: i.requestId ?? db.newRequestId() }));
     return r.ok ? r.value : undefined;
   }, [run]);
-  const unpayBill: Store['unpayBill'] = useCallback(async (id, due, del) => (await run(() => db.unpayBill(id, due, del))).ok, [run]);
+  const unpayBill: Store['unpayBill'] = useCallback(async (id, due, del, partial) => (await run(() => db.unpayBill(id, due, del, partial))).ok, [run]);
   const setBillPaused: Store['setBillPaused'] = useCallback(async (id, paused, resume) => (await run(() => db.setBillPaused(id, paused, resume))).ok, [run]);
   const updateCategory: Store['updateCategory'] = useCallback(async (id, p) => (await run(() => db.updateCategory(id, p))).ok, [run]);
   const scheduleBill: Store['scheduleBill'] = useCallback(async (id, s) => (await run(() => db.scheduleBill(id, s))).ok, [run]);

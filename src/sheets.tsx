@@ -764,7 +764,7 @@ export function BillSheet({ billId, date }: { billId: string; date: string }) {
     setSaving(true);
     const r = await payBill({ billId, due: date, mode: tab === 'pay' ? 'post' : tab === 'link' ? 'link' : 'external', amount: tab === 'link' ? undefined : cents, accountId: tab === 'pay' ? acctId : undefined, paidOn: tab === 'link' ? undefined : paidOn, transactionId: tab === 'link' ? linkId : undefined, settle: partial ? settle : true, requestId: requestId.current });
     if (!r) { setSaving(false); return; }
-    toast(r.settled ? `${bill.name} paid · ${money(r.amount)}` : `${money(r.amount)} recorded toward ${bill.name} · still due`, () => { void unpayBill(billId, date, r.created && r.settled); });
+    toast(r.settled ? `${bill.name} paid · ${money(r.amount)}` : `${money(r.amount)} recorded toward ${bill.name} · still due`, () => { void unpayBill(billId, date, r.created, r.settled ? undefined : { transactionId: r.transactionId, debtApplied: r.debtApplied }); });
     closeModal();
   };
 

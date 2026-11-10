@@ -30,3 +30,6 @@ Browser tests need Chrome or Edge (set `CHROME_PATH` if it is not in a default l
 - `docs/` audit, design proposal, screenshots, issue tracker
 
 Production: https://marrero-finance.netlify.app/ (GitHub `main` auto-deploys). Never commit `.env*` files.
+
+## Preview with your real data (read-only)
+Create `.env.realpreview.local` (git-ignored) containing `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (the same public values Netlify uses) and `VITE_READONLY=1`, then `npm run preview:real` and sign in. All writes are blocked in the browser; see `docs/RELEASE-READINESS.md`.

@@ -329,12 +329,13 @@ export async function exportEverything() {
 
 // ── Finances 2.0: atomic server operations (migration 018) ───────────────────
 export interface PayInput { billId: string; due: string; mode: 'post' | 'link' | 'external'; paidOn?: string; amount?: number; accountId?: string; transactionId?: string; settle?: boolean; requestId: string }
-export interface PayResult { settled: boolean; transactionId?: string; created: boolean; amount: number; nextDue?: string; duplicate: boolean }
+export interface PayResult { settled: boolean; transactionId?: string; created: boolean; amount: number; nextDue?: string; duplicate: boolean; debtApplied: number }
 export const payBillV2 = async (i: PayInput): Promise<PayResult> => {
   const r = ok(await supabase.rpc('fos_pay_bill_v2', { p: { category_id: Number(i.billId), due: i.due, mode: i.mode, paid_on: i.paidOn ?? todayISO(), amount: i.amount != null ? dollars(i.amount) : null, account_id: num(i.accountId), transaction_id: num(i.transactionId), settle: i.settle ?? true, request_id: i.requestId } })) as Row;
-  return { settled: !!r.settled, transactionId: r.transaction_id ? S(r.transaction_id) : undefined, created: !!r.created, amount: cents(r.amount), nextDue: r.next_due ?? undefined, duplicate: !!r.duplicate };
+  return { settled: !!r.settled, transactionId: r.transaction_id ? S(r.transaction_id) : undefined, created: !!r.created, amount: cents(r.amount), nextDue: r.next_due ?? undefined, duplicate: !!r.duplicate, debtApplied: cents(r.debt_applied) };
 };
-export const unpayBill = async (billId: string, due: string, deleteTxn: boolean) => { ok(await supabase.rpc('fos_unpay_bill', { cat: Number(billId), due, delete_txn: deleteTxn })); };
+/** Undo a payment. For a partial payment (no payment record) pass the transaction it created and the debt it removed. */
+export const unpayBill = async (billId: string, due: string, deleteTxn: boolean, partial?: { transactionId?: string; debtApplied: number }) => { ok(await supabase.rpc('fos_unpay_bill', { cat: Number(billId), due, delete_txn: deleteTxn, txn_id: num(partial?.transactionId), debt_restore: partial ? dollars(partial.debtApplied) : 0 })); };
 /** Posts scheduled transactions whose date has arrived (idempotent; any signed-in device may call it). Tolerated as absent before migration 018. */
 export const postDue = async (today: string): Promise<number> => { const r = await supabase.rpc('fos_post_due', { today }); return r.error ? 0 : Number(r.data ?? 0); };
 export const setBillPaused = async (billId: string, paused: boolean, resume?: string) => { ok(await supabase.rpc('fos_set_bill_paused', { cat: Number(billId), paused, resume: resume ?? null })); };
