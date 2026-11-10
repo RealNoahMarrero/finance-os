@@ -145,6 +145,30 @@ await test('SCHEDULED: opening the app on/after the date posts it exactly once',
   if (a.st !== 'posted' || Math.abs(Number(a.b) - (b0 - 12.5)) > 0.001) throw new Error(JSON.stringify([b0, a]));
 });
 
+await test('HOME: Expected income section shows totals, overdue confirmation, status, and links to the full view', async (page) => {
+  await go(page, '/');
+  const t = await page.evaluate(() => document.querySelector('[data-testid=ov-income]').innerText);
+  for (const w of ['Acme Payroll', 'Freelance invoice', 'Client refund', 'Guaranteed', 'Anticipated', 'Confirm', 'past the expected date']) if (!t.includes(w)) throw new Error(`missing "${w}"`);
+  const total = await page.evaluate(() => document.querySelector('[data-testid=ov-income-total]').innerText);
+  if (!/\$5,720/.test(total)) throw new Error('30-day total ' + total);
+  const rta = await page.evaluate(() => document.querySelector('[data-testid=ov-rta-value]').innerText);
+  if (!/\$3,645\.15/.test(rta)) throw new Error('Ready to Assign changed: ' + rta);
+  const before = await page.evaluate(() => location.hash);
+  await click(page, 'All expected income'); const after = await page.evaluate(() => location.hash + ' | ' + document.body.innerText.includes('Expected income'));
+  if (!/tab=income/.test(after)) throw new Error('link went to ' + after);
+});
+await test('HOME: Expected income empty state, and mobile layout does not overflow', async () => {
+  const page = await fresh({ width: 390, height: 844, isMobile: true, hasTouch: true });
+  try {
+    await sql(`update projected_income set status='cancelled'`);
+    await go(page, '/'); const t = await page.evaluate(() => document.querySelector('[data-testid=ov-income]').innerText);
+    if (!/Nothing expected in the next 30 days/.test(t) || !/Add/.test(t)) throw new Error('empty state: ' + t.slice(0, 100));
+    const over = await page.evaluate(() => document.documentElement.scrollWidth > 392); if (over) throw new Error('horizontal overflow on phone');
+    results.push(['HOME: Expected income empty state, and mobile layout does not overflow', true]);
+  } catch (e) { results.push(['HOME: Expected income empty state, and mobile layout does not overflow', false, e.message]); }
+  await page.close();
+});
+
 await browser.close(); await new Promise((r) => pv.httpServer.close(r)); backend.close(); fs.rmSync(outDir, { recursive: true, force: true });
 for (const [n, ok, why] of results) console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${why ? '  — ' + why : ''}`);
 console.log(`${results.filter((r) => r[1]).length}/${results.length} passed`);

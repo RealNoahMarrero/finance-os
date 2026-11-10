@@ -206,6 +206,21 @@ export function nextIncomeDate(repeat: Repeat, date: string, anchor?: string): s
   }
   return null;
 }
+/** Money that is EXPECTED, never received: entries past their date that still need confirming, plus the next `days` days of scheduled income.
+ *  Built from the same pending income and recurrence logic as the Bills > Expected income view; it is not part of cash or Ready to Assign. */
+export interface ExpectedIncomeRow { id: string; label: string; amount: number; date: string; certainty: Income['certainty']; overdue: boolean; repeats: boolean }
+export function expectedIncomeSummary(d: DataState, days = 30) {
+  const overdue: ExpectedIncomeRow[] = d.incomes.filter((i) => i.date <= d.today).sort((a, b) => a.date.localeCompare(b.date))
+    .map((i) => ({ id: i.id, label: i.label, amount: i.amount, date: i.date, certainty: i.certainty, overdue: true, repeats: i.repeat !== 'none' }));
+  const upcoming: ExpectedIncomeRow[] = incomeOccurrences(d, addDays(d.today, 1), addDays(d.today, days))
+    .map((o) => ({ id: o.inc.id, label: o.inc.label, amount: o.amount, date: o.date, certainty: o.inc.certainty, overdue: false, repeats: o.inc.repeat !== 'none' }));
+  return {
+    rows: [...overdue, ...upcoming], overdue, upcoming,
+    guaranteed: sum(upcoming.filter((r) => r.certainty === 'guaranteed'), (r) => r.amount),
+    anticipated: sum(upcoming.filter((r) => r.certainty === 'anticipated'), (r) => r.amount),
+    overdueTotal: sum(overdue, (r) => r.amount),
+  };
+}
 export function incomeOccurrences(d: DataState, from: string, to: string, certainty: 'all' | 'guaranteed' = 'all'): IncomeOcc[] {
   const out: IncomeOcc[] = [];
   for (const inc of d.incomes) {

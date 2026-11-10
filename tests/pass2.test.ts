@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 // @ts-expect-error the synthetic fixture is plain JS
 import { tables } from '../tools/demo/fixture.mjs';
 import { toDataState } from '../src/db';
-import { billOccurrences, buildForecast, cashEvents, groupBills, incomeOccurrences, monthlyFlow, nextIncomeDate, upcomingBills, spendingTotal, type DataState } from '../src/data';
+import { expectedIncomeSummary, readyToAssign, cashCheck, billOccurrences, buildForecast, cashEvents, groupBills, incomeOccurrences, monthlyFlow, nextIncomeDate, upcomingBills, spendingTotal, type DataState } from '../src/data';
 import { addDays } from '../src/lib';
 
 const raw = (over: Record<string, unknown[]> = {}) => ({
@@ -99,4 +99,26 @@ describe('billOccurrences basics still hold', () => {
     const keys = occ.map((o) => `${o.bill.id}|${o.date}`);
     expect(new Set(keys).size).toBe(keys.length);
   });
+});
+
+describe('Home: expected income summary (reuses the existing income data; never counted as cash)', () => {
+  const d = state();
+  const s = expectedIncomeSummary(d, 30);
+  it('splits the next 30 days into guaranteed and anticipated', () => {
+    expect(s.guaranteed).toBe(241000 * 2);   // two biweekly paychecks (Nov 13, Nov 27)
+    expect(s.anticipated).toBe(90000);        // the freelance invoice
+    expect(s.upcoming.every((r) => r.date > d.today)).toBe(true);
+  });
+  it('flags entries past their date as needing confirmation, separately from the 30-day total', () => {
+    expect(s.overdue.map((r) => r.label)).toEqual(['Client refund']);
+    expect(s.overdue[0].overdue).toBe(true);
+    expect(s.guaranteed + s.anticipated).toBe(241000 * 2 + 90000);
+  });
+  it('overdue entries first, then upcoming by date', () => expect(s.rows.map((r) => r.label)).toEqual(['Client refund', 'Acme Payroll', 'Freelance invoice', 'Acme Payroll']));
+  it('expected income does not change cash or Ready to Assign', () => {
+    const none = state({ income: [] });
+    expect(readyToAssign(d)).toBe(readyToAssign(none));
+    expect(cashCheck(d).cash).toBe(cashCheck(none).cash);
+  });
+  it('empty state when nothing is expected', () => expect(expectedIncomeSummary(state({ income: [] }), 30).rows).toHaveLength(0));
 });

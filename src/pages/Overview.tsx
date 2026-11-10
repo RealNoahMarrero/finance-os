@@ -1,10 +1,10 @@
 import { Plus, Landmark, ChevronRight, CircleCheck } from 'lucide-react';
 import { useStore } from '../store';
 import {
-  cashCheck, cardsOwed, loansOwed, netWorth, netWorthSeries, upcomingBills, groupBills, allEnvelopes, overspent, readyToAssign, underfunded, monthlyFlow, usualSpend, type DataState, type Account,
+  cashCheck, cardsOwed, loansOwed, netWorth, netWorthSeries, upcomingBills, groupBills, allEnvelopes, overspent, readyToAssign, underfunded, monthlyFlow, usualSpend, expectedIncomeSummary, type DataState, type Account,
 } from '../data';
 import { daysInMonth, diffDays, fmtDate, money, monthKey, parse, plural, sum } from '../lib';
-import { Empty, Money } from '../ui';
+import { Empty, Money, StatusPill } from '../ui';
 import { PageHead, TxnRow } from '../shared';
 import { BillList } from './Bills';
 
@@ -93,6 +93,7 @@ export function Overview() {
   const recent = data.txns.filter((t) => t.date <= data.today).slice(0, 5);
   const rta = cc.rta;
   const needs = underfunded(data).length;
+  const inc = expectedIncomeSummary(data, 30);
 
   return (
     <div className="page">
@@ -129,6 +130,32 @@ export function Overview() {
           <section className="card pad" aria-label="Coming up">
             <div className="sect-head"><h2 className="sect-title">Coming up</h2><a className="sect-link" href="#/bills">All bills<ChevronRight size={14} /></a></div>
             {groups.length ? <BillList groups={groups} compact /> : <div className="small muted">Nothing due in the next 30 days.</div>}
+          </section>
+          <section className="card pad" aria-label="Expected income" data-testid="ov-income">
+            <div className="sect-head"><h2 className="sect-title">Expected income</h2>
+              <span className="row gap12"><button className="sect-link" onClick={() => openModal({ type: 'income', mode: 'add' })}><Plus size={14} />Add</button><a className="sect-link" href="#/bills?tab=income" data-testid="ov-income-all">All expected income<ChevronRight size={14} /></a></span></div>
+            {inc.rows.length === 0 ? (
+              <div className="small muted">Nothing expected in the next 30 days. Add a paycheck or invoice to see money coming in next to what’s going out.</div>
+            ) : (<>
+              <div className="sum-row" style={{ gap: 24, marginBottom: 6 }}>
+                <div><div className="eyebrow">Next 30 days</div><div className="amt-lg num" data-testid="ov-income-total"><Money v={inc.guaranteed + inc.anticipated} cents={false} /></div></div>
+                <div><div className="eyebrow">Guaranteed</div><div className="amt-lg num c-proj" data-testid="ov-income-g"><Money v={inc.guaranteed} cents={false} /></div></div>
+                <div><div className="eyebrow">Anticipated</div><div className="amt-lg num muted" data-testid="ov-income-a"><Money v={inc.anticipated} cents={false} /></div></div>
+              </div>
+              {inc.overdue.length > 0 && <div className="alert warn" style={{ margin: '10px 0 4px' }}><div className="grow small"><b>{plural(inc.overdue.length, 'entry', 'entries')} past the expected date</b> · {money(inc.overdueTotal, { cents: false })} not confirmed yet. Open one to mark it received or not coming.</div></div>}
+              <div className="list">
+                {inc.rows.slice(0, 5).map((r) => (
+                  <button key={r.id + r.date} className="rowx" onClick={() => openModal({ type: 'income', mode: 'view', id: r.id })}>
+                    <div className={`datebox ${r.overdue ? 'late' : 'proj'}`}><b className="num">{fmtDate(r.date, 'day')}</b><span>{fmtDate(r.date).split(' ')[0]}</span></div>
+                    <div className="grow"><div className="row gap8"><span className="li-title ellipsis">{r.label}</span>{r.overdue && <StatusPill status="warn">Confirm</StatusPill>}</div>
+                      <div className="li-sub ellipsis">{r.overdue ? 'Expected' : ''} {fmtDate(r.date)}{r.repeats ? ' · repeats' : ''}</div></div>
+                    <div className="right"><div className="amt-md num pos">+{money(r.amount, { cents: false })}</div><div className="xs muted">{r.certainty === 'guaranteed' ? 'Guaranteed' : 'Anticipated'}</div></div>
+                  </button>
+                ))}
+              </div>
+              {inc.rows.length > 5 && <div className="xs muted" style={{ marginTop: 6 }}>+ {inc.rows.length - 5} more in the full view</div>}
+              <div className="xs muted" style={{ marginTop: 8 }}>Expected money isn’t in your balances or Ready to Assign until you mark it received.</div>
+            </>)}
           </section>
           <section className="card pad" aria-label="Recent activity">
             <div className="sect-head"><h2 className="sect-title">Recent activity</h2><a className="sect-link" href="#/activity">All activity<ChevronRight size={14} /></a></div>
