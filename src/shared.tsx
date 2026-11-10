@@ -164,7 +164,7 @@ export function AttnRow({ a }: { a: Attn }) {
 
 /** Tabs shared by the "Bills & Budget" section. */
 export function SectionTabs({ active }: { active: 'bills' | 'budget' | 'income' | 'calendar' | 'forecast' }) {
-  const items = [['bills', 'Bills', '/plan/bills'], ['budget', 'Budget', '/plan/budget'], ['income', 'Income', '/plan/income'], ['calendar', 'Calendar', '/plan/calendar']] as const;
+  const items = [['bills', 'Bills', '/bills'], ['budget', 'Budget', '/budget'], ['income', 'Income', '/bills?tab=income'], ['calendar', 'Calendar', '/bills?view=calendar']] as const;
   return (
     <nav className="subtabs" aria-label="Bills and budget sections">
       {items.map(([k, l, to]) => <a key={k} href={`#${to}`} aria-current={active === k ? 'page' : undefined}>{l}</a>)}

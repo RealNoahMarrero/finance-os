@@ -28,7 +28,7 @@ function UtilBar({ pct, level }: { pct: number | null; level: UtilLevel }) {
   return <div className={cn('bar', barTone(level))} role="img" aria-label={pct == null ? 'Utilization unavailable' : `Utilization ${pctText(pct)}`}><i style={{ width: `${Math.min(100, pct ?? 0)}%` }} /></div>;
 }
 
-export function Credit() {
+export function Credit({ embedded }: { embedded?: boolean } = {}) {
   const { data, openModal } = useStore();
   const credit = data.credit;
   const rows = useMemo(() => cardRows(data, credit), [data, credit]);
@@ -39,9 +39,11 @@ export function Credit() {
   const latest = sRows[0] ?? null;
 
   return (
-    <div className="page" id="credit-page">
-      <PageHead title="Credit" sub="Scores you enter by hand · utilization from your credit-card accounts"
-        actions={<button className="btn primary" onClick={() => openModal({ type: 'credit-score' })}><Plus />Add score</button>} />
+    <div className={embedded ? '' : 'page'} id="credit-page">
+      {embedded
+        ? <div className="row between" style={{ marginBottom: 14 }}><div className="small muted">Scores you enter by hand · utilization from your credit-card accounts</div><button className="btn primary" onClick={() => openModal({ type: 'credit-score' })}><Plus />Add score</button></div>
+        : <PageHead title="Credit" sub="Scores you enter by hand · utilization from your credit-card accounts"
+        actions={<button className="btn primary" onClick={() => openModal({ type: 'credit-score' })}><Plus />Add score</button>} />}
       {!credit.ready && <div style={{ marginBottom: 16 }}><Callout tone="warn">Credit tracking isn’t set up in the database yet, so scores can’t be saved. Everything else in Finances is unaffected.</Callout></div>}
 
       {/* ── Overview ── */}

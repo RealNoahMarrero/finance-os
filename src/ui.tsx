@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import {
   House, Car, GraduationCap, Droplets, Zap, Wifi, Smartphone, ShieldCheck, Tv, ShoppingBasket, Fuel, Wrench, HeartPulse, Utensils, Film,
   ShoppingBag, Gift, Umbrella, Hammer, Plane, CreditCard, Landmark, Banknote, Wallet, PiggyBank, X, Check, Info, TriangleAlert, Sun, Moon, Monitor,
@@ -52,8 +52,24 @@ export function MoneyLegend() {
 }
 
 export function Sheet({ title, onClose, children, footer, wide, sub }: { title: ReactNode; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; sub?: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Focus moves into the dialog on open, is kept inside while it is open (Tab wraps), and returns to what opened it on close.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const opener = document.activeElement as HTMLElement | null;
+    const first = ref.current?.querySelector<HTMLElement>('input:not([type=hidden]), textarea, select');
+    if (first) first.focus(); else ref.current?.focus();
+    return () => { if (opener && document.contains(opener)) opener.focus(); };
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { onClose(); return; }
+      if (e.key !== 'Tab' || !ref.current) return;
+      const f = [...ref.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])')].filter((x) => x.offsetParent !== null);
+      if (!f.length) return;
+      const a = document.activeElement as HTMLElement;
+      if (e.shiftKey && (a === f[0] || !ref.current.contains(a))) { e.preventDefault(); f[f.length - 1].focus(); }
+      else if (!e.shiftKey && (a === f[f.length - 1] || !ref.current.contains(a))) { e.preventDefault(); f[0].focus(); }
+    };
     document.addEventListener('keydown', onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -61,7 +77,7 @@ export function Sheet({ title, onClose, children, footer, wide, sub }: { title: 
   }, [onClose]);
   return (
     <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className={cn('sheet', wide && 'wide')} role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined}>
+      <div ref={ref} tabIndex={-1} className={cn('sheet', wide && 'wide')} role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined}>
         <div className="grab" />
         <div className="sheet-head">
           <div>

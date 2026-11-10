@@ -44,7 +44,7 @@ function BillCard({ o }: { o: BillOcc }) {
     </button>
   );
 }
-function AllBills() {
+export function AllBills() {
   const { data, openModal } = useStore();
   const rows = [...data.bills].sort((a, b) => a.name.localeCompare(b.name));
   return (
@@ -60,7 +60,7 @@ function AllBills() {
   );
 }
 /** Retired bills. Everything about them is kept; Restore puts one back on its next unpaid due date. */
-function ArchivedBills() {
+export function ArchivedBills() {
   const { data, restoreBill, toast } = useStore();
   const [busy, setBusy] = useState('');
   if (data.archivedBills.length === 0) return null;
@@ -118,7 +118,7 @@ function BillsTab() {
 }
 
 // ── Income ──────────────────────────────────────────────────
-function IncomeTab() {
+export function IncomeTab() {
   const { data, openModal } = useStore();
   const [days, setDays] = useState(60);
   const occ = incomeOccurrences(data, addDays(data.today, 1), addDays(data.today, days));
@@ -186,7 +186,7 @@ export function cashEvents(d: DataState, from: string, to: string) {
   }
   return ev.sort((a, b) => a.date.localeCompare(b.date));
 }
-function ForecastTab() {
+export function ForecastTab() {
   const { data } = useStore();
   const [horizon, setHorizon] = useState(90);
   const [scenario, setScenario] = useState<Scenario>('both');
@@ -196,6 +196,7 @@ function ForecastTab() {
   const events = cashEvents(data, addDays(data.today, 1), addDays(data.today, 35));
   const balAt = (date: string, s: 'conservative' | 'optimistic') => f[s][Math.max(0, diffDays(date, data.today))]?.balance ?? 0;
   const firstShort = f.conservative.slice(0, horizon + 1).find((p) => p.balance < 0);
+  const trigger = firstShort ? [...cashEvents(data, addDays(data.today, 1), firstShort.date)].filter((e) => e.amount < 0).pop() : undefined;
   return (
     <div className="fade-in">
       <div className="row between" style={{ marginBottom: 14, gap: 12, flexWrap: 'wrap' }}>
@@ -225,7 +226,7 @@ function ForecastTab() {
 
       {firstShort ? (
         <div style={{ marginBottom: 16 }}><Callout tone="warn" icon={<TrendingDown />}>
-          <b>Possible shortfall from {fmtDate(firstShort.date)}.</b> Counting only guaranteed income, checking &amp; cash would go below $0 — for example rent leaves on Dec 1 before the next paycheck lands. Moving a bill, trimming a flexible category, or confirming an anticipated payment would close the gap. This is a projection, not a balance.</Callout></div>
+          <b>Possible shortfall from {fmtDate(firstShort.date)}.</b> Counting only guaranteed income, checking &amp; cash would go below $0{trigger ? <> — {trigger.label} ({money(-trigger.amount, { cents: false })}) leaves on {fmtDate(trigger.date)}</> : ''}. Moving a bill, trimming a flexible category, or confirming an anticipated payment would close the gap. This is a projection, not a balance.</Callout></div>
       ) : <div style={{ marginBottom: 16 }}><Callout icon={<Info />}>No shortfall projected in this window.</Callout></div>}
 
       <section className="card" style={{ overflow: 'hidden' }}>
@@ -261,7 +262,7 @@ function PlannedItems() {
 }
 
 // ── Calendar ────────────────────────────────────────────────
-function CalendarTab() {
+export function CalendarTab() {
   const { data, openModal } = useStore();
   const [month, setMonth] = useState(monthKey(data.today));
   const [sel, setSel] = useState(data.today);

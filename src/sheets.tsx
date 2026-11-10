@@ -472,7 +472,7 @@ function EnvSelect({ items, value, onPick, label, testid, disabledIds, placehold
 
 /** Move Money: From → To → Amount. One dialog for every entry point (Cover, Assign, Move). Budget allocations only — never touches bank balances. */
 export function MoveSheet({ from: f0, to: t0, amount: a0 }: { from?: string; to?: string; amount?: number }) {
-  const { data, closeModal, assign, moveMoney, toast } = useStore();
+  const { data, closeModal, assign, moveMoney, toast, openModal } = useStore();
   const rta = readyToAssign(data);
   const envs = allEnvelopes(data).filter((e) => !e.cat.hidden);
   const groupName = (gid: string) => data.groups.find((g) => g.id === gid)?.name ?? '';
@@ -555,6 +555,7 @@ export function MoveSheet({ from: f0, to: t0, amount: a0 }: { from?: string; to?
           </div>
         )}
         <button type="submit" style={{ display: 'none' }} aria-hidden="true" tabIndex={-1} />
+        <button type="button" className="btn ghost sm" style={{ alignSelf: 'flex-start' }} onClick={() => openModal({ type: 'assign' })}>Assign to several categories at once…</button>
       </form>
     </Sheet>
   );
@@ -1247,11 +1248,10 @@ export function MenuSheet() {
   );
   return (
     <Sheet title="More" onClose={closeModal}>
-      <div className="list">{link('/plan/budget', 'Budget (optional)', <Wallet />)}{link('/accounts', 'Accounts & reconciliation', <Landmark />)}{link('/credit', 'Credit & utilization', <Gauge />)}{link('/insights', 'Insights', <Eye />)}
+      <div className="list">{link('/accounts', 'Accounts', <Landmark />)}{link('/insights', 'Insights', <Eye />)}{link('/insights/forecast', 'Forecast', <Gauge />)}{link('/insights/credit', 'Credit', <Gauge />)}{link('/settings', 'Settings', <Wallet />)}
         <button className="li hover" style={{ padding: '14px 4px' }} onClick={() => openModal({ type: 'category-add' })}><span className="li-ico"><Plus /></span><span className="li-title grow">New category or bill</span><ArrowRight size={16} className="muted" /></button>
         <button className="li hover" style={{ padding: '14px 4px' }} onClick={() => openModal({ type: 'cutover' })}><span className="li-ico"><Scale /></span><span className="li-title grow">Set opening balances</span><ArrowRight size={16} className="muted" /></button></div>
       <div style={{ marginTop: 18 }}><div className="label" style={{ marginBottom: 8 }}>Appearance</div><ThemeSwitch theme={theme} setTheme={setTheme} /></div>
-      <div style={{ marginTop: 18 }}><AccountFoot /></div>
     </Sheet>
   );
 }

@@ -27,7 +27,7 @@ export interface Category {
 export interface Txn {
   id: string; date: string; payee: string; amount: number; type: 'expense' | 'income' | 'transfer';
   accountId: string; toAccountId?: string; categoryId?: string; splits?: { categoryId: string; amount: number }[];
-  notes?: string; adjustment?: boolean; billId?: string; incomeId?: string;
+  notes?: string; adjustment?: boolean; billId?: string; incomeId?: string; scheduled?: boolean; // scheduled = future-dated and not yet posted to balances
 }
 export type BillPeriod = 'Monthly' | 'Weekly' | 'Bi-Weekly' | 'Yearly';
 export interface Bill {
@@ -158,16 +158,31 @@ export function billOccurrences(d: DataState, from: string, to: string): BillOcc
         cur = nextDue(b, cur);
       }
     }
+    // One envelope pays one bill: its available money is shared out across the unpaid occurrences, oldest first, never counted twice.
+    dates.sort((x, y) => x.date.localeCompare(y.date));
+    const env = b.categoryId ? envelope(d, b.categoryId, thisMonth) : null;
+    let pool = env ? Math.max(0, env.avail) : 0;
     for (const { date, paid } of dates) {
       const key = date;
-      const env = b.categoryId ? envelope(d, b.categoryId, thisMonth) : null;
       const future = monthKey(date) > thisMonth;
-      const funded = !env ? b.amount : future ? 0 : Math.max(0, Math.min(b.amount, env.avail));
+      let funded = !env ? b.amount : future ? 0 : Math.min(b.amount, pool);
+      if (env && !paid && !future) pool -= funded;
       const status: BillOcc['status'] = paid ? 'paid' : date < d.today ? 'overdue' : diffDays(date, d.today) <= 3 ? 'due' : 'upcoming';
       out.push({ bill: b, date, key, paid, future, status, funded: paid ? b.amount : funded, short: paid || future ? 0 : Math.max(0, b.amount - funded) });
     }
   }
   return out.sort((a, b) => a.date.localeCompare(b.date) || a.bill.name.localeCompare(b.bill.name));
+}
+/** One entry per bill for display: its oldest unpaid occurrence, how many are overdue, and the rest. */
+export interface BillGroup { bill: Bill; occs: BillOcc[]; next: BillOcc; missed: number; total: number }
+export function groupBills(occs: BillOcc[]): BillGroup[] {
+  const by = new Map<string, BillOcc[]>();
+  for (const o of occs.filter((x) => !x.paid)) { if (!by.has(o.bill.id)) by.set(o.bill.id, []); by.get(o.bill.id)!.push(o); }
+  return [...by.values()].map((list) => {
+    list.sort((a, b) => a.date.localeCompare(b.date));
+    const missed = list.filter((o) => o.status === 'overdue').length;
+    return { bill: list[0].bill, occs: list, next: list[0], missed, total: list.reduce((n, o) => n + (o.status === 'overdue' ? o.bill.amount : 0), 0) };
+  }).sort((a, b) => a.next.date.localeCompare(b.next.date) || a.bill.name.localeCompare(b.bill.name));
 }
 export const upcomingBills = (d: DataState, days = 21) => {
   const from = addDays(d.today, -14);

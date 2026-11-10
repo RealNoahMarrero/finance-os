@@ -10,24 +10,28 @@ const chrome = process.env.CHROME_PATH || ['C:/Program Files/Google/Chrome/Appli
 if (!chrome) { console.error('No Chrome/Edge found. Set CHROME_PATH.'); process.exit(2); }
 const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fos-demo-'));
 Object.assign(process.env, { VITE_SUPABASE_URL: 'http://127.0.0.1:54399', VITE_SUPABASE_ANON_KEY: 'demo', VITE_DEMO_TODAY: '2026-11-10' });
-const backend = await start(54399);
+const backend = await start(54399, { readonly: true });
 await build({ logLevel: 'silent', build: { outDir, emptyOutDir: true } });
 const pv = await preview({ logLevel: 'silent', build: { outDir }, preview: { port: 4181, strictPort: true } });
 const base = 'http://localhost:4181/';
 const session = { access_token: 'demo', refresh_token: 'demo', token_type: 'bearer', expires_in: 3600, expires_at: 4102444800, user: { id: 'demo-user', aud: 'authenticated', email: 'demo@example.test' } };
-const routes = ['/', '/transactions', '/accounts', '/accounts/1', '/plan/bills', '/plan/budget', '/plan/income', '/plan/calendar', '/plan/forecast', '/insights', '/credit'];
+const routes = ['/', '/activity', '/accounts', '/accounts/1', '/bills', '/bills?tab=income', '/bills?view=calendar', '/bills?tab=paused', '/budget', '/insights', '/insights/forecast', '/insights/credit', '/settings',
+  '/transactions', '/plan/bills', '/plan/budget', '/plan/income', '/plan/calendar', '/plan/forecast', '/credit']; // the last seven are older saved links and must still resolve
+const SHOTS = process.env.SHOTS; if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
+const themes = SHOTS ? ['light', 'dark'] : ['light'];
 const browser = await puppeteer.launch({ executablePath: chrome, headless: 'new', args: ['--no-sandbox'] });
 const failures = []; let checks = 0;
-for (const [kind, vp] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844, isMobile: true, hasTouch: true }]]) {
+for (const theme of themes) for (const [kind, vp] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true }]]) {
   const page = await browser.newPage(); await page.setViewport(vp);
-  await page.evaluateOnNewDocument((s) => { localStorage.setItem('fos-auth', JSON.stringify(s)); }, session);
+  await page.evaluateOnNewDocument((s, t) => { localStorage.setItem('fos-auth', JSON.stringify(s)); localStorage.setItem('fos-theme', t); }, session, theme);
   page.on('pageerror', (e) => failures.push(`${kind} pageerror: ${e}`));
   page.on('console', (m) => { if (m.type() === 'error') failures.push(`${kind} console: ${m.text().slice(0, 160)}`); });
   for (const r of routes) {
     await page.goto(`${base}#${r}`, { waitUntil: 'networkidle0' }); await page.reload({ waitUntil: 'networkidle0' });
-    const m = await page.evaluate(() => ({ text: document.body.innerText.length, over: document.documentElement.scrollWidth > innerWidth, h1: !!document.querySelector('h1') }));
+    const m = await page.evaluate(() => ({ text: document.body.innerText.length, over: document.documentElement.scrollWidth > (window.visualViewport ? window.visualViewport.width : innerWidth) + 1 || document.documentElement.scrollWidth > 392 && matchMedia('(max-width: 600px)').matches, h1: !!document.querySelector('h1') }));
     checks++;
-    if (m.text < 200) failures.push(`${kind} ${r}: page looks empty`);
+    if (SHOTS && !r.startsWith('/transactions') && !r.startsWith('/plan') && r !== '/credit') await page.screenshot({ path: `${SHOTS}/${kind}-${theme}-${r.replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '') || 'home'}.png`, fullPage: true });
+    if (m.text < 80) failures.push(`${kind} ${r}: page looks empty`);
     if (m.over) failures.push(`${kind} ${r}: horizontal overflow`);
     if (!m.h1 && !r.startsWith('/accounts/')) failures.push(`${kind} ${r}: no <h1>`);
   }

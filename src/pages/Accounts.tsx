@@ -64,7 +64,7 @@ export function Accounts() {
       )}
       <div className="grid g12" style={{ marginBottom: 20 }}>
         <section className="card pad" style={{ gridColumn: '1 / span 7' }} aria-label="Net worth">
-          <div className="sect-head"><div><h2 className="sect-title">Net worth <StatusPill status="muted">Recorded</StatusPill></h2><div className="small muted">Last 12 months</div></div>
+          <div className="sect-head"><div><h2 className="sect-title">Net worth <StatusPill status="muted">Estimate</StatusPill></h2><div className="small muted">Last 12 months · worked back from today’s balances</div></div>
             <div className="right"><div className="amt-xl num"><Money v={nw} cents={false} /></div><div className={cn('small', nw - series[0].value >= 0 ? 'pos' : 'neg')} style={{ fontWeight: 600 }}>{money(nw - series[0].value, { sign: true, cents: false })} in a year</div></div></div>
           <AreaLine series={series} height={190} label="Net worth over the last twelve months" />
           <div className="grid g12 keep2" style={{ marginTop: 12, gap: 12 }}>
@@ -112,7 +112,7 @@ export function Accounts() {
 
       {data.debts.length > 0 && (
         <>
-          <h2 className="eyebrow" style={{ margin: '0 0 10px' }}>Loans</h2>
+          <h2 className="eyebrow" style={{ margin: '0 0 10px' }}>Debts &amp; loans</h2>
           <section className="card" style={{ overflow: 'hidden' }}>
             <div className="list">
               {data.debts.map((d) => {

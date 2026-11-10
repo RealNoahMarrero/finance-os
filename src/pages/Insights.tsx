@@ -4,12 +4,14 @@ import { useStore } from '../store';
 import { allEnvelopes, categorySpend, liquidTotal, monthlyFlow, netWorthSeries, usualSpend, upcomingBills } from '../data';
 import { addDays, cn, money, monthKey, monthLabel, sum } from '../lib';
 import { Empty, Money, Kind } from '../ui';
+import { ForecastTab } from './Plan';
+import { Credit } from './Credit';
 import { AreaLine, FlowBars } from '../charts';
 import { PageHead } from './../shared';
 import { buildInsights } from './Overview';
 import { cardRows, totals, scoreRows } from '../credit';
 
-export function Insights() {
+export function Insights({ tab = 'overview' }: { tab?: 'overview' | 'forecast' | 'credit' }) {
   const { data } = useStore();
   const flow = useMemo(() => monthlyFlow(data), [data]);
   const nw = useMemo(() => netWorthSeries(data), [data]);
@@ -17,6 +19,15 @@ export function Insights() {
   const insights = useMemo(() => buildInsights(data), [data]);
   const cr = useMemo(() => { const rows = cardRows(data, data.credit); return { n: rows.length, t: totals(rows), s: scoreRows(data.credit.scores)[0] }; }, [data]);
 
+  const tabs = (
+    <nav className="view-tabs" aria-label="Insights views">
+      <a href="#/insights" aria-current={tab === 'overview' ? 'page' : undefined}>Overview</a>
+      <a href="#/insights/forecast" aria-current={tab === 'forecast' ? 'page' : undefined}>Forecast</a>
+      <a href="#/insights/credit" aria-current={tab === 'credit' ? 'page' : undefined}>Credit</a>
+    </nav>
+  );
+  if (tab === 'forecast') return <div className="page"><PageHead title="Insights" sub="Forecast — a projection from the bills and income you’ve entered" />{tabs}{data.accounts.length ? <ForecastTab /> : <div className="card pad small muted">Add an account to see a forecast.</div>}</div>;
+  if (tab === 'credit') return <div className="page"><PageHead title="Insights" sub="Credit" />{tabs}<Credit embedded /></div>;
   if (data.txns.length === 0) {
     return (
       <div className="page"><PageHead title="Insights" sub="Trends, patterns and financial health" />
@@ -30,7 +41,7 @@ export function Insights() {
   const over = envs.filter((e) => e.env.avail < 0);
   const adherence = Math.round(((envs.length - over.length) / Math.max(1, envs.length)) * 100);
   const avgExp = sum(flow.filter((m) => !m.partial), (m) => m.expense) / Math.max(1, flow.filter((m) => !m.partial).length);
-  const runway = Math.round(liquidTotal(data) / (avgExp / 30));
+  const runway = avgExp > 0 ? Math.round(liquidTotal(data) / (avgExp / 30)) : null;
   const occ = upcomingBills(data, 40);
   const overdue = occ.filter((o) => o.status === 'overdue').length;
   const totalCat = sum(cats, (c) => c.spent) || 1;
@@ -45,7 +56,7 @@ export function Insights() {
   const wmax = Math.max(...weeks.map((w) => w.v), 1);
 
   const health = [
-    { l: 'Cash runway', v: `${runway} days`, s: 'at your usual monthly spending', pct: Math.min(100, (runway / 90) * 100), c: 'var(--actual)' },
+    { l: 'Cash runway', v: runway == null ? '—' : `${runway} days`, s: runway == null ? 'not enough spending history yet' : 'at your usual monthly spending', pct: runway == null ? 0 : Math.min(100, (runway / 90) * 100), c: 'var(--actual)' },
     { l: 'Savings rate', v: `${savingsRate}%`, s: 'of last month’s income kept', pct: Math.max(0, Math.min(100, savingsRate * 4)), c: 'var(--actual)' },
     { l: 'Budget on track', v: `${adherence}%`, s: over.length ? `${over.length} envelope${over.length > 1 ? 's' : ''} overspent` : 'no envelopes overspent', pct: adherence, c: 'var(--planned)' },
     { l: 'Bills handled', v: overdue ? `${overdue} overdue` : 'All on time', s: 'this month', pct: overdue ? 70 : 100, c: overdue ? 'var(--warn)' : 'var(--actual)' },
@@ -54,6 +65,7 @@ export function Insights() {
   return (
     <div className="page">
       <PageHead title="Insights" sub={`${monthLabel(monthKey(data.today), true)} · what your history says`} />
+      {tabs}
 
       <div className="grid g12" style={{ marginBottom: 16, gap: 12 }}>
         {health.map((h) => (
@@ -70,10 +82,10 @@ export function Insights() {
         <section className="card pad" style={{ gridColumn: 'span 7' }}>
           <div className="sect-head"><h2 className="sect-title">Income vs spending</h2><Kind kind="actual" label="Actual" /></div>
           <FlowBars months={flow} />
-          <div className="xs muted" style={{ marginTop: 8 }}><Info size={12} style={{ verticalAlign: -2 }} /> Older months are imported summaries from before your fresh start. The current month is still in progress.</div>
+          <div className="xs muted" style={{ marginTop: 8 }}><Info size={12} style={{ verticalAlign: -2 }} /> The current month is still in progress.</div>
         </section>
         <section className="card pad" style={{ gridColumn: 'span 5' }}>
-          <div className="sect-head"><h2 className="sect-title">Net worth</h2><span className="small muted">12 months</span></div>
+          <div className="sect-head"><h2 className="sect-title">Net worth</h2><span className="small muted">12 months · estimate</span></div>
           <div className="amt-xl num" style={{ marginBottom: 6 }}><Money v={nw[nw.length - 1].value} cents={false} /></div>
           <AreaLine series={nw} label="Net worth" height={190} />
         </section>
@@ -87,7 +99,7 @@ export function Insights() {
               const usual = usualSpend(data, c.cat.id);
               const hi = usual > 0 && c.spent > usual * 1.1;
               return (
-                <a key={c.cat.id} href={`#/transactions?cat=${c.cat.id}`} className="cat-row">
+                <a key={c.cat.id} href={`#/activity?cat=${c.cat.id}`} className="cat-row">
                   <div className="row between small" style={{ marginBottom: 5 }}>
                     <span style={{ fontWeight: 560 }}>{c.cat.name}</span>
                     <span className="num">{money(c.spent, { cents: false })}<span className="muted"> · {Math.round((c.spent / totalCat) * 100)}%</span></span>
@@ -114,19 +126,6 @@ export function Insights() {
           </div>
           <div className="xs muted" style={{ marginTop: 8, textAlign: 'center' }}>Dollars per week · latest week highlighted</div>
         </section>
-      </div>
-
-      <div className="ov-cols" style={{ marginTop: 0, marginBottom: 16 }}>
-        <a href="#/credit" className="card pad" style={{ display: 'block' }} aria-label="Credit summary" data-testid="insights-credit">
-          <div className="eyebrow">Credit</div>
-          <div className="small" style={{ marginTop: 4 }}>{cr.n > 0 ? (cr.t.pct != null ? <>Utilization <b className="num">{cr.t.pct.toFixed(1).replace(/\.0$/, '')}%</b> across {cr.t.eligibleCards} {cr.t.eligibleCards === 1 ? 'card' : 'cards'} (estimate from current balances)</> : 'Add a credit limit to see utilization') : 'Card utilization and scores you enter yourself'}{cr.s ? <> · latest score <b className="num">{cr.s.score}</b> <span className="muted">({cr.s.bureau}, {cr.s.model})</span></> : ''}</div>
-          <div className="small muted" style={{ marginTop: 8 }}>Open Credit →</div>
-        </a>
-        <a href="#/plan/forecast" className="card pad" style={{ display: 'block' }} aria-label="Forecast" data-testid="insights-forecast">
-          <div className="eyebrow">Forecast</div>
-          <div className="small" style={{ marginTop: 4 }}>A look at the next 30–365 days based on bills and income you’ve entered. A projection, not a promise.</div>
-          <div className="small muted" style={{ marginTop: 8 }}>Open Forecast →</div>
-        </a>
       </div>
 
       <section className="card" style={{ overflow: 'hidden' }}>
