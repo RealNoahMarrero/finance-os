@@ -1,134 +1,69 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight, Landmark, Pencil, Plus, Scale } from 'lucide-react';
 import { useStore } from '../store';
-import { balanceSeries, billOccurrences, cardsOwed, liquidTotal, loansOwed, netWorth, netWorthSeries, staleness, type Account } from '../data';
-import { addDays, cn, compact, fmtDate, money, plural, sum } from '../lib';
+import { balanceSeries, billOccurrences, cardsOwed, liquidTotal, loansOwed, netWorth, staleness, type Account } from '../data';
+import { addDays, cn, compact, fmtDate, money } from '../lib';
 import { AccountIcon, Callout, Empty, Money, StatusPill } from '../ui';
-import { AreaLine, Spark } from '../charts';
-import { BillRow, PageHead, TxnRow, txnDisplayAmount } from '../shared';
+import { Spark } from '../charts';
+import { PageHead, TxnRow, txnDisplayAmount } from '../shared';
 
 function StaleBadge({ a, today }: { a: Account; today: string }) {
   const s = staleness(a, today);
-  if (s.level === 'never') return <StatusPill status="late">Not verified yet</StatusPill>;
+  if (s.level === 'never') return <StatusPill status="late">Not verified</StatusPill>;
   if (s.level === 'fresh') return <StatusPill status="ok">{s.days === 0 ? 'Reconciled today' : `Reconciled ${s.days}d ago`}</StatusPill>;
   if (s.level === 'aging') return <StatusPill status="warn">Check in · {s.days}d</StatusPill>;
-  return <StatusPill status="late">May be stale · {s.days}d</StatusPill>;
+  return <StatusPill status="late">Check balance · {s.days}d</StatusPill>;
 }
-
 const typeLabel = (a: Account) => (a.type === 'credit' ? 'Credit card' : a.type[0].toUpperCase() + a.type.slice(1));
 
 export function Accounts() {
   const { data, openModal } = useStore();
   if (data.accounts.length === 0) {
     return (
-      <div className="page"><PageHead title="Accounts" sub="Recorded balances you reconcile yourself" />
-        <div className="card"><Empty icon={<Landmark />} title="No accounts yet" text="Add checking, savings, cash or a credit card. You enter the balance, and reconcile it against your bank whenever you like." action={<button className="btn primary" onClick={() => openModal({ type: 'account-add' })}><Plus />Add an account</button>} /></div></div>
+      <div className="page"><PageHead title="Accounts" />
+        <div className="card"><Empty icon={<Landmark />} title="No accounts yet" text="Add checking, savings, cash or a credit card." action={<button className="btn primary" onClick={() => openModal({ type: 'account-add' })}><Plus />Add an account</button>} /></div></div>
     );
   }
   const cash = data.accounts.filter((a) => a.type !== 'credit');
   const cards = data.accounts.filter((a) => a.type === 'credit');
-  const nw = netWorth(data);
-  const series = netWorthSeries(data);
-  const assets = liquidTotal(data), owedCards = cardsOwed(data), owedLoans = loansOwed(data);
-
-  const card = (a: Account) => {
-    const credit = a.type === 'credit';
-    const series = balanceSeries(data, a.id, 30);
-    const util = credit && a.limit ? a.balance / a.limit : 0;
+  const unverified = data.accounts.filter((a) => !a.baseline);
+  const row = (a: Account) => {
+    const credit = a.type === 'credit'; const util = credit && a.limit ? a.balance / a.limit : 0;
     return (
-      <button key={a.id} className="card acct-card" onClick={() => (location.hash = `/accounts/${a.id}`)} aria-label={`${a.name}, ${money(a.balance)}`}>
-        <div className="row between">
-          <div className="row gap12"><div className="li-ico"><AccountIcon type={a.type} /></div>
-            <div><div className="li-title">{a.name}</div><div className="li-sub">{typeLabel(a)}</div></div></div>
-          <ChevronRight size={16} className="muted" />
-        </div>
-        <div className="row between" style={{ alignItems: 'flex-end' }}>
-          <div><div className="eyebrow">{credit ? 'Owed' : 'Recorded balance'}</div><div className="amt-xl num" style={{ marginTop: 4 }}><Money v={a.balance} /></div></div>
-          <Spark values={series} width={92} height={36} color={credit ? 'var(--ink-3)' : 'var(--actual)'} />
-        </div>
-        {credit && a.limit ? (
-          <div><div className="bar actual" style={{ height: 6 }}><i style={{ width: `${Math.min(100, util * 100)}%`, background: util > 0.5 ? 'var(--warn)' : 'var(--actual)' }} /></div>
-            <div className="row between xs muted" style={{ marginTop: 5 }}><span>{Math.round(util * 100)}% of {compact(a.limit)} limit</span><span className="num">{money(a.limit - a.balance, { cents: false })} available</span></div></div>
-        ) : null}
-        <StaleBadge a={a} today={data.today} />
-      </button>
+      <a key={a.id} className="rowx" href={`#/accounts/${a.id}`} aria-label={`${a.name}, ${money(a.balance)}`}>
+        <div className="li-ico"><AccountIcon type={a.type} /></div>
+        <div className="grow"><div className="li-title">{a.name}</div>
+          <div className="li-sub">{credit && a.limit ? `${Math.round(util * 100)}% of ${compact(a.limit)} limit · ${money(a.limit - a.balance, { cents: false })} available` : typeLabel(a)}</div></div>
+        <div className="d-only"><StaleBadge a={a} today={data.today} /></div>
+        <div className="right"><div className="amt-md num"><Money v={a.balance} /></div><div className="xs muted">{credit ? 'owed' : ''}</div></div>
+        <ChevronRight size={16} className="muted" />
+      </a>
     );
   };
-
   return (
     <div className="page">
-      <PageHead title="Accounts" sub="Balances are recorded by you — reconcile to keep them trustworthy"
-        actions={<><button className="btn desktop-only" onClick={() => openModal({ type: 'cutover' })}><Scale />Opening balances</button><button className="btn desktop-only" onClick={() => openModal({ type: 'account-add' })}><Plus />Add account</button></>} />
-      {data.accounts.some((a) => !a.baseline) && (
-        <div style={{ marginBottom: 16 }}><div className="card pad setup-banner"><div><div className="li-title">Set your opening balances</div><div className="small muted" style={{ maxWidth: 560 }}>{data.accounts.filter((a) => !a.baseline).length} of {data.accounts.length} accounts aren’t verified yet. Pick a cutover date and enter the real balance for each — all your past transactions stay saved either way.</div></div><button className="btn primary" onClick={() => openModal({ type: 'cutover' })}><Scale />Set opening balances</button></div></div>
-      )}
-      <div className="grid g12" style={{ marginBottom: 20 }}>
-        <section className="card pad" style={{ gridColumn: '1 / span 7' }} aria-label="Net worth">
-          <div className="sect-head"><div><h2 className="sect-title">Net worth <StatusPill status="muted">Estimate</StatusPill></h2><div className="small muted">Last 12 months · worked back from today’s balances</div></div>
-            <div className="right"><div className="amt-xl num"><Money v={nw} cents={false} /></div><div className={cn('small', nw - series[0].value >= 0 ? 'pos' : 'neg')} style={{ fontWeight: 600 }}>{money(nw - series[0].value, { sign: true, cents: false })} in a year</div></div></div>
-          <AreaLine series={series} height={190} label="Net worth over the last twelve months" />
-          <div className="grid g12 keep2" style={{ marginTop: 12, gap: 12 }}>
-            {[['Cash & savings', assets, ''], ['Credit cards', -owedCards, ''], ['Loans', -owedLoans, '']].map(([l, v]) => (
-              <div key={l as string} style={{ gridColumn: 'span 4' }}><div className="eyebrow">{l as string}</div><div className="amt-md num" style={{ marginTop: 3 }}><Money v={v as number} cents={false} /></div></div>
-            ))}
-          </div>
-        </section>
-        <section className="card" style={{ gridColumn: '8 / span 5' }} aria-label="Reconciliation status">
-          <div className="pad" style={{ paddingBottom: 6 }}><div className="sect-head" style={{ marginBottom: 0 }}><h2 className="sect-title"><Scale size={16} />Reconciliation</h2></div>
-            <p className="small muted" style={{ marginTop: 4 }}>How recently each balance was checked against your bank.</p></div>
-          <div className="list">
-            {[...data.accounts].sort((a, b) => (a.lastReconciled ?? '').localeCompare(b.lastReconciled ?? '')).map((a) => {
-              const s = staleness(a, data.today);
-              return (
-                <div className="li" key={a.id}>
-                  <span className="dot" style={{ background: s.level === 'fresh' ? 'var(--pos)' : s.level === 'aging' ? 'var(--warn)' : 'var(--neg)' }} />
-                  <div className="grow"><div className="li-title" style={{ fontSize: 13.5 }}>{a.name}</div><div className="li-sub" style={{ fontSize: 12 }}>{a.lastReconciled ? <>{s.days === 0 ? 'Today' : `${plural(s.days, 'day')} ago`} · {fmtDate(a.lastReconciled)}</> : 'Not verified — enter its real balance'}</div></div>
-                  <button className={cn('btn sm', !a.lastReconciled && 'primary')} onClick={() => openModal({ type: 'reconcile', id: a.id })}>{a.baseline ? 'Reconcile' : 'Set balance'}</button>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      </div>
-
-      <h2 className="eyebrow" style={{ margin: '0 0 10px' }}>Cash &amp; savings</h2>
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', marginBottom: 22 }}>{cash.map(card)}</div>
-      {cards.length > 0 && <><h2 className="eyebrow" style={{ margin: '0 0 10px' }}>Credit cards</h2>
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', marginBottom: 22 }}>{cards.map(card)}</div></>}
-
+      <PageHead title="Accounts" sub={`Cash & savings ${money(liquidTotal(data), { cents: false })} · owed ${money(cardsOwed(data) + loansOwed(data), { cents: false })} · net ${money(netWorth(data), { cents: false })}`}
+        actions={<><button className="btn" onClick={() => openModal({ type: 'cutover' })}><Scale />Opening balances</button><button className="btn primary" onClick={() => openModal({ type: 'account-add' })}><Plus />Add account</button></>} />
+      {unverified.length > 0 && <div className="mini-banner" style={{ marginBottom: 14 }}><span>{unverified.length} of {data.accounts.length} accounts aren’t verified yet.</span><button className="btn sm" onClick={() => openModal({ type: 'cutover' })}>Set opening balances</button></div>}
+      <div className="group-h"><h2>Cash &amp; savings</h2></div>
+      <div className="group">{cash.map(row)}</div>
+      {cards.length > 0 && <><div className="group-h"><h2>Credit cards</h2><a className="sect-link" href="#/insights/credit">Credit<ChevronRight size={14} /></a></div><div className="group">{cards.map(row)}</div></>}
+      {data.debts.length > 0 && (<>
+        <div className="group-h"><h2>Debts &amp; loans</h2></div>
+        <div className="group">{data.debts.map((d) => (
+          <div className="rowx" key={d.id}>
+            <div className="li-ico"><Landmark /></div>
+            <div className="grow"><div className="li-title">{d.name}</div><div className="li-sub">{d.payment > 0 ? `${money(d.payment, { cents: false })} payment` : 'No set payment'}{d.dueDay ? ` · due the ${d.dueDay}${['th', 'st', 'nd', 'rd'][d.dueDay % 10 > 3 || [11, 12, 13].includes(d.dueDay) ? 0 : d.dueDay % 10]}` : ''}</div></div>
+            <div className="amt-md num"><Money v={d.balance} /></div>
+            <button className="btn sm" aria-label={`Edit ${d.name}`} onClick={() => openModal({ type: 'category-edit', id: d.id })}>Edit</button>
+          </div>))}</div></>)}
       {data.allAccounts.some((x) => x.archived) && (
-        <details style={{ marginBottom: 22 }} data-testid="archived-accounts">
-          <summary className="eyebrow" style={{ cursor: 'pointer', margin: '0 0 10px' }}>Archived accounts ({data.allAccounts.filter((x) => x.archived).length})</summary>
-          <section className="card" style={{ overflow: 'hidden' }}><div className="list">
-            {data.allAccounts.filter((x) => x.archived).map((x) => (
-              <div className="li" key={x.id}><div className="li-ico"><AccountIcon type={x.type} /></div>
-                <div className="grow"><div className="li-title">{x.name}</div><div className="li-sub">{typeLabel(x)} · history kept</div></div>
-                <a className="btn sm" href={`#/accounts/${x.id}`}>History</a>
-                <button className="btn sm" onClick={() => openModal({ type: 'account-edit', id: x.id })}>Restore…</button></div>
-            ))}
-          </div></section>
+        <details style={{ marginTop: 18 }} data-testid="archived-accounts">
+          <summary className="group-h" style={{ cursor: 'pointer', paddingTop: 0 }}><h2>Archived accounts · {data.allAccounts.filter((x) => x.archived).length}</h2></summary>
+          <div className="group">{data.allAccounts.filter((x) => x.archived).map((x) => (
+            <div className="rowx" key={x.id}><div className="li-ico"><AccountIcon type={x.type} /></div><div className="grow"><div className="li-title">{x.name}</div><div className="li-sub">{typeLabel(x)} · history kept</div></div>
+              <a className="btn sm" href={`#/accounts/${x.id}`}>History</a><button className="btn sm" onClick={() => openModal({ type: 'account-edit', id: x.id })}>Restore…</button></div>))}</div>
         </details>
-      )}
-
-      {data.debts.length > 0 && (
-        <>
-          <h2 className="eyebrow" style={{ margin: '0 0 10px' }}>Debts &amp; loans</h2>
-          <section className="card" style={{ overflow: 'hidden' }}>
-            <div className="list">
-              {data.debts.map((d) => {
-                return (
-                  <div className="li" key={d.id} style={{ padding: '16px 20px', flexWrap: 'wrap' }}>
-                    <div className="li-ico"><Landmark /></div>
-                    <div className="grow" style={{ minWidth: 150 }}><div className="li-title">{d.name}</div><div className="li-sub">{d.payment > 0 ? `${money(d.payment)} payment` : 'No set payment'}{d.dueDay ? ` · due the ${d.dueDay}${['th','st','nd','rd'][d.dueDay % 10 > 3 || [11, 12, 13].includes(d.dueDay) ? 0 : d.dueDay % 10]}` : ''}</div></div>
-                    <div className="right" style={{ minWidth: 100 }}><div className="eyebrow">Balance</div><div className="amt-md num">{money(d.balance)}</div></div>
-                    <button className="btn sm" aria-label={`Edit ${d.name} debt`} onClick={() => openModal({ type: 'debt-edit', categoryId: d.id })}>Edit</button>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-          <p className="xs muted" style={{ marginTop: 8 }}>Balances owed drop when you confirm a payment on the matching bill with a transaction, and you can correct any balance with Edit. Simple records — no interest modeling.</p>
-        </>
       )}
     </div>
   );
@@ -145,81 +80,55 @@ export function AccountDetail({ id }: { id: string }) {
   const delta = s30[s30.length - 1] - s30[0];
   const st = staleness(a, data.today);
   const bills = billOccurrences(data, data.today, addDays(data.today, 30)).filter((o) => !o.paid && (o.bill.accountId === a.id || o.bill.toAccountId === a.id)).slice(0, 3);
-
   return (
     <div className="page">
-      <a href="#/accounts" className="sect-link" style={{ marginBottom: 14, display: 'inline-flex' }}><ChevronLeft size={16} />Accounts</a>
-      <div className="grid g12">
-        <section className="card hero" style={{ gridColumn: '1 / span 12' }}>
-          <div className="hero-top" style={{ alignItems: 'center' }}>
-            <div>
-              <div className="row gap12" style={{ marginBottom: 10 }}><div className="li-ico"><AccountIcon type={a.type} /></div>
-                <div><div className="li-title" style={{ fontSize: 17 }}>{a.name}</div><div className="li-sub">{typeLabel(a)}</div></div></div>
-              <div className="eyebrow row gap8">{credit ? 'Recorded amount owed' : 'Recorded balance'}<span className="pill"><i className="dot actual" style={{ width: 7, height: 7 }} />Actual</span></div>
-              <div className="amt-hero num" style={{ marginTop: 6 }}><Money v={a.balance} /></div>
-              <div className={cn('small', (credit ? delta <= 0 : delta >= 0) ? 'pos' : 'muted')} style={{ marginTop: 6, fontWeight: 600 }}>{money(delta, { sign: true })} in 30 days</div>
-            </div>
-            <div className="stack gap12" style={{ alignItems: 'flex-end' }}>
-              <Spark values={s30} width={200} height={64} color={credit ? 'var(--ink-3)' : 'var(--actual)'} />
-              <div className="row gap8" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                <button className="btn" data-testid="edit-account" onClick={() => openModal({ type: 'account-edit', id: a.id })}><Pencil />{a.archived ? 'Restore account…' : 'Edit account'}</button>
-                <button className="btn primary" onClick={() => openModal({ type: 'reconcile', id: a.id })}><Scale />Reconcile</button>
-              </div>
-            </div>
-          </div>
-        </section>
-        <section className="card" style={{ gridColumn: '1 / span 8', overflow: 'hidden' }}>
-          <div className="pad" style={{ paddingBottom: 6 }}><div className="sect-head" style={{ marginBottom: 0 }}><h2 className="sect-title">Transactions</h2><span className="small muted">{txns.length} in history</span></div></div>
-          <div className="list">{txns.slice(0, limit).map((t, i, arr) => (
+      <a href="#/accounts" className="sect-link" style={{ marginBottom: 12, display: 'inline-flex' }}><ChevronLeft size={16} />Accounts</a>
+      <div className="topbar">
+        <div><div className="eyebrow">{typeLabel(a)}{a.archived ? ' · archived' : ''}</div><h1 className="page-title" style={{ fontSize: 28 }}>{a.name}</h1></div>
+        <div className="top-actions"><button className="btn" data-testid="edit-account" onClick={() => openModal({ type: 'account-edit', id: a.id })}><Pencil />{a.archived ? 'Restore…' : 'Edit'}</button><button className="btn primary" onClick={() => openModal({ type: 'reconcile', id: a.id })}><Scale />Reconcile</button></div>
+      </div>
+      <div className="row gap24" style={{ alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 18 }}>
+        <div><div className="eyebrow">{credit ? 'Recorded amount owed' : 'Recorded balance'}</div><div className="amt-hero num"><Money v={a.balance} /></div>
+          <div className={cn('small', (credit ? delta <= 0 : delta >= 0) ? 'pos' : 'muted')} style={{ marginTop: 4, fontWeight: 560 }}>{money(delta, { sign: true })} in 30 days</div></div>
+        <Spark values={s30} width={180} height={54} color={credit ? 'var(--ink-3)' : 'var(--accent)'} />
+      </div>
+      <div className="split-layout">
+        <section>
+          <div className="group-h"><h2>Transactions</h2><span className="small muted">{txns.length}</span></div>
+          <div className="group">{txns.slice(0, limit).map((t, i, arr) => (
             <div key={t.id}>
-              {a.baseline && t.date <= a.baseline && (i === 0 || arr[i - 1].date > a.baseline) && <div className="xs muted" style={{ padding: '10px 20px', background: 'var(--surface-2)', borderTop: '1px solid var(--line)', borderBottom: '1px solid var(--line)' }}>History through {fmtDate(a.baseline, 'long')} — saved for reference; not counted in the balance (the opening balance replaces it).</div>}
-              <div style={a.baseline && t.date <= a.baseline ? { opacity: 0.62 } : undefined}><TxnRow t={t} pov={a.id} onOpen={() => openModal({ type: 'txn', mode: 'view', id: t.id })} /></div>
+              {a.baseline && t.date <= a.baseline && (i === 0 || arr[i - 1].date > a.baseline) && <div className="tx-day"><span>History through {fmtDate(a.baseline, 'long')} · not counted in the balance</span></div>}
+              <div style={a.baseline && t.date <= a.baseline ? { opacity: 0.6 } : undefined}><TxnRow t={t} pov={a.id} onOpen={() => openModal({ type: 'txn', mode: 'view', id: t.id })} /></div>
             </div>
           ))}</div>
           {txns.length > limit && <div style={{ padding: 14, textAlign: 'center' }}><button className="btn" onClick={() => setLimit(limit + 25)}>Show more</button></div>}
         </section>
-        <div className="stack gap16" style={{ gridColumn: '9 / span 4' }}>
-          <section className="card pad">
-            <div className="sect-head"><h2 className="sect-title">Reconciliation</h2><StaleBadge a={a} today={data.today} /></div>
-            <div className="kv"><span className="k">Last verified</span><span className="v">{a.lastReconciled ? fmtDate(a.lastReconciled, 'long') : 'Never'}</span></div>
-            {a.lastReconciled && <div className="kv"><span className="k">Days since</span><span className="v num">{st.days}</span></div>}
-            <div className="kv"><span className="k">Recorded</span><span className="v num">{money(a.balance)}</span></div>
+        <div className="rail">
+          <div><div className="group-h"><h2>Reconciliation</h2></div>
+            <div className="group">
+              <div className="rowx"><div className="grow li-sub">Status</div><StaleBadge a={a} today={data.today} /></div>
+              <div className="rowx"><div className="grow li-sub">Last verified</div><div className="small" style={{ fontWeight: 560 }}>{a.lastReconciled ? fmtDate(a.lastReconciled, 'long') : 'Never'}</div></div>
+              {a.baseline && <div className="rowx"><div className="grow li-sub">Opening balance</div><div className="small num" style={{ fontWeight: 560 }}>{money(a.openingBalance ?? 0)} · {fmtDate(a.baseline)}</div></div>}
+              {credit && a.limit && <div className="rowx"><div className="grow li-sub">Credit limit</div><div className="small num" style={{ fontWeight: 560 }}>{money(a.limit, { cents: false })}</div></div>}
+              {data.reconciliations.filter((r) => r.accountId === a.id).slice(0, 3).map((r) => <div className="rowx" key={r.id}><div className="grow li-sub">{fmtDate(r.date)}</div><div className="small num">{r.diff === 0 ? 'matched' : `adjusted ${money(r.diff, { sign: true })}`}</div></div>)}
+              {a.baseline && <div className="rowx" style={{ justifyContent: 'flex-end' }}><button className="btn sm" onClick={() => openModal({ type: 'cutover', id: a.id })}>Change opening balance</button></div>}
+            </div>
             {a.derived != null && a.derived !== a.balance && (() => {
               const diff = a.balance - a.derived;
               const day = a.baseline ? txns.filter((t) => t.date === a.baseline && !t.adjustment) : [];
               const eff = day.reduce((n, t) => n + (credit ? -1 : 1) * txnDisplayAmount(data, t, a.id).v, 0);
               const explained = day.length > 0 && eff === diff;
-              return (<div style={{ marginTop: 10 }} data-testid="drift-note"><Callout tone="warn">
-                {explained ? <>The recorded balance is <b className="num">{money(Math.abs(diff))}</b> {diff < 0 ? 'lower' : 'higher'} than opening balance + later transactions. That is exactly {day.length === 1 ? 'one transaction' : `${day.length} transactions`} dated on the opening-balance day itself ({day.map((t) => `${t.payee} ${money(t.amount)}`).join(', ')}): the recorded balance includes {day.length === 1 ? 'it' : 'them'}, the opening-balance check only counts later dates. If your bank balance on {fmtDate(a.baseline!)} already included {day.length === 1 ? 'it' : 'them'}, the recorded balance double-counts. Nothing was changed — reconcile against your bank to settle it.</>
-                  : <>Opening balance plus later transactions adds up to <b className="num">{money(a.derived)}</b>; the recorded balance is <b className="num">{money(a.balance)}</b> ({money(Math.abs(diff))} {diff < 0 ? 'lower' : 'higher'}). Nothing was changed — reconcile against your bank to see which is right.</>}
-              </Callout></div>);
+              return <div style={{ marginTop: 10 }} data-testid="drift-note"><Callout tone="warn">{explained
+                ? <>The recorded balance is <b className="num">{money(Math.abs(diff))}</b> {diff < 0 ? 'lower' : 'higher'} than the opening balance plus later transactions — exactly {day.length === 1 ? 'one transaction' : `${day.length} transactions`} dated on the opening-balance day ({day.map((t) => `${t.payee} ${money(t.amount)}`).join(', ')}). Reconcile against your bank to settle it.</>
+                : <>Opening balance plus later transactions is <b className="num">{money(a.derived)}</b>; the recorded balance is <b className="num">{money(a.balance)}</b>. Reconcile against your bank to see which is right.</>}</Callout></div>;
             })()}
-            {!a.baseline ? <div style={{ marginTop: 10 }}><Callout tone="warn">This balance hasn’t been checked against your bank yet. Set the real opening balance to anchor it.</Callout></div>
-              : st.level !== 'fresh' && <div style={{ marginTop: 10 }}><Callout tone={st.level === 'stale' ? 'warn' : undefined}>Balances are entered manually, so this may have drifted. A quick check takes under a minute.</Callout></div>}
-            {data.reconciliations.filter((r) => r.accountId === a.id).slice(0, 4).map((r) => (
-              <div className="kv" key={r.id}><span className="k">{fmtDate(r.date)}</span><span className="v num">{r.diff === 0 ? 'matched' : `adjusted ${money(r.diff, { sign: true })}`}</span></div>
-            ))}
-          </section>
-          <section className="card pad">
-            <div className="sect-head"><h2 className="sect-title">Account details</h2></div>
-            {a.archived && <div className="pill" style={{ marginBottom: 8 }}>Archived</div>}
-            <div className="kv"><span className="k">Type</span><span className="v">{typeLabel(a)}</span></div>
-            {credit && a.limit && <div className="kv"><span className="k">Credit limit</span><span className="v num">{money(a.limit, { cents: false })}</span></div>}
-            {a.baseline ? <>
-              <div className="kv"><span className="k">Opening balance</span><span className="v num">{money(a.openingBalance ?? 0)}</span></div>
-              <div className="kv"><span className="k">Counted from</span><span className="v">after {fmtDate(a.baseline, 'long')}</span></div>
-              <p className="xs muted" style={{ marginTop: 6 }}>Earlier transactions are kept and searchable, but the balance counts forward from the verified opening figure.</p>
-              <button className="btn sm" style={{ marginTop: 8 }} onClick={() => openModal({ type: 'cutover', id: a.id })}>Change opening balance</button></> : <p className="xs muted" style={{ marginTop: 6 }}>No opening balance yet. All history is saved; nothing has been marked verified.</p>}
-          </section>
-          {bills.length > 0 && (
-            <section className="card" style={{ overflow: 'hidden' }}>
-              <div className="pad" style={{ paddingBottom: 4 }}><h2 className="sect-title">Coming from this account</h2></div>
-              <div className="list">{bills.map((o) => <BillRow key={o.bill.id + o.date} o={o} onOpen={() => openModal({ type: 'bill', billId: o.bill.id, date: o.date })} />)}</div>
-            </section>
-          )}
+            {!a.baseline ? <div style={{ marginTop: 10 }}><Callout tone="warn">Not checked against your bank yet. Set the real opening balance to anchor it.</Callout></div>
+              : st.level !== 'fresh' && <div style={{ marginTop: 10 }}><Callout>Balances are entered manually, so this may have drifted. A quick check takes under a minute.</Callout></div>}
+          </div>
+          {bills.length > 0 && <div><div className="group-h"><h2>Coming from this account</h2></div><div className="group">{bills.map((o) => (
+            <button key={o.bill.id + o.date} className="rowx" onClick={() => openModal({ type: 'bill', billId: o.bill.id, date: o.date })}><div className="grow"><div className="li-title">{o.bill.name}</div><div className="li-sub">{fmtDate(o.date)}</div></div><div className="amt-md num"><Money v={o.bill.amount} /></div></button>))}</div></div>}
         </div>
       </div>
-      
     </div>
   );
 }

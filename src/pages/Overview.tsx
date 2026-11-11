@@ -6,7 +6,7 @@ import {
 import { daysInMonth, diffDays, fmtDate, money, monthKey, parse, plural, sum } from '../lib';
 import { Empty, Money, StatusPill } from '../ui';
 import { PageHead, TxnRow } from '../shared';
-import { BillList } from './Bills';
+import { BillList } from './PlanPage';
 
 export interface Insight { id: string; tone: 'pos' | 'warn' | 'planned' | 'proj'; title: string; text: string; href?: string }
 export function buildInsights(d: DataState): Insight[] {
@@ -36,21 +36,8 @@ export function buildInsights(d: DataState): Insight[] {
     const kept = last.income - last.expense;
     out.push({ id: 'saved', tone: 'pos', title: `You kept ${Math.round((kept / last.income) * 100)}% of last month’s income`, text: `${money(kept, { cents: false })} left after ${money(last.expense, { cents: false })} of spending in ${new Date(2000, parse(last.key + '-01').getMonth(), 1).toLocaleString('en', { month: 'long' })}.` });
   }
-  const nw = netWorthSeries(d);
-  const chg = nw[nw.length - 1].value - nw[0].value;
-  if (out.length < 3 && d.txns.length > 20) out.push({ id: 'nw', tone: chg >= 0 ? 'pos' : 'warn', title: chg >= 0 ? 'Net worth is trending up' : 'Net worth is lower than a year ago', text: `${chg >= 0 ? 'Up' : 'Down'} about ${money(Math.abs(chg), { cents: false })} over twelve months (estimate from recorded income and spending).` });
+  void netWorthSeries;
   return out;
-}
-
-function Chip({ a }: { a: Account }) {
-  const credit = a.type === 'credit';
-  return (
-    <a className={credit ? 'acct-chip debt' : 'acct-chip'} href={`#/accounts/${a.id}`} aria-label={`${a.name}, ${credit ? 'owed' : 'balance'} ${money(a.balance)}`}>
-      <span className="xs muted ellipsis">{a.name}{credit ? ' · owed' : ''}</span>
-      <span className="n num"><Money v={a.balance} /></span>
-      {credit && a.limit ? <span className="xs muted">{Math.round((a.balance / a.limit) * 100)}% of {money(a.limit, { cents: false })}</span> : null}
-    </a>
-  );
 }
 
 /** The few things that need a person: missed bills, overspending, income that hasn't arrived, over-assignment. */
@@ -63,16 +50,16 @@ function Attention({ d }: { d: DataState }) {
   const rta = readyToAssign(d);
   if (rta < 0) items.push({ id: 'rta', tone: 'warn', title: `${money(-rta)} more is set aside than you have`, sub: 'Move money back to Ready to Assign', action: 'Review', run: () => openModal({ type: 'move', to: 'rta', amount: -rta }) });
   for (const i of d.incomes.filter((x) => x.date <= d.today)) items.push({ id: `i${i.id}`, tone: '', title: `${i.label} hasn’t been marked received`, sub: `Awaiting confirmation · originally ${fmtDate(i.date)} · ${money(i.amount)}`, action: 'Review', run: () => openModal({ type: 'income', mode: 'view', id: i.id }) });
-  if (!items.length) return <div className="alert"><CircleCheck size={18} style={{ color: 'var(--pos)' }} /><div className="small">You’re all caught up.</div></div>;
+  if (!items.length) return <div className="group"><div className="rowx"><CircleCheck size={18} style={{ color: 'var(--pos)' }} /><div className="grow small">You’re all caught up.</div></div></div>;
   return (
-    <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'minmax(0, 1fr)' }}>
+    <div className="group" data-testid="attention">
       {items.slice(0, 4).map((x) => (
-        <div key={x.id} className={`alert ${x.tone}`}>
-          <div className="grow"><div className="li-title" style={{ fontSize: 14 }}>{x.title}</div><div className="li-sub ellipsis">{x.sub}</div></div>
+        <div key={x.id} className="rowx">
+          <div className="grow"><div className="li-title" style={{ fontSize: 14, color: x.tone === 'neg' ? 'var(--neg)' : undefined }}>{x.title}</div><div className="li-sub ellipsis">{x.sub}</div></div>
           <button className={x.tone === 'neg' ? 'btn sm primary' : 'btn sm'} onClick={x.run}>{x.action}</button>
         </div>
       ))}
-      {items.length > 4 && <div className="xs muted">+ {items.length - 4} more — see Bills and Budget</div>}
+      {items.length > 4 && <div className="rowx xs muted">+ {items.length - 4} more in Plan</div>}
     </div>
   );
 }
@@ -92,58 +79,49 @@ export function Overview() {
   const overdueTotal = sum(dueGroups, (g) => g.total);
   const recent = data.txns.filter((t) => t.date <= data.today).slice(0, 5);
   const rta = cc.rta;
-  const needs = underfunded(data).length;
   const inc = expectedIncomeSummary(data, 30);
+  const accountRow = (a: Account) => {
+    const credit = a.type === 'credit';
+    return (
+      <a key={a.id} className="rowx" href={`#/accounts/${a.id}`} aria-label={`${a.name}, ${credit ? 'owed' : 'balance'} ${money(a.balance)}`}>
+        <div className="grow"><div className="li-title">{a.name}</div><div className="li-sub">{credit ? (a.limit ? `Owed · ${Math.round((a.balance / a.limit) * 100)}% of ${money(a.limit, { cents: false })}` : 'Owed') : a.type[0].toUpperCase() + a.type.slice(1)}</div></div>
+        <div className="amt-md num"><Money v={a.balance} /></div><ChevronRight size={16} className="muted" />
+      </a>
+    );
+  };
 
   return (
     <div className="page">
-      <PageHead title="Where you stand" sub={fmtDate(data.today, 'long')} />
+      <PageHead title="Home" sub={fmtDate(data.today, 'long')} />
       {unverified.length > 0 && (
-        <div className="mini-banner" style={{ marginBottom: 16 }}>
+        <div className="mini-banner" style={{ marginBottom: 14 }}>
           <span>{unverified.length === data.accounts.length ? 'No account balances are verified yet.' : `${plural(unverified.length, 'account')} not verified yet.`}</span>
           <button className="btn sm" onClick={() => openModal({ type: 'cutover' })}>Set opening balances</button>
         </div>
       )}
-      <section className="card hero3" aria-label="Where you stand" data-testid="ov-summary">
-        <div className="hero3-stats">
-          <div className="hero-stat">
-            <div className="eyebrow">Cash &amp; savings</div>
-            <div className="amt-hero num" data-testid="ov-cash"><Money v={cc.cash} cents={false} /></div>
-            <div className="small muted">Ready to assign <b className="num" style={{ color: 'var(--ink)' }}>{money(rta, { cents: false })}</b></div>
-          </div>
-          <div className="hero-stat">
-            <div className="eyebrow">Due in the next 14 days</div>
-            <div className={`amt-hero num ${dueGroups.some((g) => g.missed) ? 'neg' : ''}`} data-testid="ov-due"><Money v={dueTotal} cents={false} /></div>
-            <div className="small muted">{dueGroups.length ? `${plural(dueGroups.length, 'bill')}${overdueTotal > 0 ? ` · ${money(overdueTotal, { cents: false })} overdue` : ''}` : 'Nothing due'}</div>
-          </div>
-          <div className="hero-stat">
-            <div className="eyebrow">Net position</div>
-            <div className="amt-hero num" data-testid="ov-position"><Money v={position} cents={false} /></div>
-            <div className="small muted">Cards owed <b className="num" style={{ color: 'var(--ink)' }} data-testid="ov-owed">{money(owed, { cents: false })}</b>{loans > 0 && <> · loans <b className="num" style={{ color: 'var(--ink)' }}>{money(loans, { cents: false })}</b></>}</div>
-          </div>
-        </div>
-        <div className="strip hero3-accts">{cash.map((a) => <Chip key={a.id} a={a} />)}{cards.map((a) => <Chip key={a.id} a={a} />)}</div>
+      <section className="home-top" aria-label="Summary" data-testid="ov-summary">
+        <div className="stat"><div className="eyebrow">Cash &amp; savings</div><div className="amt-xl num" data-testid="ov-cash"><Money v={cc.cash} cents={false} /></div></div>
+        <div className="stat"><div className="eyebrow">Ready to assign</div><div className={`amt-xl num ${rta < 0 ? 'neg' : ''}`} data-testid="ov-rta-value"><Money v={rta} cents={false} /></div>
+          <div className="row gap8"><button className="sect-link" data-testid="ov-rta-action" onClick={() => openModal(rta < 0 ? { type: 'move', to: 'rta', amount: -rta } : { type: 'move', from: 'rta' })}>Move money</button><a className="sect-link" href="#/plan">Open plan</a></div></div>
+        <div className="stat"><div className="eyebrow">Due in 14 days</div><div className={`amt-xl num ${dueGroups.some((g) => g.missed) ? 'neg' : ''}`} data-testid="ov-due"><Money v={dueTotal} cents={false} /></div>
+          <div className="small muted">{dueGroups.length ? `${plural(dueGroups.length, 'item')}${overdueTotal > 0 ? ` · ${money(overdueTotal, { cents: false })} overdue` : ''}` : 'Nothing due'}</div></div>
       </section>
 
-      <div className="home-grid">
+      <div className="home-grid" style={{ marginTop: 22 }}>
         <div>
-          <section className="card pad" aria-label="Coming up">
-            <div className="sect-head"><h2 className="sect-title">Coming up</h2><a className="sect-link" href="#/bills">All bills<ChevronRight size={14} /></a></div>
-            {groups.length ? <BillList groups={groups} compact /> : <div className="small muted">Nothing due in the next 30 days.</div>}
-          </section>
-          <section className="card pad" aria-label="Expected income" data-testid="ov-income">
-            <div className="sect-head"><h2 className="sect-title">Expected income</h2>
-              <span className="row gap12"><button className="sect-link" onClick={() => openModal({ type: 'income', mode: 'add' })}><Plus size={14} />Add</button><a className="sect-link" href="#/bills?tab=income" data-testid="ov-income-all">All expected income<ChevronRight size={14} /></a></span></div>
+          <div className="group-h"><h2>Upcoming</h2><a className="sect-link" href="#/plan">Plan<ChevronRight size={14} /></a></div>
+          {groups.length ? <BillList groups={groups} /> : <div className="group pad small muted">Nothing due in the next 30 days.</div>}
+
+          <div className="group-h"><h2>Expected income</h2>
+            <span className="row gap12"><button className="sect-link" onClick={() => openModal({ type: 'income', mode: 'add' })}>Add</button><a className="sect-link" href="#/plan?view=income" data-testid="ov-income-all">View all<ChevronRight size={14} /></a></span></div>
+          <section data-testid="ov-income" aria-label="Expected income">
             {inc.rows.length === 0 ? (
-              <div className="small muted">Nothing expected in the next 30 days. Add a paycheck or invoice to see money coming in next to what’s going out.</div>
+              <div className="group pad small muted">Nothing expected in the next 30 days. Add a paycheck or invoice to see money coming in next to what’s going out.</div>
             ) : (<>
-              <div className="sum-row" style={{ gap: 24, marginBottom: 6 }}>
-                <div><div className="eyebrow">Pending · next 30 days</div><div className="amt-lg num" data-testid="ov-income-total"><Money v={inc.total} cents={false} /></div></div>
-                <div><div className="eyebrow">Guaranteed</div><div className="amt-lg num c-proj" data-testid="ov-income-g"><Money v={inc.guaranteed} cents={false} /></div></div>
-                <div><div className="eyebrow">Anticipated</div><div className="amt-lg num muted" data-testid="ov-income-a"><Money v={inc.anticipated} cents={false} /></div></div>
-              </div>
-              {inc.overdue.length > 0 && <div className="alert warn" style={{ margin: '10px 0 4px' }}><div className="grow small"><b>{plural(inc.overdue.length, 'entry', 'entries')} awaiting confirmation</b> · {money(inc.overdueTotal, { cents: false })}, shown as arriving today. Open one to mark it received or not coming.</div></div>}
-              <div className="list">
+              <div className="group">
+                <div className="rowx"><div className="grow"><div className="eyebrow">Pending · next 30 days</div><div className="amt-lg num" data-testid="ov-income-total"><Money v={inc.total} cents={false} /></div></div>
+                  <div className="right small"><div>Guaranteed <b className="num" data-testid="ov-income-g">{money(inc.guaranteed, { cents: false })}</b></div><div className="muted">Anticipated <b className="num" data-testid="ov-income-a">{money(inc.anticipated, { cents: false })}</b></div></div></div>
+                {inc.overdue.length > 0 && <div className="rowx" style={{ background: 'var(--warn-soft)' }}><div className="grow small"><b>{plural(inc.overdue.length, 'entry', 'entries')} awaiting confirmation</b> · {money(inc.overdueTotal, { cents: false })}, shown as arriving today</div></div>}
                 {inc.rows.slice(0, 5).map((r) => (
                   <button key={r.id + r.date} className="rowx" onClick={() => openModal({ type: 'income', mode: 'view', id: r.id })}>
                     <div className={`datebox ${r.overdue ? 'late' : 'proj'}`}><b className="num">{fmtDate(r.date, 'day')}</b><span>{fmtDate(r.date).split(' ')[0]}</span></div>
@@ -153,29 +131,26 @@ export function Overview() {
                   </button>
                 ))}
               </div>
-              {inc.rows.length > 5 && <div className="xs muted" style={{ marginTop: 6 }}>+ {inc.rows.length - 5} more in the full view</div>}
-              <div className="xs muted" style={{ marginTop: 8 }}>Pending, not received: it isn’t in your balances or Ready to Assign until you mark it received.</div>
+              {inc.rows.length > 5 && <div className="xs muted" style={{ margin: '6px 4px 0' }}>+ {inc.rows.length - 5} more in the full view</div>}
+              <div className="xs muted" style={{ margin: '8px 4px 0' }}>Pending, not received: not in your balances or Ready to Assign until you mark it received.</div>
             </>)}
           </section>
-          <section className="card pad" aria-label="Recent activity">
-            <div className="sect-head"><h2 className="sect-title">Recent activity</h2><a className="sect-link" href="#/activity">All activity<ChevronRight size={14} /></a></div>
-            {recent.length ? <div className="list">{recent.map((t) => <TxnRow key={t.id} t={t} onOpen={() => openModal({ type: 'txn', mode: 'view', id: t.id })} />)}</div> : <div className="small muted">No transactions yet.</div>}
-          </section>
         </div>
+
         <div>
-          <section className="card pad" aria-label="Needs attention">
-            <div className="sect-head"><h2 className="sect-title">Needs attention</h2></div>
-            <Attention d={data} />
-          </section>
-          <section className="card pad" aria-label="Budget" data-testid="ov-budget">
-            <div className="sect-head"><h2 className="sect-title">Budget</h2><a className="sect-link" href="#/budget">Open budget<ChevronRight size={14} /></a></div>
-            <div className="eyebrow">{rta < 0 ? 'Over-assigned' : 'Ready to assign'}</div>
-            <div className="row between" style={{ marginTop: 6, gap: 12 }}>
-              <div className={`amt-xl num ${rta < 0 ? 'neg' : 'c-planned'}`} data-testid="ov-rta-value"><Money v={rta} /></div>
-              <button className="btn primary sm" data-testid="ov-rta-action" onClick={() => openModal(rta < 0 ? { type: 'move', to: 'rta', amount: -rta } : { type: 'move', from: 'rta' })}>Move money</button>
-            </div>
-            <div className="small muted" style={{ marginTop: 10 }}>{needs > 0 ? `${plural(needs, 'category', 'categories')} still need funding` : 'Every target is funded'}{overspent(data).length ? ` · ${overspent(data).length} over` : ''}</div>
-          </section>
+          <div className="group-h"><h2>Needs attention</h2></div>
+          <Attention d={data} />
+
+          <div className="group-h"><h2>Accounts</h2><a className="sect-link" href="#/accounts">All<ChevronRight size={14} /></a></div>
+          <div className="group">
+            {cash.map(accountRow)}
+            {cards.map(accountRow)}
+            <div className="rowx" style={{ background: 'var(--surface-2)' }}><div className="grow li-sub">Net worth{owed > 0 || loans > 0 ? ` · after ${money(owed + loans, { cents: false })} owed` : ''}</div><div className="small num" style={{ fontWeight: 600 }} data-testid="ov-position"><Money v={position} cents={false} /></div></div>
+          </div>
+          <span hidden data-testid="ov-owed">{money(owed)}</span>
+
+          <div className="group-h"><h2>Recent activity</h2><a className="sect-link" href="#/activity">All<ChevronRight size={14} /></a></div>
+          {recent.length ? <div className="group">{recent.map((t) => <TxnRow key={t.id} t={t} onOpen={() => openModal({ type: 'txn', mode: 'view', id: t.id })} />)}</div> : <div className="group pad small muted">No transactions yet.</div>}
         </div>
       </div>
     </div>

@@ -15,8 +15,9 @@ await build({ logLevel: 'silent', build: { outDir, emptyOutDir: true } });
 const pv = await preview({ logLevel: 'silent', build: { outDir }, preview: { port: 4181, strictPort: true } });
 const base = 'http://localhost:4181/';
 const session = { access_token: 'demo', refresh_token: 'demo', token_type: 'bearer', expires_in: 3600, expires_at: 4102444800, user: { id: 'demo-user', aud: 'authenticated', email: 'demo@example.test' } };
-const routes = ['/', '/activity', '/accounts', '/accounts/1', '/bills', '/bills?tab=income', '/bills?view=calendar', '/bills?tab=paused', '/budget', '/insights', '/insights/forecast', '/insights/credit', '/settings',
-  '/transactions', '/plan/bills', '/plan/budget', '/plan/income', '/plan/calendar', '/plan/forecast', '/credit']; // the last seven are older saved links and must still resolve
+const CURRENT = ['/', '/activity', '/accounts', '/accounts/1', '/plan', '/plan?view=calendar', '/plan?view=income', '/plan?filter=archived', '/insights', '/insights/forecast', '/insights/credit', '/settings'];
+const LEGACY = ['/transactions', '/bills', '/bills?tab=income', '/bills?view=calendar', '/bills?tab=paused', '/budget', '/plan/bills', '/plan/budget', '/plan/income', '/plan/calendar', '/plan/forecast', '/credit']; // earlier saved links must still resolve
+const routes = [...CURRENT, ...LEGACY];
 const SHOTS = process.env.SHOTS; if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 const themes = SHOTS ? ['light', 'dark'] : ['light'];
 const browser = await puppeteer.launch({ executablePath: chrome, headless: 'new', args: ['--no-sandbox'] });
@@ -30,7 +31,7 @@ for (const theme of themes) for (const [kind, vp] of [['desktop', { width: 1440,
     await page.goto(`${base}#${r}`, { waitUntil: 'networkidle0' }); await page.reload({ waitUntil: 'networkidle0' });
     const m = await page.evaluate(() => ({ text: document.body.innerText.length, over: document.documentElement.scrollWidth > (window.visualViewport ? window.visualViewport.width : innerWidth) + 1 || document.documentElement.scrollWidth > 392 && matchMedia('(max-width: 600px)').matches, h1: !!document.querySelector('h1') }));
     checks++;
-    if (SHOTS && !r.startsWith('/transactions') && !r.startsWith('/plan') && r !== '/credit') await page.screenshot({ path: `${SHOTS}/${kind}-${theme}-${r.replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '') || 'home'}.png`, fullPage: true });
+    if (SHOTS && CURRENT.includes(r)) await page.screenshot({ path: `${SHOTS}/${kind}-${theme}-${r.replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '') || 'home'}.png`, fullPage: true });
     if (m.text < 80) failures.push(`${kind} ${r}: page looks empty`);
     if (m.over) failures.push(`${kind} ${r}: horizontal overflow`);
     if (!m.h1 && !r.startsWith('/accounts/')) failures.push(`${kind} ${r}: no <h1>`);

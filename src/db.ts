@@ -96,6 +96,7 @@ export function toDataState(raw: RawData, today = todayISO()): DataState {
       id: S(c.id), groupId: S(c.group_id), name: c.name, icon: c.emoji || '', target: Number(c.target_amount) > 0 ? cents(c.target_amount) : null,
       priority: kind === 'bills' ? 1 : kind === 'everyday' ? 2 : 3, carry: 0, assigned: cents(c.assigned_amount),
       cardAccountId: cardOf.get(S(c.id)), hidden: !!c.is_hidden, billPaused: !!c.bill_paused, billArchived: !!c.bill_archived, isDebt: !!c.is_debt, debtBalance: cents(c.balance),
+      targetMode: c.target_mode === 'save' || c.target_mode === 'keep' ? c.target_mode : Number(c.target_amount) > 0 ? 'keep' : undefined,
     };
   });
 
@@ -343,4 +344,23 @@ export const addAccountAtomic = async (a: { name: string; type: AccountType; lim
   S(ok(await supabase.rpc('fos_add_account', { p: { name: a.name, type: DB_ACCT_TYPE[a.type], credit_limit: a.limit ? dollars(a.limit) : 0, opening: dollars(a.opening), cutover: a.cutover } })));
 export const setCutoversAtomic = async (date: string, items: { accountId: string; opening: number }[]) => { ok(await supabase.rpc('fos_set_cutovers', { cutover: date, items: items.map((x) => ({ account_id: Number(x.accountId), opening: dollars(x.opening) })) })); };
 export const archiveBillAtomic = async (billId: string, archived: boolean, alsoCategory: boolean, resume?: string) => { ok(await supabase.rpc('fos_archive_bill', { cat: Number(billId), archived, also_category: alsoCategory, resume: resume ?? null })); };
+
+// ── Plan items (migration 019): one atomic save / archive / restore ──────────
+export interface ScheduleSave { amount: number; date: string; period: 'once' | BillPeriod }
+export interface SaveItemInput { id?: string; name: string; emoji?: string; groupId?: string; target?: number | null; mode?: 'save' | 'keep'; schedule?: ScheduleSave | null; paused?: boolean; isDebt?: boolean; debtBalance?: number }
+export const saveItem = async (i: SaveItemInput): Promise<string> => {
+  const p: Row = { name: i.name };
+  if (i.id) p.id = Number(i.id);
+  if (i.emoji !== undefined) p.emoji = i.emoji;
+  if (i.groupId) p.group_id = Number(i.groupId);
+  if (i.target !== undefined) p.target_amount = i.target == null ? 0 : dollars(i.target);
+  if (i.mode !== undefined) p.target_mode = i.mode;
+  if (i.schedule !== undefined) p.schedule = i.schedule == null ? null : { amount: dollars(i.schedule.amount), date: i.schedule.date, period: i.schedule.period };
+  if (i.paused !== undefined) p.paused = i.paused;
+  if (i.isDebt !== undefined) { p.is_debt = i.isDebt; if (i.debtBalance !== undefined) p.debt_balance = dollars(i.debtBalance); }
+  return S(ok(await supabase.rpc('fos_save_item', { p })));
+};
+/** Returns the amount (cents) that went back to Ready to Assign. The server refuses, with the reason, when archiving would hide something unfinished. */
+export const archiveItem = async (id: string, today: string): Promise<number> => cents((ok(await supabase.rpc('fos_archive_item', { cat: Number(id), today })) as Row).returned);
+export const restoreItem = async (id: string, reassign = 0, resume?: string) => { ok(await supabase.rpc('fos_restore_item', { cat: Number(id), reassign: dollars(reassign), resume: resume ?? null })); };
 void diffDays;

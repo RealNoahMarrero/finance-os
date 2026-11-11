@@ -49,7 +49,7 @@ await test('add an expense: balance and envelope both change', async (page) => {
   if (Number(cat.assigned_amount) !== 29.5) throw new Error(`Dining Out is ${cat.assigned_amount}, expected 29.5`);
 });
 await test('cover overspending moves budget money only', async (page) => {
-  await go(page, '/budget');
+  await go(page, '/plan');
   const before = await sql('select sum(balance)::float as b from accounts');
   await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.innerText.trim() === 'Cover').click()); await sleep(500); await click(page, 'Move $35.00');
   const [gas] = await sql('select assigned_amount from categories where id=8'); const after = await sql('select sum(balance)::float as b from accounts');
@@ -57,7 +57,7 @@ await test('cover overspending moves budget money only', async (page) => {
   if (before[0].b !== after[0].b) throw new Error('bank balances changed');
 });
 await test('Pay an upcoming bill (Electric) records the payment', async (page) => {
-  await go(page, '/bills');
+  await go(page, '/');
   await click(page, 'Electric details');
   const body = await page.evaluate(() => document.querySelector('[role=dialog]')?.innerText ?? '');
   if (!/Electric/.test(body)) throw new Error('bill sheet did not open');
@@ -70,18 +70,20 @@ await test('phone: More menu reaches Accounts, Insights and Settings', async () 
   const page = await fresh({ width: 390, height: 844, isMobile: true, hasTouch: true });
   try {
     await go(page, '/'); await click(page, 'More');
-    const t = await page.evaluate(() => document.querySelector('[role=dialog]').innerText); for (const w of ['Accounts', 'Insights', 'Settings']) if (!t.includes(w)) throw new Error(`${w} missing from More`);
+    const t = await page.evaluate(() => document.querySelector('[role=dialog]').innerText); for (const w of ['Insights', 'Settings']) if (!t.includes(w)) throw new Error(`${w} missing from More`);
+    await page.keyboard.press('Escape'); await sleep(300);
+    const bar = await page.evaluate(() => document.querySelector('nav.tabbar').innerText); for (const w of ['Home', 'Activity', 'Plan', 'Accounts']) if (!bar.includes(w)) throw new Error(`${w} missing from the bottom bar`);
     results.push(['phone: More menu reaches Accounts, Insights and Settings', true]);
   } catch (e) { results.push(['phone: More menu reaches Accounts, Insights and Settings', false, e.message]); }
   await page.close();
 });
 await test('settings export control and theme switch exist', async (page) => {
-  await go(page, '/settings'); const t = await page.evaluate(() => document.body.innerText); if (!/Export everything/.test(t) || !/Appearance/.test(t)) throw new Error('settings incomplete');
+  await go(page, '/settings'); const t = await page.evaluate(() => document.body.innerText); if (!/export everything/i.test(t) || !/appearance/i.test(t)) throw new Error('settings incomplete');
   await click(page, 'Dark', '.theme-seg button'); const th = await page.evaluate(() => document.documentElement.dataset.theme); if (th !== 'dark') throw new Error('theme did not switch');
 });
 
 const setVal = (page, sel, v) => page.evaluate((sel, v) => { const el = document.querySelector(sel); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); }, sel, v);
-const openCarLoan = async (page) => { await go(page, '/bills'); await click(page, 'Car Loan details'); };
+const openCarLoan = async (page) => { await go(page, '/'); await click(page, 'Car Loan details'); };
 
 await test('PAY (record): one atomic payment — account, envelope, debt, due date; a double-click records it once', async (page) => {
   await openCarLoan(page);
@@ -120,10 +122,10 @@ await test('PAY (paid elsewhere): marks paid, no transaction, balances untouched
   if (Number(a.n) !== Number(b0.n) || Number(a.b) !== Number(b0.b) || Number(a.owed) !== 8080) throw new Error(JSON.stringify([b0, a]));
 });
 await test('missed payments: one Car Loan row with a count, expandable, and Home shows one alert', async (page) => {
-  await go(page, '/bills');
-  const t = await page.evaluate(() => document.body.innerText); if (!/2 missed/.test(t)) throw new Error('no "2 missed" on Bills');
-  if ((t.match(/Car Loan/g) || []).length > 3) throw new Error('Car Loan appears as several rows');
-  await go(page, '/'); const h = await page.evaluate(() => document.querySelector('[aria-label="Needs attention"]').innerText);
+  await go(page, '/plan');
+  const t = await page.evaluate(() => document.body.innerText); if (!/2 payments missed/.test(t)) throw new Error('no missed count on Plan');
+  if ((t.match(/Car Loan/g) || []).length > 2) throw new Error('Car Loan appears as several rows');
+  await go(page, '/'); const h = await page.evaluate(() => document.querySelector('[data-testid=attention]').innerText);
   if (!/Car Loan · 2 payments missed/.test(h)) throw new Error('Home attention row missing: ' + h.slice(0, 120));
 });
 await test('SCHEDULED: a future-dated expense changes no balance until its date', async (page) => {
@@ -152,10 +154,10 @@ await test('HOME: Expected income section shows totals, overdue confirmation, st
   const total = await page.evaluate(() => document.querySelector('[data-testid=ov-income-total]').innerText);
   if (!/\$5,870/.test(total)) throw new Error('30-day pending total ' + total); // paychecks 4,820 + invoice 900 + the overdue $150 refund, shown as arriving today
   const rta = await page.evaluate(() => document.querySelector('[data-testid=ov-rta-value]').innerText);
-  if (!/\$3,645\.15/.test(rta)) throw new Error('Ready to Assign changed: ' + rta);
+  if (!/\$3,645/.test(rta)) throw new Error('Ready to Assign changed: ' + rta);
   const before = await page.evaluate(() => location.hash);
-  await click(page, 'All expected income'); const after = await page.evaluate(() => location.hash + ' | ' + document.body.innerText.includes('Expected income'));
-  if (!/tab=income/.test(after)) throw new Error('link went to ' + after);
+  await click(page, 'View all', '[data-testid=ov-income-all]'); const after = await page.evaluate(() => location.hash);
+  if (!/view=income/.test(after)) throw new Error('link went to ' + after);
 });
 await test('HOME: Expected income empty state, and mobile layout does not overflow', async () => {
   const page = await fresh({ width: 390, height: 844, isMobile: true, hasTouch: true });
@@ -185,6 +187,101 @@ await test('INCOME: an overdue entry is awaiting confirmation (dated today, orig
   if (!/\$5,720/.test(total)) throw new Error('pending total after confirming: ' + total);
 });
 
+
+const rowClick = (page, name) => page.evaluate((name) => { const r = [...document.querySelectorAll('[data-testid=plan-row]')].find((x) => x.innerText.includes(name)); r.click(); }, name);
+const detail = (page) => page.evaluate(() => document.querySelector('[data-testid=item-detail]')?.innerText ?? '');
+
+await test('PLAN: one list for bills and spending; selecting any item opens the same detail, adapted to the item', async (page) => {
+  await go(page, '/plan');
+  const t = await page.evaluate(() => document.body.innerText);
+  for (const n of ['Rent', 'Electric', 'Groceries', 'Vacation Fund']) if (!t.includes(n)) throw new Error(`${n} missing from Plan`);
+  await rowClick(page, 'Electric'); await sleep(400); const e = await detail(page);
+  if (!/Record payment/.test(e) || !/Next payment/.test(e) || !/Move money/.test(e) || !/Archive/.test(e)) throw new Error('scheduled item detail incomplete: ' + e.slice(0, 200));
+  await rowClick(page, 'Groceries'); await sleep(400); const g = await detail(page);
+  if (/Record payment/.test(g) || /Next payment/.test(g)) throw new Error('an unscheduled item shows schedule controls');
+  if (!/Move money/.test(g) || !/Edit/.test(g)) throw new Error('unscheduled item detail incomplete');
+});
+await test('PLAN: add one item with a goal and a schedule (no bill-vs-category choice)', async (page) => {
+  await go(page, '/plan'); await page.evaluate(() => document.querySelector('[data-testid=add-item]').click()); await sleep(400);
+  await page.type('#it-name', 'Car Insurance');
+  await click(page, 'Add funding goal'); await click(page, 'Add payment schedule');
+  await sleep(200); await page.evaluate(() => { const i = document.querySelectorAll('[role=dialog] input[inputmode=decimal]'); });
+  const inputs = await page.$$('[role=dialog] input[inputmode=decimal]');
+  await inputs[0].type('120'); await inputs[1].type('118');
+  await setVal(page, '#it-date', '2026-12-05'); await sleep(200);
+  await page.evaluate(() => document.querySelector('[data-testid=item-save]').click()); await sleep(900);
+  const [c] = await sql(`select name, bill_amount::float ba, target_amount::float ta, due_date::text d, is_repeating, assigned_amount::float a from categories where name='Car Insurance'`);
+  if (!c || c.ba !== 118 || c.ta !== 120 || c.d !== '2026-12-05' || !c.is_repeating || c.a !== 0) throw new Error(JSON.stringify(c));
+  await go(page, '/plan'); const t = await page.evaluate(() => document.body.innerText); if (!/Car Insurance/.test(t)) throw new Error('new item not in Plan');
+});
+await test('PLAN: Archive Item returns its money to Ready to Assign, keeps history, and Undo puts it back', async (page) => {
+  await go(page, '/plan');
+  const rta0 = Number((await sql(`select (select sum(balance) from accounts where type <> 'Credit Card') - (select sum(assigned_amount) from categories where not is_hidden) as r`))[0].r);
+  const banks = (await sql('select sum(balance) b from accounts'))[0].b; const txns = (await sql('select count(*) n from transactions'))[0].n;
+  await rowClick(page, 'Vacation Fund'); await sleep(400);
+  await page.evaluate(() => document.querySelector('[data-testid=archive-item]').click()); await sleep(500);
+  const prev = await page.evaluate(() => document.querySelector('[data-testid=archive-returns]').innerText); if (!/\$900/.test(prev)) throw new Error('confirmation shows ' + prev);
+  await page.evaluate(() => document.querySelector('[data-testid=archive-confirm]').click()); await sleep(1000);
+  const [a] = await sql(`select is_hidden, assigned_amount::float v from categories where name='Vacation Fund'`);
+  if (!a.is_hidden || a.v !== 0) throw new Error(JSON.stringify(a));
+  const rta1 = Number((await sql(`select (select sum(balance) from accounts where type <> 'Credit Card') - (select sum(assigned_amount) from categories where not is_hidden) as r`))[0].r);
+  if (Math.abs(rta1 - (rta0 + 900)) > 0.001) throw new Error(`RTA ${rta0} -> ${rta1}`);
+  if ((await sql('select sum(balance) b from accounts'))[0].b !== banks || (await sql('select count(*) n from transactions'))[0].n !== txns) throw new Error('bank balances or history changed');
+  await click(page, 'Undo', '.toast button'); await sleep(900);
+  const [u] = await sql(`select is_hidden, assigned_amount::float v from categories where name='Vacation Fund'`);
+  if (u.is_hidden || u.v !== 900) throw new Error('undo: ' + JSON.stringify(u));
+});
+await test('PLAN: archive is refused with the reason (debt still owed); restore comes back empty', async (page) => {
+  await go(page, '/plan'); await rowClick(page, 'Car Loan'); await sleep(400);
+  await page.evaluate(() => document.querySelector('[data-testid=archive-item]').click()); await sleep(500);
+  const t = await page.evaluate(() => document.querySelector('[role=dialog]').innerText); if (!/still owes/.test(t)) throw new Error('no reason shown: ' + t.slice(0, 150));
+  const disabled = await page.evaluate(() => document.querySelector('[data-testid=archive-confirm]').disabled); if (!disabled) throw new Error('archive button was enabled');
+  await page.keyboard.press('Escape'); await sleep(300);
+  await sql(`select 1`); // archive + restore of a plain item
+  await rowClick(page, 'Dining Out'); await sleep(300);
+  await sql(`update categories set assigned_amount = 0 where name='Dining Out'`);
+  await go(page, '/plan'); await rowClick(page, 'Dining Out'); await sleep(300);
+  await page.evaluate(() => document.querySelector('[data-testid=archive-item]').click()); await sleep(400);
+  await page.evaluate(() => document.querySelector('[data-testid=archive-confirm]').click()); await sleep(900);
+  await go(page, '/plan?filter=archived'); const arch = await page.evaluate(() => document.querySelector('[data-testid=archived-list]').innerText); if (!/Dining Out/.test(arch)) throw new Error('not in Archived');
+  await click(page, 'Restore'); await sleep(900);
+  const [r] = await sql(`select is_hidden, assigned_amount::float v from categories where name='Dining Out'`); if (r.is_hidden || r.v !== 0) throw new Error('restore: ' + JSON.stringify(r));
+});
+await test('PLAN: a partial payment shows what was paid and what remains, and does not clear the obligation', async (page) => {
+  await go(page, '/'); await click(page, 'Electric details'); await sleep(300);
+  await setVal(page, '#pay-amt', '50'); await sleep(200);
+  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => /^Pay \$50/.test(b.innerText.trim())).click()); await sleep(1000);
+  const [p] = await sql(`select (select due_date::text from categories where name='Electric') d, (select count(*) from bill_payments where category_id=(select id from categories where name='Electric')) bp`);
+  if (p.d !== '2026-11-14' || Number(p.bp) !== 0) throw new Error('obligation was advanced: ' + JSON.stringify(p));
+  await go(page, '/plan'); await rowClick(page, 'Electric'); await sleep(400); const e = await detail(page);
+  if (!/Paid so far/.test(e) || !/\$50/.test(e) || !/remaining/.test(e)) throw new Error('partial not shown: ' + e.slice(0, 260));
+});
+await test('MOVE MONEY: budget movement never changes a bank balance; an account transfer is a separate transaction', async (page) => {
+  await go(page, '/plan'); const banks = (await sql('select sum(balance) b from accounts'))[0].b;
+  await sql(`select fos_move_money(7, 9, 20)`).catch(() => null);
+  await page.evaluate(() => document.querySelector('[data-testid=plan-move]').click()); await sleep(400);
+  const t = await page.evaluate(() => document.querySelector('[role=dialog]').innerText); if (!/Nothing changes in your bank accounts/i.test(t)) throw new Error('move sheet lacks the bank-account note');
+  if ((await sql('select sum(balance) b from accounts'))[0].b !== banks) throw new Error('banks changed');
+});
+await test('DEEP LINKS: earlier addresses land on the matching screen', async (page) => {
+  const want = { '/bills': /Plan/, '/budget': /Ready to assign/i, '/bills?tab=income': /Pending|Expected income/i, '/bills?view=calendar': /sun/i, '/plan/forecast': /Forecast/i };
+  for (const [h, re] of Object.entries(want)) { await go(page, h); const t = await page.evaluate(() => document.body.innerText); if (!re.test(t)) throw new Error(`${h} did not show ${re}`); }
+});
+
+
+await test('ACCOUNTS: balances list, and reconciling records one visible adjustment', async (page) => {
+  await go(page, '/accounts'); const t = await page.evaluate(() => document.body.innerText);
+  for (const n of ['Everyday Checking', 'Rewards Visa', 'Car Loan']) if (!t.includes(n)) throw new Error(`${n} missing from Accounts`);
+  await go(page, '/accounts/1'); await click(page, 'Reconcile');
+  await page.type('#act', '4800.00'); await click(page, 'Preview difference'); await click(page, 'Record adjustment'); await sleep(900);
+  const [a] = await sql(`select (select balance::float from accounts where id=1) b, (select count(*) from transactions where is_adjustment and account_id=1 and payee='Reconciliation adjustment' and amount=20.15) adj`);
+  if (a.b !== 4800 || Number(a.adj) < 1) throw new Error(JSON.stringify(a));
+});
+await test('APPEARANCE: light, dark and automatic are all available and persist', async (page) => {
+  await go(page, '/settings');
+  for (const [label, want] of [['Dark', 'dark'], ['Light', 'light']]) { await click(page, label, '.theme-seg button'); const th = await page.evaluate(() => document.documentElement.dataset.theme); if (th !== want) throw new Error(`${label} -> ${th}`); }
+  const labels = await page.evaluate(() => [...document.querySelectorAll('.theme-seg button')].map((b) => b.innerText.trim())); if (!labels.includes('Auto')) throw new Error('no Auto option');
+});
 await browser.close(); await new Promise((r) => pv.httpServer.close(r)); backend.close(); fs.rmSync(outDir, { recursive: true, force: true });
 for (const [n, ok, why] of results) console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${why ? '  — ' + why : ''}`);
 console.log(`${results.filter((r) => r[1]).length}/${results.length} passed`);

@@ -287,3 +287,79 @@ describe('atomic multi-step operations', () => {
     expect(g.map((x) => x.kind)).toEqual(['bills', 'everyday', 'lifestyle', 'goals']);
   }));
 });
+
+
+describe('Plan items: one save, one archive (migration 019)', () => {
+  const archive = (tx, id) => one(tx, `select to_jsonb(fos_archive_item($1, '2026-11-10')) as r`, [id]).then((x) => x.r);
+  it('archiving returns the available money to Ready to Assign, hides the item, and keeps every transaction', () => sandbox(async (tx) => {
+    const rta = await rtaOf(tx), banks = await num(tx, 'select sum(balance) from accounts'), txns = await num(tx, 'select count(*) from transactions');
+    const r = await archive(tx, 10); // Vacation Fund holds $900
+    expect(r.returned).toBe(900);
+    expect(await rtaOf(tx)).toBeCloseTo(rta + 900, 2);
+    expect(await avail(tx, 10)).toBe(0);
+    expect((await one(tx, 'select is_hidden from categories where id=10')).is_hidden).toBe(true);
+    expect(await num(tx, 'select sum(balance) from accounts')).toBeCloseTo(banks, 2); // a budget action, never a bank movement
+    expect(await num(tx, 'select count(*) from transactions')).toBe(txns);
+  }));
+  it('archiving a scheduled item stops its schedule and keeps its payment history', () => sandbox(async (tx) => {
+    await pay(tx, { category_id: 2, due: '2026-11-14', mode: 'external', amount: 118.4 }); // Electric now has history
+    const hist = await num(tx, 'select count(*) from bill_payments where category_id=2');
+    const rta = await rtaOf(tx), held = await avail(tx, 2);
+    const r = await archive(tx, 2);
+    expect(r.returned).toBeCloseTo(Math.max(held, 0), 2);
+    expect(await rtaOf(tx)).toBeCloseTo(rta + Math.max(held, 0), 2);
+    expect(await one(tx, 'select bill_archived, bill_paused, is_hidden from categories where id=2')).toMatchObject({ bill_archived: true, bill_paused: true, is_hidden: true });
+    expect(await num(tx, 'select count(*) from bill_payments where category_id=2')).toBe(hist);
+  }));
+  it('refuses, with the reason and without changing anything: debt still owed, overspending, overdue payment, linked card', () => sandbox(async (tx) => {
+    const before = JSON.stringify(await rows(tx, 'select id, assigned_amount, is_hidden, bill_archived from categories order by id'));
+    await fails(tx, `select fos_archive_item(5, '2026-11-10')`, [], /still owes/);
+    await fails(tx, `select fos_archive_item(8, '2026-11-10')`, [], /overspent/);
+    await fails(tx, `select fos_archive_item(4, '2026-11-10')`, [], /unpaid payment due/);
+    await fails(tx, `select fos_archive_item(6, '2026-11-10')`, [], /credit card/);
+    expect(JSON.stringify(await rows(tx, 'select id, assigned_amount, is_hidden, bill_archived from categories order by id'))).toBe(before);
+  }));
+  it('restore brings the item back EMPTY and resumes its schedule; nothing is re-funded unless the user asks', () => sandbox(async (tx) => {
+    await archive(tx, 3);
+    const rta = await rtaOf(tx);
+    await tx.query(`select fos_restore_item(3, 0, '2026-11-22')`);
+    expect(await avail(tx, 3)).toBe(0);
+    expect(await rtaOf(tx)).toBeCloseTo(rta, 2);
+    expect(await one(tx, 'select is_hidden, bill_archived, bill_paused, due_date::text as d from categories where id=3')).toMatchObject({ is_hidden: false, bill_archived: false, bill_paused: false, d: '2026-11-22' });
+  }));
+  it('undo = restore with the same amount re-assigned, checked against Ready to Assign', () => sandbox(async (tx) => {
+    const r = await archive(tx, 10);
+    const rta = await rtaOf(tx);
+    await tx.query(`select fos_restore_item(10, $1, null)`, [r.returned]);
+    expect(await avail(tx, 10)).toBe(900); expect(await rtaOf(tx)).toBeCloseTo(rta - 900, 2);
+    await archive(tx, 10);
+    await fails(tx, `select fos_restore_item(10, $1, null)`, [(await rtaOf(tx)) + 1], /Ready to Assign/);
+  }));
+
+  const save = (tx, o) => num(tx, `select fos_save_item($1::jsonb)`, [JSON.stringify(o)]);
+  it('creates an item with a goal and a schedule in one step; a duplicate name creates nothing', () => sandbox(async (tx) => {
+    const n = await num(tx, 'select count(*) from categories');
+    const id = await save(tx, { name: 'Car Insurance', group_id: 1, emoji: '🚗', target_amount: 120, target_mode: 'keep', schedule: { amount: 118, date: '2026-12-05', period: 'Monthly' } });
+    expect(await one(tx, `select name, bill_amount::float as ba, target_amount::float as ta, target_mode, due_date::text as d, is_repeating, assigned_amount::float as a from categories where id=$1`, [id]))
+      .toMatchObject({ name: 'Car Insurance', ba: 118, ta: 120, target_mode: 'keep', d: '2026-12-05', is_repeating: true, a: 0 });
+    await fails(tx, `select fos_save_item($1::jsonb)`, [JSON.stringify({ name: 'car insurance', group_id: 1 })], /already called/);
+    expect(await num(tx, 'select count(*) from categories')).toBe(n + 1);
+  }));
+  it('creates a plain item with no schedule; sets, changes and removes a schedule without touching the money', () => sandbox(async (tx) => {
+    const id = await save(tx, { name: 'Gifts', group_id: 4, target_amount: 300, target_mode: 'save' });
+    expect(await one(tx, 'select due_date, target_mode from categories where id=$1', [id])).toMatchObject({ due_date: null, target_mode: 'save' });
+    await save(tx, { id, schedule: { amount: 50, date: '2026-12-20', period: 'Yearly' } });
+    expect(await one(tx, `select due_date::text as d, bill_amount::float as ba, target_period from categories where id=$1`, [id])).toMatchObject({ d: '2026-12-20', ba: 50, target_period: 'Yearly' });
+    const before = await avail(tx, id);
+    await save(tx, { id, schedule: null });
+    expect(await one(tx, 'select due_date, bill_amount from categories where id=$1', [id])).toMatchObject({ due_date: null, bill_amount: null });
+    expect(await avail(tx, id)).toBe(before);
+  }));
+  it('refuses a schedule date that is already recorded as paid; pause touches only the paused flag', () => sandbox(async (tx) => {
+    await fails(tx, `select fos_save_item($1::jsonb)`, [JSON.stringify({ id: 1, schedule: { amount: 1500, date: '2026-11-01', period: 'Monthly' } })], /already recorded as paid/);
+    const b = await one(tx, 'select name, bill_amount, due_date from categories where id=2');
+    await save(tx, { id: 2, paused: true });
+    expect(await one(tx, 'select name, bill_amount, due_date from categories where id=2')).toEqual(b);
+    expect((await one(tx, 'select bill_paused from categories where id=2')).bill_paused).toBe(true);
+  }));
+});

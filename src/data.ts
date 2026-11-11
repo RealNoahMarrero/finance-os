@@ -23,6 +23,7 @@ export interface Category {
   assigned: number; // the envelope's Available balance as stored (budgeted minus activity)
   cardAccountId?: string; hidden: boolean; billPaused?: boolean; billArchived?: boolean;
   isDebt?: boolean; debtBalance?: number; // a standalone amount owed (cents), independent of envelope funding, bills and credit cards
+  targetMode?: 'save' | 'keep'; // wording of the funding goal: save toward an amount / keep an amount available
 }
 export interface Txn {
   id: string; date: string; payee: string; amount: number; type: 'expense' | 'income' | 'transfer';
@@ -405,3 +406,12 @@ export const isVerified = (a: Account) => a.lastReconciled != null;
 /** balance implied by opening balance + later transactions, minus the recorded balance */
 export const drift = (a: Account) => (a.derived == null ? null : a.derived - a.balance);
 export { iso };
+
+/** How much has already been paid toward the CURRENT payment of a scheduled item by transactions that are not yet linked to a payment
+ *  (partial payments). Display only: it never clears or advances an obligation. */
+export function paidTowardCurrent(d: DataState, bill: Bill): number {
+  if (!bill.date) return 0;
+  const span = bill.recurring ? ({ Weekly: 7, 'Bi-Weekly': 14, Monthly: 31, Yearly: 366 } as const)[bill.period] : 90;
+  const from = addDays(bill.date, -span);
+  return sum(d.txns.filter((t) => t.categoryId === bill.categoryId && (t.type === 'expense' || t.type === 'transfer') && !t.adjustment && !t.scheduled && !t.billId && t.date > from && t.date <= d.today), (t) => t.amount);
+}

@@ -9,34 +9,26 @@ export function Settings() {
   const hb = data.hiddenBusiness;
   const archived = data.allAccounts.filter((a) => a.archived).length;
   return (
-    <div className="page" style={{ maxWidth: 760 }}>
+    <div className="page" style={{ maxWidth: 720 }}>
       <PageHead title="Settings" />
-      <div className="grid" style={{ gap: 16 }}>
-        <section className="card pad" aria-label="Appearance">
-          <div className="sect-head"><h2 className="sect-title">Appearance</h2></div>
-          <ThemeSwitch theme={theme} setTheme={setTheme} />
-          <div className="xs muted" style={{ marginTop: 8 }}>Auto follows your device’s light or dark setting.</div>
-        </section>
+      <div className="group-h"><h2>Appearance</h2></div>
+      <div className="group"><div className="rowx"><ThemeSwitch theme={theme} setTheme={setTheme} /></div></div>
 
-        <section className="card pad" aria-label="Your data">
-          <div className="sect-head"><h2 className="sect-title">Your data</h2></div>
-          <div className="rowx"><div className="grow"><div className="li-title">Export everything</div>
-            <div className="li-sub">One JSON file with every record{hb.accounts + hb.transactions > 0 ? `, including ${hb.transactions} hidden Business transactions` : ''}.</div></div>
-            <button className="btn" onClick={async () => { try { await exportEverything(); toast('Export downloaded'); } catch { toast('Export failed — please try again'); } }}><Download />Export</button></div>
-          <div className="rowx"><div className="grow"><div className="li-title">Opening balances</div><div className="li-sub">Set or change the verified starting balance for each account.</div></div>
-            <button className="btn" onClick={() => openModal({ type: 'cutover' })}><Scale />Set…</button></div>
-          {archived > 0 && <div className="rowx"><div className="grow"><div className="li-title">Archived accounts</div><div className="li-sub">{archived} hidden, history kept.</div></div><a className="btn" href="#/accounts">View</a></div>}
-          {(hb.accounts + hb.transactions) > 0 && <div className="xs muted" style={{ marginTop: 8 }}>Business records ({hb.transactions} transactions) are hidden from every screen but safely stored.</div>}
-        </section>
-
-        <section className="card pad" aria-label="Account">
-          <div className="sect-head"><h2 className="sect-title">Account</h2></div>
-          <div className="rowx"><div className="grow"><div className="li-title">Signed in</div><div className="li-sub">{email}</div></div>
-            <button className="btn" onClick={() => { void signOut(); }}><LogOut />Sign out</button></div>
-        </section>
-
-        <p className="xs muted">Balances are what you record — Finances isn’t connected to your bank.</p>
+      <div className="group-h"><h2>Data</h2></div>
+      <div className="group">
+        <div className="rowx"><div className="grow"><div className="li-title">Export everything</div>
+          <div className="li-sub">One JSON file{hb.accounts + hb.transactions > 0 ? `, including ${hb.transactions} hidden Business transactions` : ''}.</div></div>
+          <button className="btn" onClick={async () => { try { await exportEverything(); toast('Export downloaded'); } catch { toast('Export failed — please try again'); } }}><Download />Export</button></div>
+        <div className="rowx"><div className="grow"><div className="li-title">Opening balances</div><div className="li-sub">Set or change each account’s verified starting balance.</div></div>
+          <button className="btn" onClick={() => openModal({ type: 'cutover' })}><Scale />Set…</button></div>
+        {archived > 0 && <div className="rowx"><div className="grow"><div className="li-title">Archived accounts</div><div className="li-sub">{archived} hidden, history kept.</div></div><a className="btn" href="#/accounts">View</a></div>}
+        <div className="rowx"><div className="grow"><div className="li-title">Archived Plan items</div><div className="li-sub">Restore an item you archived.</div></div><a className="btn" href="#/plan?filter=archived">View</a></div>
       </div>
+
+      <div className="group-h"><h2>Account</h2></div>
+      <div className="group"><div className="rowx"><div className="grow"><div className="li-title">Signed in</div><div className="li-sub">{email}</div></div>
+        <button className="btn" onClick={() => { void signOut(); }}><LogOut />Sign out</button></div></div>
+      <p className="xs muted" style={{ marginTop: 14 }}>Balances are what you record — Finances isn’t connected to your bank.</p>
     </div>
   );
 }

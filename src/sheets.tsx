@@ -2,11 +2,12 @@ import { useMemo, useRef, useState, useEffect, type ReactNode } from 'react';
 import { Archive, ArrowLeftRight, ArrowRight, ArrowUpDown, ChevronDown, Bell, Check, CircleCheck, Download, Eye, FlaskConical, Info, Landmark, LogOut, ListChecks, Pencil, Plus, Scale, Split, StickyNote, Trash, TriangleAlert, Wallet } from 'lucide-react';
 import { useStore } from './store';
 import {
-  allEnvelopes, envelope, readyToAssign, staleness, billOccurrences, drift, rollForward, nextDueDate, type Account, type Bill, type BillPeriod, type Category, type Txn, type Income, type Repeat as Rep,
+  allEnvelopes, envelope, readyToAssign, staleness, billOccurrences, drift, rollForward, nextDueDate, paidTowardCurrent, type Account, type Bill, type BillPeriod, type Category, type Txn, type Income, type Repeat as Rep,
 } from './data';
 import { addDays, centsToInput, cn, diffDays, fmtDate, money, monthKey, relDay, sum, toCents, plural, todayISO } from './lib';
 import { CatIcon, Callout, Money, Seg, Sheet, StatusPill, ThemeSwitch } from './ui';
 import { exportEverything, newRequestId } from './db';
+import { ItemSheet, ItemAddSheet, ItemEditSheet, ArchiveItemSheet } from './itemSheets';
 import { CreditScoreSheet, CreditCardSheet, CreditReportedSheet } from './creditSheets';
 import { Gauge } from 'lucide-react';
 
@@ -566,162 +567,6 @@ export function MoveSheet({ from: f0, to: t0, amount: a0 }: { from?: string; to?
 }
 
 // ═══════════════════════════════════════════════════════════
-// Category detail
-// ═══════════════════════════════════════════════════════════
-export function CategorySheet({ id }: { id: string }) {
-  const { data, closeModal, openModal, setTarget, setBillPaused, removeBill, setCategoryArchived, toast } = useStore();
-  const cat = data.categories.find((c) => c.id === id)!;
-  const [confirmRemove, setConfirmRemove] = useState(false);
-  const [busyBill, setBusyBill] = useState(false);
-  const env = envelope(data, id);
-  const [editing, setEditing] = useState(false);
-  const [tgt, setTgt] = useState(cat.target ? centsToInput(cat.target) : '');
-  const recent = data.txns.filter((t) => t.categoryId === id || t.splits?.some((s) => s.categoryId === id)).slice(0, 4);
-  const bill = data.bills.find((b) => b.categoryId === id);
-  const over = env.avail < 0;
-  // Payments confirmed through the linked bill that produced a transaction (the only payments that reduce the balance automatically)
-  const confirmed = bill ? Object.values(bill.paid).map((tid) => data.txns.find((t) => t.id === tid)).filter((t): t is Txn => !!t) : [];
-  const confirmedSum = sum(confirmed, (t) => t.amount);
-  return (
-    <Sheet title={<span className="row gap12"><span className="li-ico planned" style={{ width: 34, height: 34 }}><CatIcon k={cat.icon} /></span>{cat.name}</span>} onClose={closeModal}
-      footer={<>
-        <button className="btn" onClick={() => openModal({ type: 'move', from: over ? undefined : id, to: over ? id : undefined, amount: over ? -env.avail : undefined })}>Move money</button>
-        <button className="btn primary" onClick={() => openModal({ type: 'move', from: 'rta', to: id, amount: env.remaining || undefined })}>Assign money</button>
-      </>}>
-      {cat.isDebt && (
-        <div className="card pad" style={{ boxShadow: 'none', borderColor: 'color-mix(in srgb, var(--neg) 30%, var(--line))', marginBottom: 14 }} data-testid="debt-section">
-          <div className="row between" style={{ gap: 8 }}>
-            <div><div className="eyebrow">Outstanding debt</div><div className={cn('amt-xl num', (cat.debtBalance ?? 0) > 0 && 'neg')} data-testid="debt-balance"><Money v={cat.debtBalance ?? 0} /></div></div>
-            <div style={{ textAlign: 'right' }}>{(cat.debtBalance ?? 0) === 0 ? <StatusPill status="ok">Paid off</StatusPill> : <StatusPill status="late">Owed</StatusPill>}
-              <div><button className="btn sm" style={{ marginTop: 8 }} onClick={() => openModal({ type: 'debt-edit', categoryId: id })}><Pencil />Edit debt</button></div></div>
-          </div>
-          <div style={{ marginTop: 8 }}>
-            <div className="kv"><span className="k">Payment target</span><span className="v num">{cat.target != null ? money(cat.target) : 'None set'}</span></div>
-            <div className="kv"><span className="k">Next due date</span><span className="v">{bill?.date && !bill.paused ? fmtDate(bill.date) : bill?.paused ? 'Bill paused' : 'None — no bill linked'}</span></div>
-            {confirmed.length > 0 && <div className="kv"><span className="k">Payments confirmed via bill</span><span className="v num">{money(confirmedSum)} · {plural(confirmed.length, 'payment')}</span></div>}
-          </div>
-          <div className="xs muted" style={{ marginTop: 8 }}>This is what you owe, separate from the money set aside below. $0 available doesn’t mean $0 owed.{bill?.paused ? ' Pausing the bill doesn’t pause or change the debt.' : ''}</div>
-        </div>
-      )}
-      {over && <div style={{ marginBottom: 14 }}><Callout tone="neg">This envelope is overspent by <b>{money(-env.avail)}</b>. Cover it by moving money in from another category.</Callout></div>}
-      <div className="card pad" style={{ boxShadow: 'none', background: 'var(--surface-2)' }}>
-        <div className="row between" style={{ marginBottom: 10 }}>
-          <div><div className="eyebrow">{cat.isDebt ? 'Set aside toward payments' : 'Available to spend'}</div><div className={cn('amt-xl num', over && 'neg')}><Money v={env.avail} /></div></div>
-          {cat.billPaused ? <StatusPill status="muted">Bill paused</StatusPill> : cat.target != null && <StatusPill status={env.remaining === 0 ? 'ok' : 'planned'}>{env.remaining === 0 ? 'Target funded' : `${Math.round(env.fundedPct * 100)}% funded`}</StatusPill>}
-        </div>
-        {cat.target != null && <div className="bar planned"><i style={{ width: `${env.fundedPct * 100}%` }} /></div>}
-        <div style={{ marginTop: 8 }}>
-          <div className="kv"><span className="k">Monthly target</span><span className="v num">{cat.target != null ? money(cat.target) : 'None'}</span></div>
-          <div className="kv"><span className="k">Set aside so far</span><span className="v num c-planned">{money(env.assigned)}</span></div>
-          <div className="kv"><span className="k">Still to fund</span><span className="v num">{money(env.remaining)}</span></div>
-          <div className="kv"><span className="k">Spent this month</span><span className="v num">{money(env.spent)}</span></div>
-        </div>
-      </div>
-      <div className="row between" style={{ margin: '16px 0 4px' }}>
-        <div className="small muted">Group: <b style={{ color: 'var(--ink)' }}>{data.groups.find((g) => g.id === cat.groupId)?.name}</b></div>
-        {!editing ? <span className="row gap8" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}><button className="btn ghost sm" onClick={() => openModal({ type: 'category-edit', id })}><Pencil />Edit category</button>{!cat.isDebt && <button className="btn ghost sm" onClick={() => openModal({ type: 'debt-edit', categoryId: id })}>Track as debt</button>}<button className="btn ghost sm" onClick={() => setEditing(true)}>Edit target</button></span> : null}
-      </div>
-      {editing && (
-        <div className="row gap8 fade-in" style={{ marginBottom: 10 }}>
-          <div style={{ flex: 1 }}><MoneyInput value={tgt} onChange={setTgt} autoFocus placeholder="No target" /></div>
-          <button className="btn primary" onClick={async () => { if (await setTarget(id, tgt ? toCents(tgt) : null)) setEditing(false); }}>Save</button>
-        </div>
-      )}
-      <div className="card pad" style={{ boxShadow: 'none', marginTop: 12 }} data-testid="bill-section">
-        <div className="row between" style={{ gap: 8 }}>
-          <div className="eyebrow">Scheduled bill</div>
-          {bill ? <StatusPill status={bill.paused ? 'muted' : 'planned'}>{bill.paused ? 'Paused' : 'Scheduled'}</StatusPill> : <StatusPill status="muted">Funding only</StatusPill>}
-        </div>
-        {bill ? <>
-          <div className="small" style={{ marginTop: 6 }}><b className="num">{money(bill.amount)}</b> {bill.recurring ? bill.period === 'Bi-Weekly' ? 'every 2 weeks' : bill.period.toLowerCase() : 'one time'} · {bill.paused ? 'paused — not in upcoming bills or forecasts' : bill.date ? `next due ${fmtDate(bill.date)}` : 'no due date'}</div>
-          <div className="row gap8" style={{ marginTop: 10, flexWrap: 'wrap' }}>
-            <button className="btn sm" onClick={() => openModal({ type: 'bill-edit', billId: bill.id })}><Pencil />Edit bill</button>
-            <button className="btn sm" disabled={busyBill} onClick={async () => {
-              setBusyBill(true);
-              const resume = bill.paused;
-              const date = resume && bill.date && bill.recurring ? rollForward({ recurring: true, period: bill.period, anchor: bill.anchor, date: bill.date, paid: bill.paid }, bill.date, data.today) : undefined;
-              const ok = await setBillPaused(bill.id, !resume, date); // changes only the paused flag (and the resume date), never the rest of the bill
-              setBusyBill(false); if (ok) toast(resume ? `${bill.name} resumed` : `${bill.name} paused · history and debt kept`);
-            }}>{bill.paused ? 'Resume bill' : 'Pause bill'}</button>
-            <button className="btn sm" data-testid="archive-bill" onClick={() => openModal({ type: 'bill-archive', billId: bill.id })}><Archive />Archive bill</button>
-            {!confirmRemove && <button className="btn sm danger" onClick={() => setConfirmRemove(true)}><Trash />Remove bill</button>}
-          </div>
-          {confirmRemove && <div className="fade-in" style={{ marginTop: 10 }}><Callout tone="warn">Remove the schedule from <b>{cat.name}</b>? The envelope, its money, transactions, past payments{cat.isDebt ? ' and the debt balance' : ''} all stay. Only the due date and reminders go away.
-            <div className="row gap8" style={{ marginTop: 8 }}><button className="btn sm" onClick={() => setConfirmRemove(false)}>Keep bill</button><button className="btn sm danger" disabled={busyBill} onClick={async () => { setBusyBill(true); const ok = await removeBill(id); setBusyBill(false); if (ok) { setConfirmRemove(false); toast(`${cat.name} is now funding-only · nothing deleted`); } }}>Yes, remove bill</button></div></Callout></div>}
-        </> : <>
-          <div className="small muted" style={{ marginTop: 6 }}>No payment schedule — this category only holds budget money. It won’t appear in upcoming bills or the forecast.</div>
-          <button className="btn sm" style={{ marginTop: 10 }} onClick={() => openModal({ type: 'bill-schedule', categoryId: id })}><Plus />Add scheduled bill</button>
-        </>}
-      </div>
-      {!cat.cardAccountId && (
-        <div className="card pad" style={{ boxShadow: 'none', marginTop: 12 }} data-testid="category-archive">
-          <div className="eyebrow">Archive category</div>
-          {(() => {
-            const why = bill ? 'It still has an active scheduled bill — archive the bill first.' : env.avail !== 0 ? `It still holds ${money(env.avail)}. Move that money first so nothing is lost or silently reassigned.` : cat.isDebt && (cat.debtBalance ?? 0) > 0 ? 'It tracks a debt that is still owed.' : '';
-            return <>
-              <div className="small muted" style={{ marginTop: 6 }}>{why || 'Hides it from your budget and from new transactions. Its history, allocations and transactions are kept, and you can restore it any time.'}</div>
-              <div className="row gap8" style={{ marginTop: 10, flexWrap: 'wrap' }}>
-                {env.avail !== 0 && !bill && <button className="btn sm" onClick={() => openModal({ type: 'move', ...(env.avail > 0 ? { from: id } : { to: id, amount: -env.avail }) })}><ArrowLeftRight />Move money</button>}
-                <button className="btn sm" disabled={!!why || busyBill} onClick={async () => { setBusyBill(true); const ok = await setCategoryArchived(id, true); setBusyBill(false); if (ok) { toast(`${cat.name} archived · history kept`, () => { void setCategoryArchived(id, false); }); closeModal(); } }}><Archive />Archive category</button>
-              </div></>;
-          })()}
-        </div>
-      )}
-      {recent.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <div className="eyebrow" style={{ marginBottom: 4 }}>Recent activity</div>
-          {recent.map((t) => (
-            <button key={t.id} className="row between" style={{ width: '100%', padding: '9px 0', borderBottom: '1px solid var(--line)', textAlign: 'left' }} onClick={() => openModal({ type: 'txn', mode: 'view', id: t.id })}>
-              <span><span style={{ fontWeight: 560 }}>{t.payee}</span> <span className="muted small">· {fmtDate(t.date)}</span></span>
-              <span className="num small" style={{ fontWeight: 600 }}>{money(t.splits?.find((s) => s.categoryId === id)?.amount ?? t.amount)}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </Sheet>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════
-// Archive a bill (history kept)
-// ═══════════════════════════════════════════════════════════
-export function BillArchiveSheet({ billId }: { billId: string }) {
-  const { data, closeModal, openModal, archiveBill, restoreBill, toast } = useStore();
-  const bill = data.bills.find((b) => b.id === billId);
-  const cat = data.categories.find((c) => c.id === billId);
-  const [also, setAlso] = useState(false);
-  const [saving, setSaving] = useState(false);
-  if (!bill || !cat) return <Sheet title="Bill not found" onClose={closeModal}><div className="small muted">This bill no longer exists or is already archived.</div></Sheet>;
-  const env = envelope(data, billId);
-  // Transactions in this category that are not payments of this bill (another payee, not confirmed through the bill).
-  const others = data.txns.filter((t) => !t.billId && (t.categoryId === billId || t.splits?.some((s) => s.categoryId === billId)) && t.payee.trim().toLowerCase() !== bill.payee.trim().toLowerCase());
-  const owes = cat.isDebt && (cat.debtBalance ?? 0) > 0;
-  const blocker = env.avail !== 0 ? `${cat.name} still holds ${money(env.avail)}. Move it first if you want to archive the category too.` : owes ? `${cat.name} tracks a debt that is still owed, so the category stays.` : others.length > 0 ? `${others.length} other ${others.length === 1 ? 'transaction uses' : 'transactions use'} this category, so it stays.` : '';
-  const go = async () => {
-    setSaving(true);
-    const withCat = also && !blocker;
-    if (await archiveBill(billId, withCat)) { toast(`${bill.name} archived · history kept`, () => { void restoreBill(billId, withCat); }); closeModal(); } else setSaving(false);
-  };
-  return (
-    <Sheet title="Archive bill" sub={bill.name} onClose={closeModal}
-      footer={<><button className="btn" onClick={closeModal}>Cancel</button><button className="btn primary" disabled={saving} onClick={go}>{saving ? 'Archiving…' : 'Archive bill'}</button></>}>
-      <div className="stack gap12">
-        <Callout icon={<Info />}>Archived bills leave your bill lists, reminders and forecasts. Every past payment, transaction and the original name are kept, and you can restore it from <b>Bills → Archived bills</b>. Nothing is deleted.</Callout>
-        {bill.recurring && <div className="small muted">Its repeating schedule stops while archived. Restoring moves it to its next unpaid due date.</div>}
-        {!bill.recurring && bill.date && !bill.paid[bill.date] && <div className="small muted">{bill.name} has an unpaid due date ({fmtDate(bill.date)}). It will stop counting as upcoming or overdue until you restore it.</div>}
-        <div className="card pad" style={{ boxShadow: 'none' }} data-testid="archive-category-option">
-          <label className="row gap12" style={{ alignItems: 'flex-start', cursor: blocker ? 'default' : 'pointer' }}>
-            <input type="checkbox" checked={also && !blocker} disabled={!!blocker} onChange={(e) => setAlso(e.target.checked)} style={{ marginTop: 3 }} />
-            <span><b>Also archive the “{cat.name}” category</b><div className="small muted" style={{ marginTop: 2 }}>{blocker || 'Nothing else uses it and it holds no money. It leaves your budget and new-transaction choices; its history stays.'}</div></span>
-          </label>
-          {env.avail !== 0 && <button type="button" className="btn sm" style={{ marginTop: 8 }} onClick={() => openModal({ type: 'move', ...(env.avail > 0 ? { from: billId } : { to: billId, amount: -env.avail }) })}><ArrowLeftRight />Move money</button>}
-        </div>
-      </div>
-    </Sheet>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════
 // Bill
 // ═══════════════════════════════════════════════════════════
 export function BillSheet({ billId, date }: { billId: string; date: string }) {
@@ -731,7 +576,8 @@ export function BillSheet({ billId, date }: { billId: string; date: string }) {
   const requestId = useRef(newRequestId()); // one id per sheet: a double-tap or retry can never record the payment twice
   const liquid = data.accounts.filter((a) => a.type !== 'credit');
   const [tab, setTab] = useState<'pay' | 'link' | 'outside'>('pay');
-  const [amt, setAmt] = useState(bill ? centsToInput(bill.amount) : '');
+  const paidSoFar = bill ? paidTowardCurrent(data, bill) : 0; // earlier partial payments toward this obligation (display and default only)
+  const [amt, setAmt] = useState(bill ? centsToInput(paidSoFar > 0 && paidSoFar < bill.amount ? bill.amount - paidSoFar : bill.amount) : '');
   const [paidOn, setPaidOn] = useState(data.today);
   const [acctId, setAcctId] = useState(liquid.find((a) => a.type === 'checking')?.id ?? liquid[0]?.id ?? '');
   const [settle, setSettle] = useState(false);
@@ -749,7 +595,7 @@ export function BillSheet({ billId, date }: { billId: string; date: string }) {
   const isOldest = !!bill.date && date === bill.date;
   const statusPill = occ.paid ? <StatusPill status="ok">Paid</StatusPill> : n < 0 ? <StatusPill status="late">{-n} days overdue</StatusPill> : n <= 3 ? <StatusPill status="warn">Due {relDay(date).toLowerCase()}</StatusPill> : <StatusPill status="muted">{relDay(date)}</StatusPill>;
   const cents = toCents(amt);
-  const partial = tab !== 'link' && cents > 0 && cents < bill.amount;
+  const partial = tab !== 'link' && cents > 0 && paidSoFar + cents < bill.amount; // still short of the full payment, counting what was already paid
   const toCard = !!bill.toAccountId;
   const a = data.accounts.find((x) => x.id === acctId);
   const debtNow = cat?.isDebt ? cat.debtBalance ?? 0 : null;
@@ -816,6 +662,7 @@ export function BillSheet({ billId, date }: { billId: string; date: string }) {
       <div style={{ textAlign: 'center', padding: '0 0 14px' }}>
         <div className="amt-hero num"><Money v={bill.amount} /></div>
         <div style={{ marginTop: 8, display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>{statusPill}{!occ.future && env && occ.short > 0 && <StatusPill status="warn">{money(occ.short, { cents: false })} not set aside</StatusPill>}</div>
+        {paidSoFar > 0 && paidSoFar < bill.amount && <div className="small muted" style={{ marginTop: 8 }} data-testid="paid-so-far">Paid so far <b className="num">{money(paidSoFar)}</b> · <b className="num">{money(bill.amount - paidSoFar)}</b> remaining</div>}
       </div>
       <Seg block value={tab} onChange={setTab} options={[{ v: 'pay', label: 'Record payment' }, { v: 'link', label: 'Already recorded' }, { v: 'outside', label: 'Paid elsewhere' }]} />
 
@@ -1175,111 +1022,6 @@ export function AccountEditSheet({ id }: { id: string }) {
   );
 }
 
-/** Shared schedule fields: payment amount, next due date, recurrence, reminder/prepare. */
-interface ScheduleState { amount: string; date: string; period: 'once' | BillPeriod; mode: Bill['mode'] }
-function ScheduleFields({ s, set }: { s: ScheduleState; set: (p: Partial<ScheduleState>) => void }) {
-  const day = Number((s.date || '0000-00-00').slice(8, 10));
-  return (
-    <div className="stack gap16" data-testid="schedule-fields">
-      <div className="row gap12" style={{ alignItems: 'flex-start' }}>
-        <div className="field grow"><label htmlFor="sf-amt">Payment amount</label><MoneyInput id="sf-amt" value={s.amount} onChange={(v) => set({ amount: v })} /></div>
-        <div className="field grow"><label htmlFor="sf-date">Next due date</label><input id="sf-date" type="date" className="input" value={s.date} onChange={(e) => set({ date: e.target.value })} /></div>
-      </div>
-      <div className="field"><label>Repeats</label><div className="chips">{PERIODS.map((o) => <button key={o.v} className="chip" aria-pressed={s.period === o.v} onClick={() => set({ period: o.v })}>{o.label}</button>)}</div>
-        {(s.period === 'Monthly' || s.period === 'Yearly') && day >= 29 && <div className="xs muted" style={{ marginTop: 6 }}>Anchored to the {day}th: shorter months use their last day, then it returns to the {day}th.</div>}</div>
-    </div>
-  );
-}
-
-export function CategoryAddSheet() {
-  const { data, closeModal, addCategory, toast } = useStore();
-  const [name, setName] = useState('');
-  const [groupId, setGroupId] = useState(data.groups[0]?.id ?? '');
-  const [target, setTarget] = useState('');
-  const [tgtTouched, setTgtTouched] = useState(false);
-  const [emoji, setEmoji] = useState('');
-  const [kind, setKind] = useState<'funding' | 'bill'>('bill');
-  const [sch, setSch] = useState<ScheduleState>({ amount: '', date: '', period: 'Monthly', mode: 'reminder' });
-  const [saving, setSaving] = useState(false);
-  const isBillsGroup = data.groups.find((g) => g.id === groupId)?.kind === 'bills';
-  const scheduled = isBillsGroup && kind === 'bill';
-  const dup = !!name.trim() && data.categories.some((c) => c.name.trim().toLowerCase() === name.trim().toLowerCase());
-  // Sensible default: a monthly bill's funding target starts equal to the payment; other frequencies are never assumed.
-  const tgtShown = tgtTouched ? target : scheduled && sch.period === 'Monthly' ? sch.amount : '';
-  const amountC = toCents(sch.amount);
-  const err = !name.trim() ? 'Give the category a name.' : dup ? 'A category with that name already exists.' : scheduled && amountC <= 0 ? 'Enter the payment amount.' : scheduled && !sch.date ? 'Choose the next due date.' : '';
-  return (
-    <Sheet title="New category" sub={scheduled ? 'A budget envelope plus a scheduled bill, in one step.' : 'A target is optional — you can always just assign what you have.'} onClose={closeModal}
-      footer={<button className="btn primary lg" disabled={!!err || !groupId || saving} onClick={async () => {
-        setSaving(true);
-        const ok = await addCategory({ name: name.trim(), groupId, target: toCents(tgtShown) || null, emoji: emoji.trim() || undefined, schedule: scheduled ? { amount: amountC, date: sch.date, period: sch.period, mode: sch.mode } : undefined });
-        if (ok) { toast(scheduled ? `${name.trim()} added with a scheduled bill` : `${name.trim()} added`); closeModal(); } else setSaving(false);
-      }}>{saving ? 'Adding…' : scheduled ? 'Add category & bill' : 'Add category'}</button>}>
-      <div className="stack gap16">
-        <div className="row gap12"><div className="field grow"><label htmlFor="cn">Name</label><input id="cn" className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} /></div>
-          <div className="field" style={{ width: 84 }}><label htmlFor="ce">Emoji</label><input id="ce" className="input" maxLength={4} value={emoji} onChange={(e) => setEmoji(e.target.value)} style={{ textAlign: 'center' }} /></div></div>
-        <div className="field"><label>Group</label><div className="chips">{data.groups.map((g) => <button key={g.id} className="chip" aria-pressed={groupId === g.id} onClick={() => setGroupId(g.id)}>{g.name}</button>)}</div></div>
-        {isBillsGroup && <div className="field"><label>This category is</label>
-          <Seg block value={kind} onChange={setKind} options={[{ v: 'bill', label: 'A scheduled bill' }, { v: 'funding', label: 'Funding only' }]} />
-          <div className="xs muted" style={{ marginTop: 6 }}>{kind === 'bill' ? 'Has a due date, shows in upcoming bills and the forecast, and you can mark it paid.' : 'Just an envelope you set money aside in. No due date, no reminders — you can add a schedule later.'}</div></div>}
-        {scheduled && <ScheduleFields s={sch} set={(p) => setSch({ ...sch, ...p })} />}
-        <div className="field"><label htmlFor="ct">Monthly funding target{scheduled ? '' : ' (optional)'}</label><MoneyInput id="ct" value={tgtShown} onChange={(v) => { setTarget(v); setTgtTouched(true); }} placeholder="No target" />
-          {scheduled && <div className="xs muted" style={{ marginTop: 6 }}>How much to set aside each month. {sch.period === 'Monthly' ? 'Starts equal to the payment — change it any time.' : 'Left empty for non-monthly bills — enter what you want to set aside per month.'}</div>}</div>
-        {err && name && <div className="small neg" role="alert">{err}</div>}
-      </div>
-    </Sheet>
-  );
-}
-
-export function CategoryEditSheet({ id }: { id: string }) {
-  const { data, closeModal, updateCategory, toast } = useStore();
-  const cat = data.categories.find((c) => c.id === id);
-  const [name, setName] = useState(cat?.name ?? '');
-  const [emoji, setEmoji] = useState(/^[a-z]+$/i.test(cat?.icon ?? '') ? '' : cat?.icon ?? '');
-  const [groupId, setGroupId] = useState(cat?.groupId ?? '');
-  const [saving, setSaving] = useState(false);
-  if (!cat) return <Sheet title="Category not found" onClose={closeModal}><div className="small muted">This category no longer exists.</div></Sheet>;
-  const dup = data.categories.some((c) => c.id !== id && c.name.trim().toLowerCase() === name.trim().toLowerCase());
-  const keepIcon = /^[a-z]+$/i.test(cat.icon); // built-in icon keys stay unless an emoji is typed
-  const err = !name.trim() ? 'Give the category a name.' : dup ? 'Another category already has that name.' : '';
-  const changed = name.trim() !== cat.name || groupId !== cat.groupId || (emoji.trim() !== (keepIcon ? '' : cat.icon));
-  return (
-    <Sheet title="Edit category" sub={cat.name} onClose={closeModal}
-      footer={<><button className="btn" onClick={closeModal}>Cancel</button><button className="btn primary" disabled={!!err || !changed || saving} onClick={async () => {
-        setSaving(true);
-        const ok = await updateCategory(id, { name, emoji: emoji.trim() || (keepIcon ? cat.icon : ''), groupId });
-        if (ok) { toast(`${name.trim()} updated · budget, bills and transactions unchanged`); closeModal(); } else setSaving(false);
-      }}>{saving ? 'Saving…' : 'Save changes'}</button></>}>
-      <Callout icon={<Info />}>Renaming or moving a category keeps its money, transactions, bill, payment history and any debt exactly as they are.</Callout>
-      <div className="row gap12" style={{ marginTop: 14 }}><div className="field grow"><label htmlFor="ecn">Name</label><input id="ecn" className="input" value={name} onChange={(e) => setName(e.target.value)} /></div>
-        <div className="field" style={{ width: 84 }}><label htmlFor="ece">Emoji</label><input id="ece" className="input" maxLength={4} value={emoji} onChange={(e) => setEmoji(e.target.value)} style={{ textAlign: 'center' }} placeholder={keepIcon ? '—' : ''} /></div></div>
-      <div className="field" style={{ marginTop: 14 }}><label>Group</label><div className="chips">{data.groups.map((g) => <button key={g.id} className="chip" aria-pressed={groupId === g.id} onClick={() => setGroupId(g.id)}>{g.name}</button>)}</div></div>
-      {err && changed && <div className="small neg" style={{ marginTop: 12 }} role="alert">{err}</div>}
-    </Sheet>
-  );
-}
-
-/** Add a payment schedule to a category that has none (funding-only today). Funding target, balance and history are not touched. */
-export function BillScheduleSheet({ categoryId }: { categoryId: string }) {
-  const { data, closeModal, scheduleBill, toast } = useStore();
-  const cat = data.categories.find((c) => c.id === categoryId);
-  const [sch, setSch] = useState<ScheduleState>({ amount: cat?.target ? centsToInput(cat.target) : '', date: '', period: 'Monthly', mode: 'reminder' });
-  const [saving, setSaving] = useState(false);
-  if (!cat) return <Sheet title="Category not found" onClose={closeModal}><div className="small muted">This category no longer exists.</div></Sheet>;
-  const amountC = toCents(sch.amount);
-  const err = amountC <= 0 ? 'Enter the payment amount.' : !sch.date ? 'Choose the next due date.' : '';
-  return (
-    <Sheet title="Add scheduled bill" sub={cat.name} onClose={closeModal}
-      footer={<><button className="btn" onClick={closeModal}>Cancel</button><button className="btn primary" disabled={!!err || saving} onClick={async () => {
-        setSaving(true);
-        if (await scheduleBill(categoryId, { amount: amountC, date: sch.date, period: sch.period, mode: sch.mode })) { toast(`${cat.name} now has a scheduled bill · no transactions created`); closeModal(); } else setSaving(false);
-      }}>{saving ? 'Saving…' : 'Add bill'}</button></>}>
-      <Callout icon={<Info />}>This only adds the payment schedule. The envelope’s monthly target ({cat.target ? money(cat.target) : 'none'}), its balance and your transactions stay as they are.</Callout>
-      <div style={{ marginTop: 14 }}><ScheduleFields s={sch} set={(p) => setSch({ ...sch, ...p })} /></div>
-    </Sheet>
-  );
-}
-
 // ═══════════════════════════════════════════════════════════
 // Menu + account footer
 // ═══════════════════════════════════════════════════════════
@@ -1301,105 +1043,15 @@ export function AccountFoot() {
 export function MenuSheet() {
   const { closeModal, theme, setTheme, openModal } = useStore();
   const link = (path: string, label: string, icon: React.ReactNode) => (
-    <button className="li hover" style={{ padding: '14px 4px' }} onClick={() => { closeModal(); go(path); }}><span className="li-ico">{icon}</span><span className="li-title grow">{label}</span><ArrowRight size={16} className="muted" /></button>
+    <button className="rowx hover" onClick={() => { closeModal(); go(path); }}><span className="li-ico">{icon}</span><span className="li-title grow">{label}</span><ArrowRight size={16} className="muted" /></button>
   );
   return (
     <Sheet title="More" onClose={closeModal}>
-      <div className="list">{link('/accounts', 'Accounts', <Landmark />)}{link('/insights', 'Insights', <Eye />)}{link('/insights/forecast', 'Forecast', <Gauge />)}{link('/insights/credit', 'Credit', <Gauge />)}{link('/settings', 'Settings', <Wallet />)}
-        <button className="li hover" style={{ padding: '14px 4px' }} onClick={() => openModal({ type: 'category-add' })}><span className="li-ico"><Plus /></span><span className="li-title grow">New category or bill</span><ArrowRight size={16} className="muted" /></button>
-        <button className="li hover" style={{ padding: '14px 4px' }} onClick={() => openModal({ type: 'cutover' })}><span className="li-ico"><Scale /></span><span className="li-title grow">Set opening balances</span><ArrowRight size={16} className="muted" /></button></div>
+      <div className="group">{link('/insights', 'Insights', <Eye />)}{link('/insights/forecast', 'Forecast', <Gauge />)}{link('/insights/credit', 'Credit', <Gauge />)}{link('/settings', 'Settings', <Wallet />)}</div>
+      <div className="group" style={{ marginTop: 14 }}>
+        <button className="rowx hover" onClick={() => openModal({ type: 'category-add' })}><span className="li-ico"><Plus /></span><span className="li-title grow">Add item to Plan</span><ArrowRight size={16} className="muted" /></button>
+        <button className="rowx hover" onClick={() => openModal({ type: 'cutover' })}><span className="li-ico"><Scale /></span><span className="li-title grow">Set opening balances</span><ArrowRight size={16} className="muted" /></button></div>
       <div style={{ marginTop: 18 }}><div className="label" style={{ marginBottom: 8 }}>Appearance</div><ThemeSwitch theme={theme} setTheme={setTheme} /></div>
-    </Sheet>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════
-// Debt details for a category (amount owed). Independent of bills, envelopes and accounts.
-// ═══════════════════════════════════════════════════════════
-export function DebtEditSheet({ categoryId }: { categoryId: string }) {
-  const { data, closeModal, saveDebt, toast } = useStore();
-  const cat = data.categories.find((c) => c.id === categoryId);
-  const [isDebt, setIsDebt] = useState(true); // opened to track a debt; the toggle switches it back off
-  const [bal, setBal] = useState(cat?.debtBalance ? centsToInput(cat.debtBalance) : '');
-  const [saving, setSaving] = useState(false);
-  if (!cat) return <Sheet title="Category not found" onClose={closeModal}><div className="small muted">This category no longer exists.</div></Sheet>;
-  const cents = toCents(bal);
-  const changed = isDebt !== !!cat.isDebt || (isDebt && cents !== (cat.debtBalance ?? 0));
-  const save = async () => {
-    setSaving(true);
-    const ok = await saveDebt(categoryId, { isDebt, balance: isDebt ? cents : (cat.debtBalance ?? 0) });
-    if (ok) { toast(isDebt ? `${cat.name}: balance owed set to ${money(cents)} · nothing else changed` : `${cat.name} is now an ordinary category`); closeModal(); } else setSaving(false);
-  };
-  return (
-    <Sheet title={cat.isDebt ? 'Edit debt' : 'Track as debt'} sub={cat.name} onClose={closeModal}
-      footer={<><button className="btn" onClick={closeModal}>Cancel</button><button className="btn primary" disabled={!changed || saving} onClick={save}>{saving ? 'Saving…' : 'Save'}</button></>}>
-      <Callout icon={<Info />}>This only records how much you owe. No transaction is created, and account balances, budget funding, bills and payment history are not touched.</Callout>
-      <div className="field" style={{ marginTop: 14 }}><label>This category is</label>
-        <Seg block value={isDebt ? 'debt' : 'plain'} onChange={(v) => setIsDebt(v === 'debt')} options={[{ v: 'plain', label: 'An ordinary category' }, { v: 'debt', label: 'A debt' }]} /></div>
-      {isDebt && <div className="field" style={{ marginTop: 14 }}><label htmlFor="debt-bal">Amount you currently owe</label><MoneyInput id="debt-bal" value={bal} onChange={setBal} autoFocus placeholder="0.00" />
-        <div className="xs muted" style={{ marginTop: 6 }}>Correct it any time. A due date or monthly payment is optional — set those with “Edit target” or a linked bill. If the debt has a bill and you post its payment with a transaction, the balance drops by the amount paid.</div></div>}
-      {!isDebt && cat.isDebt && <div className="xs muted" style={{ marginTop: 10 }}>The saved balance ({money(cat.debtBalance ?? 0)}) is kept in case you switch this back on.</div>}
-    </Sheet>
-  );
-}
-
-const PERIODS: { v: 'once' | BillPeriod; label: string }[] = [{ v: 'once', label: 'One time' }, { v: 'Weekly', label: 'Weekly' }, { v: 'Bi-Weekly', label: 'Every 2 weeks' }, { v: 'Monthly', label: 'Monthly' }, { v: 'Yearly', label: 'Yearly' }];
-export function BillEditSheet({ billId }: { billId: string }) {
-  const { data, closeModal, updateBill, toast } = useStore();
-  const bill = data.bills.find((b) => b.id === billId);
-  const [name, setName] = useState(bill?.name ?? '');
-  const [amt, setAmt] = useState(bill ? centsToInput(bill.amount) : '');
-  const [date, setDate] = useState(bill?.date ?? data.today);
-  const [period, setPeriod] = useState<'once' | BillPeriod>(bill ? (bill.recurring ? bill.period : 'once') : 'Monthly');
-  const [mode, setMode] = useState<Bill['mode']>(bill?.mode ?? 'reminder');
-  const [paused, setPaused] = useState(bill?.paused ?? false);
-  const [groupId, setGroupId] = useState(data.categories.find((c) => c.id === bill?.categoryId)?.groupId ?? '');
-  const [tgt, setTgt] = useState('');
-  const [tgtTouched, setTgtTouched] = useState(false);
-  const [saving, setSaving] = useState(false);
-  if (!bill) return <Sheet title="Bill not found" onClose={closeModal}><div className="small muted">This bill no longer exists.</div></Sheet>;
-  const cents = toCents(amt);
-  const catRow = data.categories.find((c) => c.id === bill.categoryId);
-  // The funding target and the payment are separate numbers. They only move together while they are still equal AND the bill is monthly;
-  // otherwise the target is left alone unless you edit it.
-  const wasTied = (catRow?.target ?? 0) === bill.amount;
-  const tgtEdited = tgtTouched ? (toCents(tgt) || null) : undefined;
-  const tgtEffective: number | null | undefined = tgtTouched ? (tgtEdited === (catRow?.target ?? null) ? undefined : tgtEdited) : wasTied && period === 'Monthly' && cents !== bill.amount ? cents : undefined;
-  const tgtShown = tgtTouched ? tgt : tgtEffective != null ? centsToInput(tgtEffective) : catRow?.target ? centsToInput(catRow.target) : '';
-  const dup = data.categories.some((c) => c.id !== bill.categoryId && c.name.trim().toLowerCase() === name.trim().toLowerCase());
-  const alreadyPaid = !!bill.paid[date] && date !== bill.date;
-  const skipsOverdue = !!bill.date && bill.date < data.today && !bill.paid[bill.date] && date > bill.date;
-  const err = !name.trim() ? 'Give the bill a name.' : dup ? 'Another category already has that name.' : cents <= 0 ? 'Enter an amount greater than $0.' : !date ? 'Choose a due date.' : alreadyPaid ? 'That date is already recorded as paid. Choose the next unpaid date.' : '';
-  const changed = name.trim() !== bill.name || cents !== bill.amount || date !== bill.date || period !== (bill.recurring ? bill.period : 'once') || mode !== bill.mode || paused !== bill.paused || tgtEffective !== undefined || groupId !== data.categories.find((c) => c.id === bill.categoryId)?.groupId;
-  const save = async () => {
-    setSaving(true);
-    const ok = await updateBill(billId, { name, amount: cents, date, recurring: period !== 'once', period: period === 'once' ? bill.period : period, mode, groupId, paused, anchor: date !== bill.date ? date : undefined, target: tgtEffective });
-    if (ok) { toast(`${name.trim()} updated · no transactions changed`); closeModal(); } else setSaving(false);
-  };
-  return (
-    <Sheet title="Edit bill" sub={bill.name} onClose={closeModal}
-      footer={<><button className="btn" onClick={closeModal}>Cancel</button><button className="btn primary" disabled={!!err || !changed || saving} onClick={save}>{saving ? 'Saving…' : 'Save changes'}</button></>}>
-      <Callout icon={<Info />}>Changes apply from now on. Past payments, transactions and your budget amounts stay exactly as they are, and nothing is posted.</Callout>
-      <div className="field" style={{ marginTop: 14 }}><label>Status</label>
-        <Seg block value={paused ? 'paused' : 'active'} onChange={(v) => { const p = v === 'paused'; setPaused(p); if (!p && bill.paused && date < data.today && period !== 'once') setDate(rollForward({ recurring: true, period: period as BillPeriod, anchor: bill.anchor, date: bill.date, paid: bill.paid }, date, data.today)); }} options={[{ v: 'active', label: 'Active' }, { v: 'paused', label: 'Paused' }]} />
-        <div className="xs muted" style={{ marginTop: 6 }}>{paused ? 'Paused bills drop out of upcoming bills, overdue alerts and forecasts. History and payments are kept.' : bill.paused ? `Resuming — next due ${fmtDate(date)}. Change it below if needed.` : 'Active bills show in upcoming bills, alerts and forecasts.'}</div></div>
-      <div className="field" style={{ marginTop: 14 }}><label htmlFor="bn">Name</label><input id="bn" className="input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" /></div>
-      <div className="row gap12" style={{ marginTop: 14, alignItems: 'flex-start' }}>
-        <div className="field grow"><label htmlFor="ba">Amount due</label><MoneyInput id="ba" value={amt} onChange={setAmt} /></div>
-        <div className="field grow"><label htmlFor="bd">Next due date</label><input id="bd" type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} /></div>
-      </div>
-      {(period === 'Monthly' || period === 'Yearly') && Number((date || '0000-00-00').slice(8, 10)) >= 29 && <div className="xs muted" style={{ marginTop: 8 }}>Anchored to the {Number(date.slice(8, 10))}th{period === 'Yearly' ? ' of that month' : ''}: shorter months use their last day, then it returns to the {Number(date.slice(8, 10))}th.</div>}
-      {skipsOverdue && <div className="xs muted" style={{ marginTop: 8 }}>The overdue {fmtDate(bill.date!)} due date stops showing. It isn’t marked paid and nothing is recorded.</div>}
-      <div className="field" style={{ marginTop: 14 }}><label>Repeats</label>
-        <div className="chips">{PERIODS.map((o) => <button key={o.v} className="chip" aria-pressed={period === o.v} onClick={() => setPeriod(o.v)}>{o.label}</button>)}</div></div>
-      <div className="field" style={{ marginTop: 14 }}><label htmlFor="bt">Monthly funding target</label><MoneyInput id="bt" value={tgtShown} onChange={(v) => { setTgt(v); setTgtTouched(true); }} placeholder="No target" />
-        <div className="xs muted" style={{ marginTop: 6 }}>What you set aside each month. Separate from the payment amount above.</div></div>
-      
-      <div className="field" style={{ marginTop: 14 }}><label htmlFor="bg">Budget group</label>
-        <select id="bg" className="input" value={groupId} onChange={(e) => setGroupId(e.target.value)}>{data.groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}</select>
-        <div className="xs muted" style={{ marginTop: 6 }}>This bill is paid from its own budget envelope, <b>{name.trim() || bill.name}</b>. Renaming it renames that envelope everywhere; its history stays attached.</div></div>
-      {err && changed && <div className="small neg" style={{ marginTop: 12 }} role="alert">{err}</div>}
     </Sheet>
   );
 }
@@ -1411,12 +1063,12 @@ export function SheetHost() {
     case 'txn': return <TxnSheet key={`${modal.mode}-${modal.id ?? 'new'}-${JSON.stringify(modal.prefill ?? {})}`} mode={modal.mode} id={modal.id} prefill={modal.prefill} />;
     case 'assign': return <AssignSheet />;
     case 'move': return <MoveSheet key={`${modal.from}-${modal.to}-${modal.amount}`} from={modal.from} to={modal.to} amount={modal.amount} />;
-    case 'category': return <CategorySheet key={modal.id} id={modal.id} />;
-    case 'category-add': return <CategoryAddSheet />;
-    case 'category-edit': return <CategoryEditSheet key={modal.id} id={modal.id} />;
-    case 'bill-schedule': return <BillScheduleSheet key={modal.categoryId} categoryId={modal.categoryId} />;
-    case 'bill-archive': return <BillArchiveSheet key={modal.billId} billId={modal.billId} />;
-    case 'bill-edit': return <BillEditSheet key={modal.billId} billId={modal.billId} />;
+    case 'category': return <ItemSheet key={modal.id} id={modal.id} />;
+    case 'category-add': return <ItemAddSheet />;
+    case 'category-edit': return <ItemEditSheet key={modal.id} id={modal.id} />;
+    case 'bill-schedule': return <ItemEditSheet key={modal.categoryId} id={modal.categoryId} />;
+    case 'bill-archive': return <ArchiveItemSheet key={modal.billId} id={modal.billId} />;
+    case 'bill-edit': return <ItemEditSheet key={modal.billId} id={modal.billId} />;
     case 'bill': return <BillSheet key={`${modal.billId}-${modal.date}`} billId={modal.billId} date={modal.date} />;
     case 'income': return <IncomeSheet key={`${modal.mode}-${modal.id}`} mode={modal.mode} id={modal.id} />;
     case 'reconcile': return <ReconcileSheet key={modal.id} id={modal.id} />;
@@ -1426,7 +1078,7 @@ export function SheetHost() {
     case 'credit-score': return <CreditScoreSheet key={`${modal.id ?? 'new'}-${modal.bureau ?? ''}-${modal.model ?? ''}`} id={modal.id} bureau={modal.bureau} model={modal.model} />;
     case 'credit-card': return <CreditCardSheet key={modal.accountId} accountId={modal.accountId} />;
     case 'credit-reported': return <CreditReportedSheet key={`${modal.id ?? 'new'}-${modal.accountId ?? ''}`} id={modal.id} accountId={modal.accountId} />;
-    case 'debt-edit': return <DebtEditSheet key={modal.categoryId} categoryId={modal.categoryId} />;
+    case 'debt-edit': return <ItemEditSheet key={modal.categoryId} id={modal.categoryId} />;
     case 'menu': return <MenuSheet />;
     default: return null;
   }

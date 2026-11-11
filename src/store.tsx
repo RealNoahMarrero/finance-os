@@ -55,6 +55,10 @@ interface Store {
   payBill: (input: Omit<db.PayInput, 'requestId'> & { requestId?: string }) => Promise<db.PayResult | undefined>;
   unpayBill: (billId: string, due: string, deleteTxn: boolean, partial?: { transactionId?: string; debtApplied: number }) => Promise<boolean>;
   setBillPaused: (billId: string, paused: boolean, resume?: string) => Promise<boolean>;
+  /** One item = a category plus an optional schedule. Create, edit and archive are single atomic operations. */
+  saveItem: (i: db.SaveItemInput) => Promise<string | undefined>;
+  archiveItem: (id: string) => Promise<number | undefined>;
+  restoreItem: (id: string, reassign?: number, resume?: string) => Promise<boolean>;
   updateBill: (billId: string, patch: db.BillPatch) => Promise<boolean>;
   receiveIncome: (incomeId: string, opts: { date: string; amount: number; accountId: string }) => Promise<boolean>;
   skipIncome: (incomeId: string) => Promise<boolean>;
@@ -168,6 +172,9 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
     return r.ok ? r.value : undefined;
   }, [run]);
   const unpayBill: Store['unpayBill'] = useCallback(async (id, due, del, partial) => (await run(() => db.unpayBill(id, due, del, partial))).ok, [run]);
+  const saveItem: Store['saveItem'] = useCallback(async (i) => { const r = await run(() => db.saveItem(i)); return r.ok ? r.value : undefined; }, [run]);
+  const archiveItem: Store['archiveItem'] = useCallback(async (id) => { const r = await run(() => db.archiveItem(id, todayISO())); return r.ok ? r.value : undefined; }, [run]);
+  const restoreItem: Store['restoreItem'] = useCallback(async (id, reassign = 0, resume) => (await run(() => db.restoreItem(id, reassign, resume))).ok, [run]);
   const setBillPaused: Store['setBillPaused'] = useCallback(async (id, paused, resume) => (await run(() => db.setBillPaused(id, paused, resume))).ok, [run]);
   const updateCategory: Store['updateCategory'] = useCallback(async (id, p) => (await run(() => db.updateCategory(id, p))).ok, [run]);
   const scheduleBill: Store['scheduleBill'] = useCallback(async (id, s) => (await run(() => db.scheduleBill(id, s))).ok, [run]);
@@ -254,8 +261,8 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
 
   const value = useMemo<Store>(() => ({
     data, status, loadError, refresh, busy, email, signOut, modal, openModal: setModal, closeModal: () => setModal(null), toasts, toast, theme, setTheme,
-    addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, archiveBill, restoreBill, setCategoryArchived, payBill, unpayBill, setBillPaused, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, updateIncome, deleteIncome, reconcile, setCutover, setCutovers, addAccount, updateAccount, archiveAccount, restoreAccount, deleteAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported,
-  }), [data, status, loadError, busy, email, modal, toasts, theme, refresh, signOut, toast, setTheme, addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, archiveBill, restoreBill, setCategoryArchived, payBill, unpayBill, setBillPaused, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported]);
+    addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, archiveBill, restoreBill, setCategoryArchived, payBill, unpayBill, setBillPaused, saveItem, archiveItem, restoreItem, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, updateIncome, deleteIncome, reconcile, setCutover, setCutovers, addAccount, updateAccount, archiveAccount, restoreAccount, deleteAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported,
+  }), [data, status, loadError, busy, email, modal, toasts, theme, refresh, signOut, toast, setTheme, addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, archiveBill, restoreBill, setCategoryArchived, payBill, unpayBill, setBillPaused, saveItem, archiveItem, restoreItem, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported]);
 
   return (
     <Ctx.Provider value={value}>
