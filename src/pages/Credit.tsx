@@ -118,7 +118,7 @@ function ScoreHistory({ sRows }: { sRows: ScoreRow[] }) {
           <div className="chips" role="group" aria-label="Filter by scoring model"><button className="chip" aria-pressed={model === 'all'} onClick={() => setModel('all')}>All models</button>{modelList.map((m) => <button key={m} className="chip" aria-pressed={model.toLowerCase() === m.toLowerCase()} onClick={() => setModel(m)}>{m}</button>)}</div>
         </div>
         {filtered.length === 0 ? <div className="small muted" style={{ padding: '24px 0' }}>No entries match these filters.</div> : <>
-          <div style={{ marginTop: 14 }}><ScoreChart series={series} /></div>
+          <div style={{ marginTop: 14 }}><ScoreChart series={series} height={340} /></div>
           <div className="legend" style={{ marginTop: 10 }} aria-label="Chart legend">{series.map((s) => <span key={s.key}><SeriesSwatch s={s} all={series} />{s.bureau} · {s.model}</span>)}</div>
           {series.length > 1 && <div className="xs muted" style={{ marginTop: 6 }}>Each line is one bureau and one scoring model; lines are never combined or compared across models.</div>}
           <div className="list" style={{ marginTop: 14 }} role="table" aria-label="Score entries">

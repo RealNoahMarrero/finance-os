@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Plus, Receipt, Search, X } from 'lucide-react';
 import { useStore } from '../store';
-import { dayHeading, diffDays, fmtDate, money, sum } from '../lib';
+import { cn, dayHeading, diffDays, fmtDate, money, sum } from '../lib';
 import { Empty, Money, Seg } from '../ui';
 import { PageHead, TxnIcon, txnCategoryLabel, txnDisplayAmount } from '../shared';
 import type { Txn } from '../data';
@@ -94,7 +94,7 @@ export function Transactions({ query }: { query: URLSearchParams }) {
         ))}
       </div>
 
-      <div className="split-layout">
+      <div className={cn('split-layout', !selTxn && 'idle')}>
         <section className="card" style={{ overflow: 'hidden' }} aria-label="Transaction list">
           {scheduled.length > 0 && (<>
             <div className="tx-day"><span>Scheduled · not yet posted</span><span>{scheduled.length}</span></div>

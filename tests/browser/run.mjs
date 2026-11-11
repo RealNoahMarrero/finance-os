@@ -22,7 +22,7 @@ const SHOTS = process.env.SHOTS; if (SHOTS) fs.mkdirSync(SHOTS, { recursive: tru
 const themes = SHOTS ? ['light', 'dark'] : ['light'];
 const browser = await puppeteer.launch({ executablePath: chrome, headless: 'new', args: ['--no-sandbox'] });
 const failures = []; let checks = 0;
-for (const theme of themes) for (const [kind, vp] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true }]]) {
+for (const theme of themes) for (const [kind, vp] of [['desktop', { width: Number(process.env.SHOTS_W || 1440), height: Number(process.env.SHOTS_H || 900) }], ['phone', { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true }]]) {
   const page = await browser.newPage(); await page.setViewport(vp);
   await page.evaluateOnNewDocument((s, t) => { localStorage.setItem('fos-auth', JSON.stringify(s)); localStorage.setItem('fos-theme', t); }, session, theme);
   page.on('pageerror', (e) => failures.push(`${kind} pageerror: ${e}`));

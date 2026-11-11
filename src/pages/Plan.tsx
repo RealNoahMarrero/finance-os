@@ -90,7 +90,7 @@ export function ForecastTab() {
       </div>
       <section className="card pad" style={{ marginBottom: 16 }}>
         <div className="sect-head"><div><h2 className="sect-title">Checking &amp; cash <StatusPill status="proj">Projected</StatusPill></h2><div className="small muted">Solid line is recorded history. Everything right of “Today” is a projection.</div></div></div>
-        <ForecastChart f={f} horizon={horizon} scenario={scenario} today={data.today} height={300} />
+        <ForecastChart f={f} horizon={horizon} scenario={scenario} today={data.today} height={400} />
         <div style={{ marginTop: 12 }}><ForecastLegend scenario={scenario} /></div>
       </section>
 

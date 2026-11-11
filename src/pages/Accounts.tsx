@@ -33,7 +33,8 @@ export function Accounts() {
       <a key={a.id} className="rowx" href={`#/accounts/${a.id}`} aria-label={`${a.name}, ${money(a.balance)}`}>
         <div className="li-ico"><AccountIcon type={a.type} /></div>
         <div className="grow"><div className="li-title">{a.name}</div>
-          <div className="li-sub">{credit && a.limit ? `${Math.round(util * 100)}% of ${compact(a.limit)} limit · ${money(a.limit - a.balance, { cents: false })} available` : typeLabel(a)}</div></div>
+          <div className="li-sub">{credit && a.limit ? `${Math.round(util * 100)}% of ${compact(a.limit)} limit · ${money(a.limit - a.balance, { cents: false })} available` : typeLabel(a)}</div>
+          {credit && a.limit ? <div className="bar" style={{ marginTop: 8, maxWidth: 280 }}><i style={{ width: `${Math.min(100, util * 100)}%`, background: util > 0.5 ? 'var(--warn)' : 'var(--accent)' }} /></div> : null}</div>
         <div className="d-only"><StaleBadge a={a} today={data.today} /></div>
         <div className="right"><div className="amt-md num"><Money v={a.balance} /></div><div className="xs muted">{credit ? 'owed' : ''}</div></div>
         <ChevronRight size={16} className="muted" />

@@ -24,6 +24,11 @@ export function MoneyInput({ value, onChange, autoFocus, big, placeholder = '0.0
   );
 }
 
+/** Accounts as chips when there are few, as a clean menu when there are many. */
+export function AccountPick({ accounts, value, onPick, label }: { accounts: Account[]; value: string; onPick: (id: string) => void; label: string }) {
+  if (accounts.length <= 4) return <div className="chips">{accounts.map((a) => <button type="button" key={a.id} className="chip" aria-pressed={value === a.id} onClick={() => onPick(a.id)}>{a.name}</button>)}</div>;
+  return <select className="select" aria-label={label} value={value} onChange={(e) => onPick(e.target.value)}><option value="" disabled>Choose an account…</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>;
+}
 const groupCats = (cats: Category[], groups: { id: string; name: string }[]) => groups.map((g) => ({ g, items: cats.filter((c) => c.groupId === g.id && !c.hidden) })).filter((x) => x.items.length);
 
 // ═══════════════════════════════════════════════════════════
@@ -282,9 +287,7 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
 
         <div className="field" style={{ marginTop: 16 }}>
           <label>{type === 'transfer' ? 'From' : type === 'income' ? 'Deposit to' : 'Account'}</label>
-          <div className="chips">
-            {data.accounts.map((a) => <button type="button" key={a.id} className="chip" aria-pressed={accountId === a.id} onClick={() => { setAccountId(a.id); setAcctTouched(true); }}>{a.name}</button>)}
-          </div>
+          <AccountPick accounts={data.accounts} value={accountId} label="Account" onPick={(id) => { setAccountId(id); setAcctTouched(true); }} />
           {sourceAcct && afterBal != null && type !== 'transfer' && (
             <div className="xs muted num" style={{ marginTop: 2 }}>Recorded balance {money(sourceAcct.balance)} → <b style={{ color: 'var(--ink-2)' }}>{money(afterBal)}</b> after this</div>
           )}
@@ -293,9 +296,7 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
         {type === 'transfer' && (
           <div className="field" style={{ marginTop: 16 }}>
             <label>To</label>
-            <div className="chips">
-              {data.accounts.filter((a) => a.id !== accountId).map((a) => <button type="button" key={a.id} className="chip" aria-pressed={toAccountId === a.id} onClick={() => setToAccountId(a.id)}>{a.name}</button>)}
-            </div>
+            <AccountPick accounts={data.accounts.filter((a) => a.id !== accountId)} value={toAccountId} label="To account" onPick={setToAccountId} />
             {acct(toAccountId)?.type === 'credit' && <div className="xs muted">Counts toward the card’s payment envelope in your budget.</div>}
           </div>
         )}
@@ -670,7 +671,7 @@ export function BillSheet({ billId, date }: { billId: string; date: string }) {
         <div className="stack gap12" style={{ marginTop: 14 }}>
           <div className="row gap12"><div className="field grow"><label htmlFor="pay-amt">Amount</label><MoneyInput id="pay-amt" value={amt} onChange={setAmt} autoFocus /></div>
             <div className="field grow"><label htmlFor="pay-date">Date</label><input id="pay-date" type="date" className="input" value={paidOn} max={data.today} onChange={(e) => setPaidOn(e.target.value)} /></div></div>
-          <div className="field"><label>Pay from</label><div className="chips">{liquid.map((x) => <button key={x.id} className="chip" aria-pressed={acctId === x.id} onClick={() => setAcctId(x.id)}>{x.name}</button>)}</div></div>
+          <div className="field"><label>Pay from</label><AccountPick accounts={liquid} value={acctId} label="Pay from" onPick={setAcctId} /></div>
         </div>
       )}
       {tab === 'link' && (

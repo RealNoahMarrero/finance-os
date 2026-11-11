@@ -79,13 +79,13 @@ export function Insights({ tab = 'overview' }: { tab?: 'overview' | 'forecast' |
       <div className="grid g12" style={{ marginBottom: 16 }}>
         <section className="card pad" style={{ gridColumn: 'span 7' }}>
           <div className="sect-head"><h2 className="sect-title">Income vs spending</h2><Kind kind="actual" label="Actual" /></div>
-          <FlowBars months={flow} />
+          <FlowBars months={flow} height={320} />
           <div className="xs muted" style={{ marginTop: 8 }}><Info size={12} style={{ verticalAlign: -2 }} /> The current month is still in progress.</div>
         </section>
         <section className="card pad" style={{ gridColumn: 'span 5' }}>
           <div className="sect-head"><h2 className="sect-title">Net worth</h2><span className="small muted">12 months · estimate</span></div>
           <div className="amt-xl num" style={{ marginBottom: 6 }}><Money v={nw[nw.length - 1].value} cents={false} /></div>
-          <AreaLine series={nw} label="Net worth" height={190} />
+          <AreaLine series={nw} label="Net worth" height={300} />
         </section>
       </div>
 

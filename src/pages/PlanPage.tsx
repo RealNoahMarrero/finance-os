@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Archive, ChevronRight, Plus, Search, Wallet } from 'lucide-react';
+import { Archive, ChevronDown, ChevronRight, Plus, Search, Wallet } from 'lucide-react';
 import { useStore } from '../store';
 import { envelope, groupBills, readyToAssign, upcomingBills, type BillGroup, type Category } from '../data';
 import { cn, diffDays, fmtDate, mon, money, relDay, sum } from '../lib';
@@ -19,7 +19,7 @@ export function BillList({ groups }: { groups: BillGroup[] }) {
           <div key={g.bill.id} className="rowx">
             <div className={cn('datebox', late && 'late')}><b className="num">{fmtDate(n.date, 'day')}</b><span>{mon(n.date)}</span></div>
             <button className="grow" style={{ textAlign: 'left', minWidth: 0 }} onClick={() => openModal({ type: 'bill', billId: g.bill.id, date: n.date })} aria-label={`${g.bill.name} details`}>
-              <div className="row gap8"><span className="li-title ellipsis">{g.bill.name}</span>{g.missed > 1 ? <StatusPill status="late">{g.missed} missed</StatusPill> : late ? <StatusPill status="late">Overdue</StatusPill> : soon ? <StatusPill status="warn">Due soon</StatusPill> : null}</div>
+              <div className="row gap8 wrapnames"><span className="li-title ellipsis">{g.bill.name}</span>{g.missed > 1 ? <StatusPill status="late">{g.missed} missed</StatusPill> : late ? <StatusPill status="late">Overdue</StatusPill> : soon ? <StatusPill status="warn">Due soon</StatusPill> : null}</div>
               <div className="li-sub ellipsis">{late ? (g.missed > 1 ? `${g.missed} payments missed · since ${fmtDate(n.date)}` : `Was due ${relDay(n.date, data.today).toLowerCase()}`) : relDay(n.date, data.today)}</div>
             </button>
             <div className="right"><div className="amt-md num"><Money v={g.bill.amount} /></div>{late && g.missed > 1 && <div className="xs muted num">{money(g.total)} total</div>}</div>
@@ -40,6 +40,9 @@ export function Plan({ query }: { query: URLSearchParams }) {
   const [filter, setFilter] = useState<Filter>(query.get('filter') === 'archived' ? 'archived' : 'all');
   const [q, setQ] = useState('');
   const [sel, setSel] = useState<string | null>(null);
+  // Which groups are collapsed is remembered on this device.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('fos-plan-collapsed') || '{}'); } catch { return {}; } });
+  const toggleGroup = (id: string) => setCollapsed((c) => { const n = { ...c, [id]: !c[id] }; try { localStorage.setItem('fos-plan-collapsed', JSON.stringify(n)); } catch { /* storage unavailable */ } return n; });
   const rta = readyToAssign(data);
   const wide = () => matchMedia('(min-width: 1101px)').matches;
   const setView = (v: PlanView) => { location.hash = v === 'items' ? '/plan' : `/plan?view=${v}`; };
@@ -118,8 +121,9 @@ export function Plan({ query }: { query: URLSearchParams }) {
               if (!rows.length) return null;
               return (
                 <section key={g.id} aria-label={g.name}>
-                  <div className="group-h"><h2>{g.name}</h2><span className="small muted num">{money(sum(rows, (r) => r.env.avail), { cents: false })}</span></div>
-                  <div className="group">
+                  {(() => { const open = !collapsed[g.id] || q.trim() !== '' || filter !== 'all'; return (
+                  <><button className="group-toggle" aria-expanded={open} aria-label={`${g.name}, ${rows.length} items`} onClick={() => toggleGroup(g.id)}><span className="t"><ChevronDown />{g.name}<span className="muted" style={{ fontWeight: 500 }}>· {rows.length}</span></span><span className="small muted num">{money(sum(rows, (r) => r.env.avail), { cents: false })}</span></button>
+                  {open && <div className="group">
                     {rows.map((it) => {
                       const st = status(it); const over = it.env.avail < 0; const late = !!it.g && it.g.missed > 0; const soon = !!it.g && !late && diffDays(it.g.next.date, data.today) <= 3;
                       return (
@@ -129,12 +133,12 @@ export function Plan({ query }: { query: URLSearchParams }) {
                           <div className="grow"><div className="li-title ellipsis">{it.cat.name}</div><div className={cn('li-sub', st.tone === 'neg' && 'neg')} style={st.tone === 'neg' ? { fontWeight: 560 } : undefined}>{st.text || ' '}</div></div>
                           {it.bill && it.g && (late || soon) && <button className="btn sm primary" onClick={(e) => { e.stopPropagation(); openModal({ type: 'bill', billId: it.bill!.id, date: it.g!.next.date }); }}>Pay</button>}
                           {over && <button className="btn sm" onClick={(e) => { e.stopPropagation(); openModal({ type: 'move', to: it.cat.id, amount: -it.env.avail }); }}>Cover</button>}
-                          <div className={cn('amt-md num', over && 'neg')} style={{ minWidth: 84, textAlign: 'right' }}><Money v={it.env.avail} /></div>
-                          <ChevronRight size={16} className="muted" />
+                          <div style={{ minWidth: 100, textAlign: 'right' }}><div className={cn('amt-md num', over && 'neg')} style={{ fontSize: 18 }}><Money v={it.env.avail} /></div><div className="avail-cap">available</div></div>
+                          <ChevronRight size={18} className="muted" />
                         </div>
                       );
                     })}
-                  </div>
+                  </div>}</>); })()}
                 </section>
               );
             })}

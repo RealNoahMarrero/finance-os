@@ -1,7 +1,7 @@
 import { Plus, Landmark, ChevronRight, CircleCheck } from 'lucide-react';
 import { useStore } from '../store';
 import {
-  cashCheck, cardsOwed, loansOwed, netWorth, netWorthSeries, upcomingBills, groupBills, allEnvelopes, overspent, readyToAssign, underfunded, monthlyFlow, usualSpend, expectedIncomeSummary, type DataState, type Account,
+  cashCheck, cardsOwed, loansOwed, netWorth, netWorthSeries, upcomingBills, groupBills, allEnvelopes, overspent, readyToAssign, underfunded, monthlyFlow, usualSpend, expectedIncomeSummary, staleness, type DataState, type Account,
 } from '../data';
 import { daysInMonth, diffDays, fmtDate, money, monthKey, parse, plural, sum } from '../lib';
 import { Empty, Money, StatusPill } from '../ui';
@@ -40,23 +40,22 @@ export function buildInsights(d: DataState): Insight[] {
   return out;
 }
 
-/** The few things that need a person: missed bills, overspending, income that hasn't arrived, over-assignment. */
+/** Exceptional items only. Missed bills live in Upcoming (with their Pay action) and overdue income in Expected income, so nothing is shown twice. */
 function Attention({ d }: { d: DataState }) {
   const { openModal } = useStore();
   const items: { id: string; tone: 'neg' | 'warn' | ''; title: string; sub: string; action: string; run: () => void }[] = [];
-  const groups = groupBills(upcomingBills(d, 30)).filter((g) => g.missed > 0);
-  for (const g of groups) items.push({ id: `b${g.bill.id}`, tone: 'neg', title: g.missed > 1 ? `${g.bill.name} · ${g.missed} payments missed` : `${g.bill.name} is overdue`, sub: `${money(g.total)} · since ${fmtDate(g.next.date)}`, action: 'Pay', run: () => openModal({ type: 'bill', billId: g.bill.id, date: g.next.date }) });
-  for (const e of overspent(d)) items.push({ id: `o${e.cat.id}`, tone: 'warn', title: `${e.cat.name} is over by ${money(-e.env.avail)}`, sub: 'Cover it from Ready to Assign or another category', action: 'Cover', run: () => openModal({ type: 'move', to: e.cat.id, amount: -e.env.avail }) });
+  for (const e of overspent(d)) items.push({ id: `o${e.cat.id}`, tone: 'warn', title: `${e.cat.name} is over by ${money(-e.env.avail)}`, sub: 'Cover it from Ready to Assign or another item', action: 'Cover', run: () => openModal({ type: 'move', to: e.cat.id, amount: -e.env.avail }) });
   const rta = readyToAssign(d);
   if (rta < 0) items.push({ id: 'rta', tone: 'warn', title: `${money(-rta)} more is set aside than you have`, sub: 'Move money back to Ready to Assign', action: 'Review', run: () => openModal({ type: 'move', to: 'rta', amount: -rta }) });
-  for (const i of d.incomes.filter((x) => x.date <= d.today)) items.push({ id: `i${i.id}`, tone: '', title: `${i.label} hasn’t been marked received`, sub: `Awaiting confirmation · originally ${fmtDate(i.date)} · ${money(i.amount)}`, action: 'Review', run: () => openModal({ type: 'income', mode: 'view', id: i.id }) });
-  if (!items.length) return <div className="group"><div className="rowx"><CircleCheck size={18} style={{ color: 'var(--pos)' }} /><div className="grow small">You’re all caught up.</div></div></div>;
+  for (const g of groupBills(upcomingBills(d, 7)).filter((x) => x.missed === 0 && x.next.short > 0 && !x.next.future)) items.push({ id: `f${g.bill.id}`, tone: '', title: `${g.bill.name} needs ${money(g.next.short)} more`, sub: `Due ${fmtDate(g.next.date)} · ${money(g.next.funded)} of ${money(g.bill.amount)} set aside`, action: 'Fund', run: () => openModal({ type: 'move', from: 'rta', to: g.bill.categoryId, amount: g.next.short }) });
+  for (const a of d.accounts) { const st = staleness(a, d.today); if (st.level === 'stale') items.push({ id: `s${a.id}`, tone: '', title: `${a.name} hasn’t been reconciled in ${st.days} days`, sub: 'Balances are manual — a quick check keeps them trustworthy', action: 'Reconcile', run: () => openModal({ type: 'reconcile', id: a.id }) }); }
+  if (!items.length) return <div className="group"><div className="rowx"><CircleCheck size={22} style={{ color: 'var(--pos)' }} /><div className="grow li-title">Nothing needs your attention</div></div></div>;
   return (
     <div className="group" data-testid="attention">
       {items.slice(0, 4).map((x) => (
         <div key={x.id} className="rowx">
-          <div className="grow"><div className="li-title" style={{ fontSize: 14, color: x.tone === 'neg' ? 'var(--neg)' : undefined }}>{x.title}</div><div className="li-sub ellipsis">{x.sub}</div></div>
-          <button className={x.tone === 'neg' ? 'btn sm primary' : 'btn sm'} onClick={x.run}>{x.action}</button>
+          <div className="grow"><div className="li-title" style={{ color: x.tone === 'neg' ? 'var(--neg)' : undefined }}>{x.title}</div><div className="li-sub">{x.sub}</div></div>
+          <button className="btn sm" onClick={x.run}>{x.action}</button>
         </div>
       ))}
       {items.length > 4 && <div className="rowx xs muted">+ {items.length - 4} more in Plan</div>}
@@ -73,7 +72,7 @@ export function Overview() {
   const cash = data.accounts.filter((a) => a.type !== 'credit');
   const cards = data.accounts.filter((a) => a.type === 'credit');
   const unverified = data.accounts.filter((a) => !a.baseline);
-  const groups = groupBills(upcomingBills(data, 30)).slice(0, 4);
+  const groups = groupBills(upcomingBills(data, 30)).slice(0, 6);
   const dueGroups = groupBills(upcomingBills(data, 14));
   const dueTotal = sum(dueGroups, (g) => g.occs.filter((o) => diffDays(o.date, data.today) <= 14).reduce((n, o) => n + o.bill.amount, 0));
   const overdueTotal = sum(dueGroups, (g) => g.total);
@@ -100,14 +99,14 @@ export function Overview() {
         </div>
       )}
       <section className="home-top" aria-label="Summary" data-testid="ov-summary">
-        <div className="stat"><div className="eyebrow">Cash &amp; savings</div><div className="amt-xl num" data-testid="ov-cash"><Money v={cc.cash} cents={false} /></div></div>
+        <div className="stat primary"><div className="eyebrow">Cash &amp; savings</div><div className="amt-hero num" data-testid="ov-cash"><Money v={cc.cash} cents={false} /></div><div className="small muted">Across {plural(cash.length, 'account')}</div></div>
         <div className="stat"><div className="eyebrow">Ready to assign</div><div className={`amt-xl num ${rta < 0 ? 'neg' : ''}`} data-testid="ov-rta-value"><Money v={rta} cents={false} /></div>
-          <div className="row gap8"><button className="sect-link" data-testid="ov-rta-action" onClick={() => openModal(rta < 0 ? { type: 'move', to: 'rta', amount: -rta } : { type: 'move', from: 'rta' })}>Move money</button><a className="sect-link" href="#/plan">Open plan</a></div></div>
+          <div className="row gap16"><button className="sect-link" data-testid="ov-rta-action" onClick={() => openModal(rta < 0 ? { type: 'move', to: 'rta', amount: -rta } : { type: 'move', from: 'rta' })}>Move money</button><a className="sect-link" href="#/plan">Open plan</a></div></div>
         <div className="stat"><div className="eyebrow">Due in 14 days</div><div className={`amt-xl num ${dueGroups.some((g) => g.missed) ? 'neg' : ''}`} data-testid="ov-due"><Money v={dueTotal} cents={false} /></div>
           <div className="small muted">{dueGroups.length ? `${plural(dueGroups.length, 'item')}${overdueTotal > 0 ? ` · ${money(overdueTotal, { cents: false })} overdue` : ''}` : 'Nothing due'}</div></div>
       </section>
 
-      <div className="home-grid" style={{ marginTop: 22 }}>
+      <div className="home-grid" style={{ marginTop: 14 }}>
         <div>
           <div className="group-h"><h2>Upcoming</h2><a className="sect-link" href="#/plan">Plan<ChevronRight size={14} /></a></div>
           {groups.length ? <BillList groups={groups} /> : <div className="group pad small muted">Nothing due in the next 30 days.</div>}

@@ -126,7 +126,10 @@ await test('missed payments: one Car Loan row with a count, expandable, and Home
   const t = await page.evaluate(() => document.body.innerText); if (!/2 payments missed/.test(t)) throw new Error('no missed count on Plan');
   if ((t.match(/Car Loan/g) || []).length > 2) throw new Error('Car Loan appears as several rows');
   await go(page, '/'); const h = await page.evaluate(() => document.querySelector('[data-testid=attention]').innerText);
-  if (!/Car Loan · 2 payments missed/.test(h)) throw new Error('Home attention row missing: ' + h.slice(0, 120));
+  if (/Car Loan/.test(h) || /Client refund/.test(h)) throw new Error('missed bills / overdue income are repeated in Needs attention: ' + h.slice(0, 160));
+  if (!/Gas is over by/.test(h)) throw new Error('overspent item missing from Needs attention: ' + h.slice(0, 160));
+  const up = await page.evaluate(() => [...document.querySelectorAll('.group-h')].map((x) => x.innerText).join('|') + document.body.innerText);
+  if (!/2 missed/.test(up)) throw new Error('missed count missing from Upcoming');
 });
 await test('SCHEDULED: a future-dated expense changes no balance until its date', async (page) => {
   await go(page, '/'); await click(page, 'Add transaction');
