@@ -9,7 +9,7 @@ import { CatIcon, Callout, Money, Seg, Sheet, StatusPill, ThemeSwitch } from './
 import { exportEverything, newRequestId } from './db';
 import { ItemSheet, ItemAddSheet, ItemEditSheet, ArchiveItemSheet } from './itemSheets';
 import { CreditScoreSheet, CreditCardSheet, CreditReportedSheet } from './creditSheets';
-import { Gauge } from 'lucide-react';
+import { Gauge, Moon, Sun } from 'lucide-react';
 
 const go = (path: string) => { location.hash = path; };
 
@@ -100,21 +100,23 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
     setHint(`Filled in from your last ${p.name} purchase${p.last.splits?.length ? ' (it was split — you can split again below)' : ''}`);
   };
   const pickPayee = (p: typeof payeeStats[number]) => { setPayee(p.name); setFocusPayee(false); setHiSug(-1); applyPayee(p, true); };
+  // The best match is highlighted as soon as you start typing; nothing is replaced until you accept it (Tab, Enter or a click).
+  const sugOpen = focusPayee && type === 'expense' && suggestions.length > 0;
+  const activeSug = !sugOpen ? -1 : hiSug >= 0 ? Math.min(hiSug, suggestions.length - 1) : needle ? 0 : -1;
   const onPayeeChange = (v: string) => {
-    setPayee(v); setHint(''); setHiSug(-1);
+    setPayee(v); setHint(''); setHiSug(-1); setFocusPayee(true);
     if (type !== 'expense' || mode !== 'add') return;
     const exact = payeeStats.find((p) => p.name.toLowerCase() === v.trim().toLowerCase());
     if (exact) applyPayee(exact, false);
     else if (autoCat && !catTouched) { setCategoryId(''); setAutoCat(false); } // typed away from the match: undo the autofill
   };
   const onPayeeKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    const open = focusPayee && type === 'expense' && suggestions.length > 0;
-    if (!open) return;
-    if (e.key === 'ArrowDown') { e.preventDefault(); setHiSug((h) => Math.min(suggestions.length - 1, h + 1)); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setHiSug((h) => Math.max(0, h - 1)); }
-    else if (e.key === 'Enter' && hiSug >= 0) { e.preventDefault(); pickPayee(suggestions[hiSug]); }
-    else if (e.key === 'Tab' && hiSug >= 0) pickPayee(suggestions[hiSug]); // accept, then Tab moves on as normal
-    else if (e.key === 'Escape' && focusPayee) { e.stopPropagation(); setFocusPayee(false); }
+    if (e.key === 'Escape' && focusPayee && suggestions.length > 0 && type === 'expense') { e.stopPropagation(); setFocusPayee(false); return; } // dismiss the list, keep the dialog
+    if (!sugOpen) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHiSug(Math.min(suggestions.length - 1, activeSug + 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHiSug(Math.max(0, activeSug - 1)); }
+    else if (e.key === 'Enter' && activeSug >= 0) { e.preventDefault(); pickPayee(suggestions[activeSug]); } // accept; never submits the transaction
+    else if (e.key === 'Tab' && !e.shiftKey && activeSug >= 0) pickPayee(suggestions[activeSug]); // accept, then Tab moves on to the next field as normal
   };
 
   // frequent categories
@@ -253,11 +255,11 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
             <label htmlFor="payee">{type === 'income' ? 'From' : 'Payee'}</label>
             <input id="payee" className="input" autoComplete="off" placeholder={type === 'income' ? 'Who paid you?' : 'Where did you spend it?'} value={payee}
               onFocus={() => setFocusPayee(true)} onBlur={() => setTimeout(() => setFocusPayee(false), 140)}
-              onChange={(e) => onPayeeChange(e.target.value)} onKeyDown={onPayeeKey} role="combobox" aria-expanded={focusPayee && suggestions.length > 0} aria-autocomplete="list" />
+              onChange={(e) => onPayeeChange(e.target.value)} onKeyDown={onPayeeKey} role="combobox" aria-expanded={sugOpen} aria-autocomplete="list" aria-controls="payee-list" aria-activedescendant={activeSug >= 0 ? `payee-opt-${activeSug}` : undefined} />
             {focusPayee && type === 'expense' && (suggestions.length > 0) && (
-              <div className="suggest" role="listbox">
+              <div className="suggest" role="listbox" id="payee-list" aria-label="Payee suggestions">
                 {suggestions.map((p, i) => (
-                  <button type="button" key={p.name} role="option" aria-selected={hiSug === i} style={hiSug === i ? { background: 'var(--surface-2)' } : undefined} onMouseDown={(e) => e.preventDefault()} onClick={() => pickPayee(p)}>
+                  <button type="button" key={p.name} id={`payee-opt-${i}`} role="option" tabIndex={-1} aria-selected={activeSug === i} style={activeSug === i ? { background: 'var(--accent-soft)' } : undefined} onMouseDown={(e) => e.preventDefault()} onClick={() => pickPayee(p)}>
                     <span style={{ fontWeight: 580 }}>{p.name}</span>
                     <span className="muted small">{p.last.splits?.length ? 'Split' : catById(p.last.categoryId)?.name}</span>
                   </button>
@@ -1042,12 +1044,13 @@ export function AccountFoot() {
 }
 
 export function MenuSheet() {
-  const { closeModal, theme, setTheme, openModal } = useStore();
+  const { closeModal, theme, setTheme, openModal, resolvedTheme, toggleTheme } = useStore();
   const link = (path: string, label: string, icon: React.ReactNode) => (
     <button className="rowx hover" onClick={() => { closeModal(); go(path); }}><span className="li-ico">{icon}</span><span className="li-title grow">{label}</span><ArrowRight size={16} className="muted" /></button>
   );
   return (
     <Sheet title="More" onClose={closeModal}>
+      <div className="group" style={{ marginBottom: 14 }}><button className="rowx hover" data-testid="theme-toggle-mobile" onClick={toggleTheme} aria-label={`Switch to ${resolvedTheme === 'dark' ? 'light' : 'dark'} mode`}><span className="li-ico">{resolvedTheme === 'dark' ? <Sun /> : <Moon />}</span><span className="li-title grow">{resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}</span></button></div>
       <div className="group">{link('/insights', 'Insights', <Eye />)}{link('/insights/forecast', 'Forecast', <Gauge />)}{link('/insights/credit', 'Credit', <Gauge />)}{link('/settings', 'Settings', <Wallet />)}</div>
       <div className="group" style={{ marginTop: 14 }}>
         <button className="rowx hover" onClick={() => openModal({ type: 'category-add' })}><span className="li-ico"><Plus /></span><span className="li-title grow">Add item to Plan</span><ArrowRight size={16} className="muted" /></button>

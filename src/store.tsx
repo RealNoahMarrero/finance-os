@@ -37,6 +37,8 @@ interface Store {
   modal: Modal | null; openModal: (m: Modal) => void; closeModal: () => void;
   toasts: Toast[]; toast: (text: string, undo?: () => void) => void;
   theme: ThemePref; setTheme: (t: ThemePref) => void;
+  /** The appearance actually showing (Automatic resolves to light or dark), and a one-click switch to the other one. */
+  resolvedTheme: 'light' | 'dark'; toggleTheme: () => void;
   addTxn: (t: Omit<Txn, 'id'>) => Promise<Opt<string>>;
   updateTxn: (id: string, t: Omit<Txn, 'id'>) => Promise<boolean>;
   deleteTxn: (id: string) => Promise<boolean>;
@@ -113,6 +115,9 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
     mq.addEventListener('change', apply);
     return () => mq.removeEventListener('change', apply);
   }, [theme]);
+  const [systemDark, setSystemDark] = useState(() => matchMedia('(prefers-color-scheme: dark)').matches);
+  useEffect(() => { const mq = matchMedia('(prefers-color-scheme: dark)'); const f = () => setSystemDark(mq.matches); mq.addEventListener('change', f); return () => mq.removeEventListener('change', f); }, []);
+  const resolvedTheme: 'light' | 'dark' = theme === 'system' ? (systemDark ? 'dark' : 'light') : theme;
   const setTheme = useCallback((t: ThemePref) => { setThemeState(t); try { localStorage.setItem('fos-theme', t); } catch { /* ignore */ } }, []);
 
   const toast = useCallback((text: string, undo?: () => void, tone?: 'error') => {
@@ -260,9 +265,9 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
   }, [run, toast, data.credit.reported]);
 
   const value = useMemo<Store>(() => ({
-    data, status, loadError, refresh, busy, email, signOut, modal, openModal: setModal, closeModal: () => setModal(null), toasts, toast, theme, setTheme,
+    data, status, loadError, refresh, busy, email, signOut, modal, openModal: setModal, closeModal: () => setModal(null), toasts, toast, theme, setTheme, resolvedTheme, toggleTheme: () => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark'),
     addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, archiveBill, restoreBill, setCategoryArchived, payBill, unpayBill, setBillPaused, saveItem, archiveItem, restoreItem, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, updateIncome, deleteIncome, reconcile, setCutover, setCutovers, addAccount, updateAccount, archiveAccount, restoreAccount, deleteAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported,
-  }), [data, status, loadError, busy, email, modal, toasts, theme, refresh, signOut, toast, setTheme, addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, archiveBill, restoreBill, setCategoryArchived, payBill, unpayBill, setBillPaused, saveItem, archiveItem, restoreItem, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported]);
+  }), [data, status, loadError, busy, email, modal, toasts, theme, resolvedTheme, refresh, signOut, toast, setTheme, addTxn, updateTxn, deleteTxn, assign, moveMoney, setTarget, addCategory, updateCategory, scheduleBill, removeBill, archiveBill, restoreBill, setCategoryArchived, payBill, unpayBill, setBillPaused, saveItem, archiveItem, restoreItem, updateBill, receiveIncome, skipIncome, addIncome, setCertainty, reconcile, setCutover, setCutovers, addAccount, saveDebt, saveScore, deleteScore, saveCard, saveReported, deleteReported]);
 
   return (
     <Ctx.Provider value={value}>

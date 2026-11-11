@@ -285,6 +285,95 @@ await test('APPEARANCE: light, dark and automatic are all available and persist'
   for (const [label, want] of [['Dark', 'dark'], ['Light', 'light']]) { await click(page, label, '.theme-seg button'); const th = await page.evaluate(() => document.documentElement.dataset.theme); if (th !== want) throw new Error(`${label} -> ${th}`); }
   const labels = await page.evaluate(() => [...document.querySelectorAll('.theme-seg button')].map((b) => b.innerText.trim())); if (!labels.includes('Auto')) throw new Error('no Auto option');
 });
+
+await test('HOME: two summary areas, an action row beneath them, and distinct sections', async (page) => {
+  await go(page, '/');
+  const m = await page.evaluate(() => {
+    const stats = [...document.querySelectorAll('.home-top .stat')]; const act = document.querySelector('.home-actions'); const tops = stats.map((s) => s.getBoundingClientRect().bottom);
+    return { n: stats.length, text: stats.map((s) => s.innerText).join(' | '), inlineLinks: document.querySelectorAll('.stat a, .stat button').length, below: act && act.getBoundingClientRect().top >= Math.max(...tops) - 1,
+      primary: document.querySelector('[data-testid=ov-rta-action]').classList.contains('primary'), plan: document.querySelector('[data-testid=ov-open-plan]').classList.contains('primary'),
+      heads: [...document.querySelectorAll('.section-h h2')].map((h) => h.innerText.replace(/\d+$/, '').trim()) };
+  });
+  if (m.n !== 2 || /Due in 14 days/i.test(m.text)) throw new Error('summary cards: ' + m.text);
+  if (!/Cash & savings/i.test(m.text) || !/Ready to assign/i.test(m.text)) throw new Error('missing summary: ' + m.text);
+  if (m.inlineLinks !== 0) throw new Error('inline links remain inside the summary cards');
+  if (!m.below || !m.primary || m.plan) throw new Error('action row: ' + JSON.stringify(m));
+  for (const h of ['Upcoming', 'Needs attention', 'Expected income', 'Accounts', 'Recent activity']) if (!m.heads.includes(h)) throw new Error(`section "${h}" missing: ${m.heads}`);
+});
+await test('THEME: quick toggle in the sidebar switches light/dark at once, and from Automatic picks an explicit theme', async (page) => {
+  await go(page, '/');
+  const th = () => page.evaluate(() => document.documentElement.dataset.theme); const stored = () => page.evaluate(() => localStorage.getItem('fos-theme'));
+  if (await th() !== 'light') throw new Error('expected light to start');
+  await click(page, 'Dark mode', '[data-testid=theme-toggle]'); if (await th() !== 'dark' || await stored() !== 'dark') throw new Error('did not switch to dark');
+  await click(page, 'Light mode', '[data-testid=theme-toggle]'); if (await th() !== 'light' || await stored() !== 'light') throw new Error('did not switch back');
+  const label = await page.evaluate(() => document.querySelector('[data-testid=theme-toggle]').getAttribute('aria-label')); if (!/Switch to dark mode/.test(label)) throw new Error('aria-label: ' + label);
+  // Automatic: follow the device (dark), then the toggle must choose an explicit LIGHT; Settings still offers all three
+  await go(page, '/settings'); await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]); await click(page, 'Auto', '.theme-seg button'); await sleep(300);
+  if (await stored() !== 'system' || await th() !== 'dark') throw new Error('automatic did not follow the device: ' + await th());
+  await click(page, 'Light mode', '[data-testid=theme-toggle]'); if (await th() !== 'light' || await stored() !== 'light') throw new Error('toggle from Automatic: ' + await th() + '/' + await stored());
+  const labels = await page.evaluate(() => [...document.querySelectorAll('.theme-seg button')].map((b) => b.innerText.trim())); if (labels.join() !== 'Light,Dark,Auto') throw new Error('Settings options: ' + labels);
+});
+await test('THEME (phone): the More menu has the quick toggle', async () => {
+  const page = await fresh({ width: 390, height: 844, isMobile: true, hasTouch: true });
+  const name = 'THEME (phone): the More menu has the quick toggle';
+  try {
+    await go(page, '/'); await click(page, 'More'); await click(page, 'Switch to dark mode', '[data-testid=theme-toggle-mobile]');
+    const th = await page.evaluate(() => document.documentElement.dataset.theme); if (th !== 'dark') throw new Error('did not switch: ' + th);
+    results.push([name, true]);
+  } catch (e) { results.push([name, false, e.message]); }
+  await page.close();
+});
+await test('PLAN: Has money shows only items with a positive available balance, works with search, and leaves other filters alone', async (page) => {
+  await go(page, '/plan');
+  const names = () => page.evaluate(() => [...document.querySelectorAll('[data-testid=plan-row]')].map((r) => r.querySelector('.li-title').innerText.trim()));
+  await click(page, 'Has money', '.seg button'); await sleep(300); const on = await names();
+  for (const n of ['Rent', 'Groceries', 'Vacation Fund', 'Dining Out']) if (!on.includes(n)) throw new Error(`${n} should have money; got ${on}`);
+  for (const n of ['Gas', 'Streaming', 'Old Internet']) if (on.includes(n)) throw new Error(`${n} (zero or negative) must be excluded; got ${on}`);
+  await page.type('input[aria-label="Search the plan"]', 'vac'); await sleep(300); const s = await names(); if (s.join() !== 'Vacation Fund') throw new Error('search + filter: ' + s);
+  await page.evaluate(() => { const i = document.querySelector('input[aria-label="Search the plan"]'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, ''); i.dispatchEvent(new Event('input', { bubbles: true })); });
+  await click(page, 'Overspent', '.seg button'); await sleep(300); const o = await names(); if (o.join() !== 'Gas') throw new Error('other filters changed: ' + o);
+  await click(page, 'Archived', '.seg button'); await sleep(300); if (!(await page.evaluate(() => !!document.querySelector('[data-testid=archived-list]') || /No archived/.test(document.body.innerText)))) throw new Error('archived view broken');
+});
+await test('PLAN (phone): Has money is reachable in the filter row', async () => {
+  const page = await fresh({ width: 390, height: 844, isMobile: true, hasTouch: true }); const name = 'PLAN (phone): Has money is reachable in the filter row';
+  try { await go(page, '/plan'); const t = await page.evaluate(() => [...document.querySelectorAll('.seg button')].map((b) => b.innerText)); if (!t.some((x) => /Has money/.test(x))) throw new Error('filter missing'); results.push([name, true]); }
+  catch (e) { results.push([name, false, e.message]); }
+  await page.close();
+});
+await test('PAYEE autocomplete: best match highlighted, Enter accepts without submitting, Tab accepts and moves on, Esc dismisses, arrows move', async (page) => {
+  await go(page, '/'); await click(page, 'Add transaction'); await page.type('input[aria-label=Amount]', '12');
+  const txns = (await sql('select count(*) n from transactions'))[0].n;
+  const opts = () => page.evaluate(() => [...document.querySelectorAll('#payee-list [role=option]')].map((o) => ({ t: o.innerText.split('\n')[0], sel: o.getAttribute('aria-selected') === 'true' })));
+  const val = () => page.evaluate(() => document.querySelector('#payee').value);
+  await page.focus('#payee'); await page.type('#payee', 'Tra'); await sleep(200);
+  let o = await opts(); if (!o.length || !o[0].sel) throw new Error('first suggestion not highlighted: ' + JSON.stringify(o));
+  if ((await val()) !== 'Tra') throw new Error('typed text was replaced early');
+  const combo = await page.evaluate(() => { const i = document.querySelector('#payee'); return [i.getAttribute('role'), i.getAttribute('aria-expanded'), !!i.getAttribute('aria-activedescendant')].join(); }); if (combo !== 'combobox,true,true') throw new Error('combobox semantics: ' + combo);
+  await page.keyboard.press('Enter'); await sleep(300);
+  if (!/^Trader Joe/.test(await val())) throw new Error('Enter did not accept: ' + await val());
+  if (!(await page.evaluate(() => !!document.querySelector('[role=dialog]')))) throw new Error('Enter closed/submitted the dialog');
+  if ((await sql('select count(*) n from transactions'))[0].n !== txns) throw new Error('Enter submitted a transaction');
+  // Escape dismisses the list but not the dialog; a brand-new payee types normally
+  await page.evaluate(() => { const i = document.querySelector('#payee'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, ''); i.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.focus('#payee'); await page.type('#payee', 'S'); await sleep(200); o = await opts(); if (o.length < 2) throw new Error('expected several matches for "S"');
+  await page.keyboard.press('ArrowDown'); await sleep(100); o = await opts(); if (!o[1].sel || o[0].sel) throw new Error('ArrowDown did not move: ' + JSON.stringify(o));
+  await page.keyboard.press('ArrowUp'); await sleep(100); o = await opts(); if (!o[0].sel) throw new Error('ArrowUp did not move back');
+  await page.keyboard.press('Escape'); await sleep(200); if ((await opts()).length) throw new Error('Escape left the list open');
+  if (!(await page.evaluate(() => !!document.querySelector('[role=dialog]')))) throw new Error('Escape closed the dialog'); if ((await val()) !== 'S') throw new Error('Escape changed the text');
+  await page.type('#payee', 'omeNewPlace'); await sleep(200); if ((await val()) !== 'SomeNewPlace' || (await opts()).length) throw new Error('new payee not typed normally: ' + await val());
+  // Tab accepts the highlighted suggestion and moves focus on
+  await page.evaluate(() => { const i = document.querySelector('#payee'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, ''); i.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.focus('#payee'); await page.type('#payee', 'Whole'); await sleep(200); await page.keyboard.press('Tab'); await sleep(300);
+  if (!/^Whole Foods/.test(await val())) throw new Error('Tab did not accept: ' + await val());
+  if (await page.evaluate(() => document.activeElement.id === 'payee')) throw new Error('focus did not move on');
+});
+await test('PAYEE autocomplete still files the transaction normally (new and remembered payees)', async (page) => {
+  await go(page, '/'); await click(page, 'Add transaction'); await page.type('input[aria-label=Amount]', '8.25'); await page.focus('#payee'); await page.type('#payee', 'Whole'); await page.keyboard.press('Enter'); await sleep(300);
+  await click(page, 'Add expense'); await sleep(900);
+  const [t] = await sql(`select payee, amount::float a, category_id from transactions order by id desc limit 1`); if (!/^Whole Foods/.test(t.payee) || t.a !== 8.25 || !t.category_id) throw new Error(JSON.stringify(t));
+  await click(page, 'Add transaction'); await page.type('input[aria-label=Amount]', '5'); await page.type('#payee', 'Brand New Place'); await click(page, 'Dining Out', '.chip'); await click(page, 'Add expense'); await sleep(900);
+  const [n] = await sql(`select payee from transactions order by id desc limit 1`); if (n.payee !== 'Brand New Place') throw new Error('new payee: ' + n.payee);
+});
 await browser.close(); await new Promise((r) => pv.httpServer.close(r)); backend.close(); fs.rmSync(outDir, { recursive: true, force: true });
 for (const [n, ok, why] of results) console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${why ? '  — ' + why : ''}`);
 console.log(`${results.filter((r) => r[1]).length}/${results.length} passed`);

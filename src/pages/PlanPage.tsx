@@ -31,7 +31,7 @@ export function BillList({ groups }: { groups: BillGroup[] }) {
   );
 }
 
-type Filter = 'all' | 'due' | 'needs' | 'over' | 'debts' | 'archived';
+type Filter = 'all' | 'money' | 'due' | 'needs' | 'over' | 'debts' | 'archived';
 export type PlanView = 'items' | 'calendar' | 'income';
 
 export function Plan({ query }: { query: URLSearchParams }) {
@@ -67,6 +67,7 @@ export function Plan({ query }: { query: URLSearchParams }) {
   const matches = (it: typeof items[number]) => {
     const s = q.trim().toLowerCase();
     if (s && !it.cat.name.toLowerCase().includes(s)) return false;
+    if (filter === 'money') return it.env.avail > 0; // the actual available allocation — never a target or a scheduled amount
     if (filter === 'due') return !!it.g && (it.g.missed > 0 || diffDays(it.g.next.date, data.today) <= 14);
     if (filter === 'needs') return it.env.remaining > 0;
     if (filter === 'over') return it.env.avail < 0;
@@ -74,7 +75,7 @@ export function Plan({ query }: { query: URLSearchParams }) {
     return true;
   };
   const archived = data.categories.filter((c) => c.hidden && c.name.toLowerCase().includes(q.trim().toLowerCase()));
-  const count = { due: items.filter((i) => i.g && (i.g.missed > 0 || diffDays(i.g.next.date, data.today) <= 14)).length, needs: items.filter((i) => i.env.remaining > 0).length, over: items.filter((i) => i.env.avail < 0).length, debts: items.filter((i) => i.cat.isDebt && (i.cat.debtBalance ?? 0) > 0).length };
+  const count = { money: items.filter((i) => i.env.avail > 0).length, due: items.filter((i) => i.g && (i.g.missed > 0 || diffDays(i.g.next.date, data.today) <= 14)).length, needs: items.filter((i) => i.env.remaining > 0).length, over: items.filter((i) => i.env.avail < 0).length, debts: items.filter((i) => i.cat.isDebt && (i.cat.debtBalance ?? 0) > 0).length };
   const pick = (id: string) => { if (wide()) setSel(id); else openModal({ type: 'category', id }); };
   const selOk = sel && data.categories.some((c) => c.id === sel && !c.hidden);
 
@@ -100,7 +101,7 @@ export function Plan({ query }: { query: URLSearchParams }) {
       <div className="row gap12" style={{ flexWrap: 'wrap', marginBottom: 14 }}>
         <div className="search-wrap" style={{ width: 240 }}><Search /><input className="input search" style={{ height: 36, fontSize: 14 }} placeholder="Search" aria-label="Search the plan" value={q} onChange={(e) => setQ(e.target.value)} /></div>
         <div style={{ overflowX: 'auto', maxWidth: '100%' }}><Seg value={filter} onChange={setFilter} options={[
-          { v: 'all', label: 'All' }, { v: 'due', label: `Due soon${count.due ? ` · ${count.due}` : ''}` }, { v: 'needs', label: `Needs funding${count.needs ? ` · ${count.needs}` : ''}` },
+          { v: 'all', label: 'All' }, { v: 'money', label: `Has money${count.money ? ` · ${count.money}` : ''}` }, { v: 'due', label: `Due soon${count.due ? ` · ${count.due}` : ''}` }, { v: 'needs', label: `Needs funding${count.needs ? ` · ${count.needs}` : ''}` },
           { v: 'over', label: `Overspent${count.over ? ` · ${count.over}` : ''}` }, { v: 'debts', label: `Debts${count.debts ? ` · ${count.debts}` : ''}` }, { v: 'archived', label: 'Archived' }]} /></div>
       </div>
 

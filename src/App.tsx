@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { BarChart3, Home, Landmark, Menu, ListChecks, Plus, Receipt, Settings as Cog } from 'lucide-react';
+import { BarChart3, Home, Landmark, Menu, ListChecks, Moon, Plus, Receipt, Settings as Cog, Sun } from 'lucide-react';
 import { useStore } from './store';
 import { SheetHost } from './sheets';
 import { Notice } from './Login';
@@ -49,7 +49,7 @@ export const NAV = [
 ];
 
 export function App() {
-  const { data, openModal, status, loadError, refresh } = useStore();
+  const { data, openModal, status, loadError, refresh, resolvedTheme, toggleTheme } = useStore();
   const r = useRoute();
 
   useEffect(() => {
@@ -87,7 +87,9 @@ export function App() {
           {NAV.map((n) => <a key={n.to} href={`#${n.to}`} aria-current={active(n.key)}><n.icon />{n.label}</a>)}
         </nav>
         <div className="side-spacer" />
-        <nav className="nav" aria-label="Secondary"><div className="sep" /><a href="#/settings" aria-current={active('settings')}><Cog />Settings</a></nav>
+        <nav className="nav" aria-label="Secondary"><div className="sep" />
+          <button className="nav-btn" data-testid="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${resolvedTheme === 'dark' ? 'light' : 'dark'} mode`}>{resolvedTheme === 'dark' ? <Sun /> : <Moon />}{resolvedTheme === 'dark' ? 'Light mode' : 'Dark mode'}</button>
+          <a href="#/settings" aria-current={active('settings')}><Cog />Settings</a></nav>
       </aside>
 
       <main className="main" id="main" tabIndex={-1}>

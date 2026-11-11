@@ -1,4 +1,4 @@
-import { Plus, Landmark, ChevronRight, CircleCheck } from 'lucide-react';
+import { Plus, Landmark, ChevronRight, CircleCheck, ArrowLeftRight, CalendarClock, Coins, ListChecks, Receipt, TriangleAlert } from 'lucide-react';
 import { useStore } from '../store';
 import {
   cashCheck, cardsOwed, loansOwed, netWorth, netWorthSeries, upcomingBills, groupBills, allEnvelopes, overspent, readyToAssign, underfunded, monthlyFlow, usualSpend, expectedIncomeSummary, staleness, type DataState, type Account,
@@ -53,7 +53,7 @@ function Attention({ d }: { d: DataState }) {
   return (
     <div className="group" data-testid="attention">
       {items.slice(0, 4).map((x) => (
-        <div key={x.id} className="rowx">
+        <div key={x.id} className={`rowx attn-row ${x.tone}`}>
           <div className="grow"><div className="li-title" style={{ color: x.tone === 'neg' ? 'var(--neg)' : undefined }}>{x.title}</div><div className="li-sub">{x.sub}</div></div>
           <button className="btn sm" onClick={x.run}>{x.action}</button>
         </div>
@@ -89,37 +89,40 @@ export function Overview() {
     );
   };
 
+  const attentionCount = overspent(data).length + (rta < 0 ? 1 : 0);
   return (
     <div className="page">
       <PageHead title="Home" sub={fmtDate(data.today, 'long')} />
       {unverified.length > 0 && (
-        <div className="mini-banner" style={{ marginBottom: 14 }}>
+        <div className="mini-banner" style={{ marginBottom: 18 }}>
           <span>{unverified.length === data.accounts.length ? 'No account balances are verified yet.' : `${plural(unverified.length, 'account')} not verified yet.`}</span>
           <button className="btn sm" onClick={() => openModal({ type: 'cutover' })}>Set opening balances</button>
         </div>
       )}
+
       <section className="home-top" aria-label="Summary" data-testid="ov-summary">
         <div className="stat primary"><div className="eyebrow">Cash &amp; savings</div><div className="amt-hero num" data-testid="ov-cash"><Money v={cc.cash} cents={false} /></div><div className="small muted">Across {plural(cash.length, 'account')}</div></div>
-        <div className="stat"><div className="eyebrow">Ready to assign</div><div className={`amt-xl num ${rta < 0 ? 'neg' : ''}`} data-testid="ov-rta-value"><Money v={rta} cents={false} /></div>
-          <div className="row gap16"><button className="sect-link" data-testid="ov-rta-action" onClick={() => openModal(rta < 0 ? { type: 'move', to: 'rta', amount: -rta } : { type: 'move', from: 'rta' })}>Move money</button><a className="sect-link" href="#/plan">Open plan</a></div></div>
-        <div className="stat"><div className="eyebrow">Due in 14 days</div><div className={`amt-xl num ${dueGroups.some((g) => g.missed) ? 'neg' : ''}`} data-testid="ov-due"><Money v={dueTotal} cents={false} /></div>
-          <div className="small muted">{dueGroups.length ? `${plural(dueGroups.length, 'item')}${overdueTotal > 0 ? ` · ${money(overdueTotal, { cents: false })} overdue` : ''}` : 'Nothing due'}</div></div>
+        <div className={`stat assign ${rta < 0 ? 'over' : ''}`}><div className="eyebrow">{rta < 0 ? 'Over-assigned' : 'Ready to assign'}</div><div className="amt-hero num" data-testid="ov-rta-value"><Money v={rta} cents={false} /></div><div className="small muted">{rta < 0 ? 'Set aside more than you have' : rta === 0 ? 'Every dollar has a job' : 'Not set aside yet'}</div></div>
       </section>
+      <div className="home-actions" role="group" aria-label="Quick actions">
+        <button className="btn primary" data-testid="ov-rta-action" onClick={() => openModal(rta < 0 ? { type: 'move', to: 'rta', amount: -rta } : { type: 'move', from: 'rta' })}><ArrowLeftRight />Move money</button>
+        <a className="btn" href="#/plan" data-testid="ov-open-plan"><ListChecks />Open plan</a>
+      </div>
 
-      <div className="home-grid" style={{ marginTop: 14 }}>
+      <div className="home-grid">
         <div>
-          <div className="group-h"><h2>Upcoming</h2><a className="sect-link" href="#/plan">Plan<ChevronRight size={14} /></a></div>
+          <div className="section-h"><h2><CalendarClock />Upcoming</h2><span className="row gap12"><span className="small muted num" data-testid="ov-due">{dueTotal > 0 ? `${money(dueTotal, { cents: false })} due in 14 days` : 'Nothing due in 14 days'}</span><a className="sect-link" href="#/plan">Plan<ChevronRight size={14} /></a></span></div>
           {groups.length ? <BillList groups={groups} /> : <div className="group pad small muted">Nothing due in the next 30 days.</div>}
 
-          <div className="group-h"><h2>Expected income</h2>
+          <div className="section-h"><h2><Coins />Expected income</h2>
             <span className="row gap12"><button className="sect-link" onClick={() => openModal({ type: 'income', mode: 'add' })}>Add</button><a className="sect-link" href="#/plan?view=income" data-testid="ov-income-all">View all<ChevronRight size={14} /></a></span></div>
           <section data-testid="ov-income" aria-label="Expected income">
             {inc.rows.length === 0 ? (
               <div className="group pad small muted">Nothing expected in the next 30 days. Add a paycheck or invoice to see money coming in next to what’s going out.</div>
             ) : (<>
               <div className="group">
-                <div className="rowx"><div className="grow"><div className="eyebrow">Pending · next 30 days</div><div className="amt-lg num" data-testid="ov-income-total"><Money v={inc.total} cents={false} /></div></div>
-                  <div className="right small"><div>Guaranteed <b className="num" data-testid="ov-income-g">{money(inc.guaranteed, { cents: false })}</b></div><div className="muted">Anticipated <b className="num" data-testid="ov-income-a">{money(inc.anticipated, { cents: false })}</b></div></div></div>
+                <div className="rowx income-head"><div className="grow"><div className="eyebrow">Pending · next 30 days</div><div className="amt-xl num" data-testid="ov-income-total"><Money v={inc.total} cents={false} /></div></div>
+                  <div className="right"><div className="small">Guaranteed <b className="num" data-testid="ov-income-g">{money(inc.guaranteed, { cents: false })}</b></div><div className="small muted">Anticipated <b className="num" data-testid="ov-income-a">{money(inc.anticipated, { cents: false })}</b></div></div></div>
                 {inc.overdue.length > 0 && <div className="rowx" style={{ background: 'var(--warn-soft)' }}><div className="grow small"><b>{plural(inc.overdue.length, 'entry', 'entries')} awaiting confirmation</b> · {money(inc.overdueTotal, { cents: false })}, shown as arriving today</div></div>}
                 {inc.rows.slice(0, 5).map((r) => (
                   <button key={r.id + r.date} className="rowx" onClick={() => openModal({ type: 'income', mode: 'view', id: r.id })}>
@@ -137,10 +140,10 @@ export function Overview() {
         </div>
 
         <div>
-          <div className="group-h"><h2>Needs attention</h2></div>
+          <div className="section-h"><h2><TriangleAlert />Needs attention{attentionCount > 0 && <span className="count-pill">{attentionCount}</span>}</h2></div>
           <Attention d={data} />
 
-          <div className="group-h"><h2>Accounts</h2><a className="sect-link" href="#/accounts">All<ChevronRight size={14} /></a></div>
+          <div className="section-h"><h2><Landmark />Accounts</h2><a className="sect-link" href="#/accounts">All<ChevronRight size={14} /></a></div>
           <div className="group">
             {cash.map(accountRow)}
             {cards.map(accountRow)}
@@ -148,7 +151,7 @@ export function Overview() {
           </div>
           <span hidden data-testid="ov-owed">{money(owed)}</span>
 
-          <div className="group-h"><h2>Recent activity</h2><a className="sect-link" href="#/activity">All<ChevronRight size={14} /></a></div>
+          <div className="section-h"><h2><Receipt />Recent activity</h2><a className="sect-link" href="#/activity">All<ChevronRight size={14} /></a></div>
           {recent.length ? <div className="group">{recent.map((t) => <TxnRow key={t.id} t={t} onOpen={() => openModal({ type: 'txn', mode: 'view', id: t.id })} />)}</div> : <div className="group pad small muted">No transactions yet.</div>}
         </div>
       </div>
