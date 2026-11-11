@@ -31,7 +31,7 @@ async function fetchAll(table: string, select = '*', order = 'id'): Promise<Row[
 
 export interface RawData {
   accounts: Row[]; groups: Row[]; categories: Row[]; transactions: Row[]; splits: Row[]; income: Row[];
-  baselines: Row[]; recons: Row[]; billPayments: Row[]; audit: Row[];
+  baselines: Row[]; recons: Row[]; billPayments: Row[]; audit: Row[]; billPartials?: Row[];
   creditScores?: Row[]; creditMeta?: Row[]; creditReported?: Row[]; creditReady?: boolean; // optional so older callers/tests still type-check
 }
 export async function fetchRaw(): Promise<RawData> {
@@ -43,7 +43,10 @@ export async function fetchRaw(): Promise<RawData> {
   let creditScores: Row[] = [], creditMeta: Row[] = [], creditReported: Row[] = [], creditReady = true;
   try { [creditScores, creditMeta, creditReported] = await Promise.all([fetchAll('credit_scores'), fetchAll('credit_card_meta', '*', 'account_id'), fetchAll('credit_reported_balances')]); }
   catch { creditReady = false; }
-  return { accounts, groups, categories, transactions, splits, income, baselines, recons, billPayments, audit, creditScores, creditMeta, creditReported, creditReady };
+  // Explicitly linked partial payments (migration 020). Tolerated as absent so the app keeps working until that migration is applied.
+  let billPartials: Row[] = [];
+  try { billPartials = await fetchAll('bill_partials', '*', 'transaction_id'); } catch { /* not applied yet */ }
+  return { accounts, groups, categories, transactions, splits, income, baselines, recons, billPayments, audit, billPartials, creditScores, creditMeta, creditReported, creditReady };
 }
 
 const ACCT_TYPE: Record<string, AccountType> = { Checking: 'checking', Savings: 'savings', Cash: 'cash', 'Credit Card': 'credit' };
@@ -107,6 +110,7 @@ export function toDataState(raw: RawData, today = todayISO()): DataState {
     splitsBy.get(k)!.push({ categoryId: S(s.category_id), amount: cents(s.amount) });
   }
   const billOfTxn = new Map(raw.billPayments.filter((p) => p.transaction_id).map((p) => [S(p.transaction_id), S(p.category_id)]));
+  const partialOfTxn = new Map((raw.billPartials ?? []).map((p) => [S(p.transaction_id), S(p.category_id)]));
   const incomeOfTxn = new Map(raw.income.filter((p) => p.transaction_id).map((p) => [S(p.transaction_id), S(p.id)]));
   const txns: Txn[] = raw.transactions.filter((t) => personal(t) && acctIds.has(S(t.account_id)))
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id))
@@ -114,7 +118,7 @@ export function toDataState(raw: RawData, today = todayISO()): DataState {
       id: S(t.id), date: t.date, payee: t.payee ?? '', amount: cents(t.amount), type: String(t.type).toLowerCase() as Txn['type'],
       accountId: S(t.account_id), toAccountId: t.to_account_id ? S(t.to_account_id) : undefined,
       categoryId: t.category_id ? S(t.category_id) : undefined, splits: splitsBy.get(S(t.id)), notes: t.notes ?? undefined,
-      adjustment: !!t.is_adjustment, billId: billOfTxn.get(S(t.id)), incomeId: incomeOfTxn.get(S(t.id)), scheduled: t.status === 'scheduled',
+      adjustment: !!t.is_adjustment, billId: billOfTxn.get(S(t.id)) ?? partialOfTxn.get(S(t.id)), billPartial: partialOfTxn.has(S(t.id)) || undefined, incomeId: incomeOfTxn.get(S(t.id)), scheduled: t.status === 'scheduled',
     }));
 
   const paidBy = new Map<string, Record<string, string>>();
@@ -152,8 +156,10 @@ export function toDataState(raw: RawData, today = todayISO()): DataState {
     meta: Object.fromEntries((raw.creditMeta ?? []).filter((m) => acctIds.has(S(m.account_id))).map((m): [string, CardMeta] => [S(m.account_id), { accountId: S(m.account_id), active: m.active !== false, closingDate: m.statement_closing_date ?? undefined, repeats: m.statement_repeats !== false, notes: m.notes ?? undefined }])),
     reported: (raw.creditReported ?? []).filter((r) => acctIds.has(S(r.account_id))).map((r): ReportedBalance => ({ id: S(r.id), accountId: S(r.account_id), balance: cents(r.balance), reportedOn: r.reported_on, bureau: bureau(r.bureau), notes: r.notes ?? undefined })),
   };
+  const billPartials = (raw.billPartials ?? []).filter((p) => billIds.has(S(p.category_id)) || archivedBills.some((b) => b.id === S(p.category_id)))
+    .map((p) => ({ txnId: S(p.transaction_id), billId: S(p.category_id), due: String(p.due_date), amount: cents(p.amount) }));
   return {
-    credit, accounts, allAccounts, groups, categories, txns, bills, archivedBills, incomes, debts, planned: [], reconciliations, today,
+    credit, accounts, allAccounts, groups, categories, txns, bills, archivedBills, incomes, debts, planned: [], reconciliations, today, billPartials,
     hiddenBusiness: {
       accounts: raw.accounts.filter((a) => !personal(a)).length, categories: raw.categories.filter((c) => !personal(c)).length,
       transactions: raw.transactions.filter((t) => !personal(t)).length,
@@ -330,12 +336,14 @@ export async function exportEverything() {
 
 // ── Finances 2.0: atomic server operations (migration 018) ───────────────────
 export interface PayInput { billId: string; due: string; mode: 'post' | 'link' | 'external'; paidOn?: string; amount?: number; accountId?: string; transactionId?: string; settle?: boolean; requestId: string }
-export interface PayResult { settled: boolean; transactionId?: string; created: boolean; amount: number; nextDue?: string; duplicate: boolean; debtApplied: number }
+export interface PayResult { settled: boolean; transactionId?: string; created: boolean; amount: number; nextDue?: string; duplicate: boolean; debtApplied: number; paidBefore: number }
 export const payBillV2 = async (i: PayInput): Promise<PayResult> => {
   const r = ok(await supabase.rpc('fos_pay_bill_v2', { p: { category_id: Number(i.billId), due: i.due, mode: i.mode, paid_on: i.paidOn ?? todayISO(), amount: i.amount != null ? dollars(i.amount) : null, account_id: num(i.accountId), transaction_id: num(i.transactionId), settle: i.settle ?? true, request_id: i.requestId } })) as Row;
-  return { settled: !!r.settled, transactionId: r.transaction_id ? S(r.transaction_id) : undefined, created: !!r.created, amount: cents(r.amount), nextDue: r.next_due ?? undefined, duplicate: !!r.duplicate, debtApplied: cents(r.debt_applied) };
+  return { settled: !!r.settled, transactionId: r.transaction_id ? S(r.transaction_id) : undefined, created: !!r.created, amount: cents(r.amount), nextDue: r.next_due ?? undefined, duplicate: !!r.duplicate, debtApplied: cents(r.debt_applied), paidBefore: cents(r.paid_before) };
 };
 /** Undo a payment. For a partial payment (no payment record) pass the transaction it created and the debt it removed. */
+/** Undo one explicitly linked partial payment (the server restores exactly the debt it removed). */
+export const unpayPartial = async (transactionId: string, deleteTxn: boolean) => { ok(await supabase.rpc('fos_unpay_partial', { txn_id: Number(transactionId), delete_txn: deleteTxn })); };
 export const unpayBill = async (billId: string, due: string, deleteTxn: boolean, partial?: { transactionId?: string; debtApplied: number }) => { ok(await supabase.rpc('fos_unpay_bill', { cat: Number(billId), due, delete_txn: deleteTxn, txn_id: num(partial?.transactionId), debt_restore: partial ? dollars(partial.debtApplied) : 0 })); };
 /** Posts scheduled transactions whose date has arrived (idempotent; any signed-in device may call it). Tolerated as absent before migration 018. */
 export const postDue = async (today: string): Promise<number> => { const r = await supabase.rpc('fos_post_due', { today }); return r.error ? 0 : Number(r.data ?? 0); };

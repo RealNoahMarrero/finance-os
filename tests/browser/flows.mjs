@@ -83,7 +83,7 @@ await test('settings export control and theme switch exist', async (page) => {
 });
 
 const setVal = (page, sel, v) => page.evaluate((sel, v) => { const el = document.querySelector(sel); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); }, sel, v);
-const openCarLoan = async (page) => { await go(page, '/'); await click(page, 'Car Loan details'); };
+const openCarLoan = async (page) => { await go(page, '/'); await click(page, 'Car Loan details'); await click(page, 'Record payment', '[data-testid=record-payment]'); };
 
 await test('PAY (record): one atomic payment — account, envelope, debt, due date; a double-click records it once', async (page) => {
   await openCarLoan(page);
@@ -251,7 +251,7 @@ await test('PLAN: archive is refused with the reason (debt still owed); restore 
   const [r] = await sql(`select is_hidden, assigned_amount::float v from categories where name='Dining Out'`); if (r.is_hidden || r.v !== 0) throw new Error('restore: ' + JSON.stringify(r));
 });
 await test('PLAN: a partial payment shows what was paid and what remains, and does not clear the obligation', async (page) => {
-  await go(page, '/'); await click(page, 'Electric details'); await sleep(300);
+  await go(page, '/'); await click(page, 'Electric details'); await click(page, 'Record payment', '[data-testid=record-payment]'); await sleep(300);
   await setVal(page, '#pay-amt', '50'); await sleep(200);
   await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => /^Pay \$50/.test(b.innerText.trim())).click()); await sleep(1000);
   const [p] = await sql(`select (select due_date::text from categories where name='Electric') d, (select count(*) from bill_payments where category_id=(select id from categories where name='Electric')) bp`);
@@ -373,6 +373,249 @@ await test('PAYEE autocomplete still files the transaction normally (new and rem
   const [t] = await sql(`select payee, amount::float a, category_id from transactions order by id desc limit 1`); if (!/^Whole Foods/.test(t.payee) || t.a !== 8.25 || !t.category_id) throw new Error(JSON.stringify(t));
   await click(page, 'Add transaction'); await page.type('input[aria-label=Amount]', '5'); await page.type('#payee', 'Brand New Place'); await click(page, 'Dining Out', '.chip'); await click(page, 'Add expense'); await sleep(900);
   const [n] = await sql(`select payee from transactions order by id desc limit 1`); if (n.payee !== 'Brand New Place') throw new Error('new payee: ' + n.payee);
+});
+
+// ───────── transaction & plan usability (Enter key, transfers, pickers, negative reconcile, quick move, payment recognition) ─────────
+const device = async (vp = { width: 1440, height: 900 }) => { // a second signed-in device on the SAME data (no reseed)
+  const page = await browser.newPage(); await page.setViewport(vp);
+  await page.evaluateOnNewDocument((s) => { localStorage.setItem('fos-auth', JSON.stringify(s)); localStorage.setItem('fos-theme', 'light'); }, session);
+  page.errors = []; page.on('pageerror', (e) => page.errors.push(String(e))); return page;
+};
+const pickAcct = async (page, which, text) => {
+  await page.evaluate((w) => document.querySelector(`[data-testid=${w}-btn]`).click(), which); await sleep(250);
+  await page.type('[role=dialog] .picker input', text); await sleep(150); await page.keyboard.press('Enter'); await sleep(300);
+};
+const chosen = (page, label) => page.evaluate((label) => {
+  const g = document.querySelector(`.chips[aria-label="${label}"]`); if (g) return g.querySelector('[aria-pressed=true]')?.innerText.split('\n')[0] ?? '';
+  const b = document.querySelector(`[aria-label^="${label}:"]`); return b ? b.getAttribute('aria-label').slice(label.length + 2).replace(/^none chosen$/, '') : '';
+}, label);
+const typePressed = (page) => page.evaluate(() => [...document.querySelectorAll('[role=dialog] .seg button')].find((b) => b.getAttribute('aria-pressed') === 'true')?.innerText.trim());
+const dialogOpen = (page) => page.evaluate(() => !!document.querySelector('[role=dialog]'));
+const nTxn = async () => Number((await sql('select count(*) n from transactions'))[0].n);
+const pickCat = async (page, name) => {
+  const hit = await page.evaluate((name) => { const c = [...document.querySelectorAll('[role=dialog] .chips .chip')].find((x) => x.innerText.trim().startsWith(name)); if (c) { c.click(); return true; } return false; }, name);
+  if (!hit) { await click(page, 'All categories', '[data-testid=all-categories]'); await page.keyboard.type(name); await sleep(150); await page.keyboard.press('Enter'); }
+  await sleep(250);
+};
+const addTxn = async (page, { amount, payee, cat, date, label = 'Add expense' }) => {
+  await go(page, '/'); await click(page, 'Add transaction'); await page.type('input[aria-label=Amount]', String(amount)); await page.type('#payee', payee);
+  if (cat) await pickCat(page, cat);
+  if (date) { await click(page, 'Date, notes, split'); await setVal(page, '#date', date); await sleep(200); }
+  await click(page, label); await sleep(1100);
+};
+
+await test('ENTER: never changes the transaction type (Income, Transfer, Expense); submits only a valid form', async (page) => {
+  await go(page, '/'); await click(page, 'Add transaction'); await click(page, 'Income', '.seg button');
+  await page.type('input[aria-label=Amount]', '300'); await page.focus('#payee'); const n0 = await nTxn();
+  await page.keyboard.press('Enter'); await sleep(400);
+  if (await typePressed(page) !== 'Income') throw new Error('Enter in From switched the type to ' + await typePressed(page));
+  if (!(await dialogOpen(page)) || await nTxn() !== n0) throw new Error('an invalid income form was submitted');
+  await page.type('#payee', 'Side Gig'); await page.keyboard.press('Enter'); await sleep(1000);
+  const [t] = await sql(`select type, payee, amount::float a from transactions order by id desc limit 1`);
+  if (t.type !== 'Income' || t.payee !== 'Side Gig' || t.a !== 300) throw new Error('income not saved as income: ' + JSON.stringify(t));
+  await click(page, 'Add transaction'); await click(page, 'Transfer', '.seg button'); await page.type('input[aria-label=Amount]', '10'); await page.focus('input[aria-label=Amount]');
+  await page.keyboard.press('Enter'); await sleep(900);
+  if (await dialogOpen(page)) { if (await typePressed(page) !== 'Transfer') throw new Error('Enter flipped Transfer to ' + await typePressed(page)); }
+  else { const [x] = await sql(`select type from transactions order by id desc limit 1`); if (x.type !== 'Transfer') throw new Error('Enter in a transfer saved a ' + x.type); }
+  await click(page, 'Add transaction').catch(() => {}); await click(page, 'Expense', '.seg button').catch(() => {});
+});
+
+await test('TRANSFER: the last SAVED pair is remembered across devices; canceled or unsaved edits never count; invalid accounts fall back', async (page) => {
+  await go(page, '/'); await click(page, 'Add transaction'); await click(page, 'Transfer', '.seg button');
+  await pickAcct(page, 'txn-to-account', 'Cash'); await pickAcct(page, 'txn-account', 'High-Yield'); await pickAcct(page, 'txn-to-account', 'Everyday'); // the other side is never offered, so free it first
+  await page.type('input[aria-label=Amount]', '5'); await click(page, 'Add transfer'); await sleep(1000);
+  const [t] = await sql(`select account_id, to_account_id from transactions where type='Transfer' order by id desc limit 1`); if (Number(t.account_id) !== 2 || Number(t.to_account_id) !== 1) throw new Error('setup transfer: ' + JSON.stringify(t));
+  const dev2 = await device(); dev2.on('dialog', () => {});
+  try {
+    const open = async () => { await go(dev2, '/'); await click(dev2, 'Add transaction'); await click(dev2, 'Transfer', '.seg button'); await sleep(250); };
+    await open(); let f = await chosen(dev2, 'From account'), to = await chosen(dev2, 'To account');
+    if (f !== 'High-Yield Savings' || to !== 'Everyday Checking') throw new Error(`second device got ${f} -> ${to}`);
+    await click(dev2, 'Swap', '[data-testid=txn-swap]'); f = await chosen(dev2, 'From account'); to = await chosen(dev2, 'To account');
+    if (f !== 'Everyday Checking' || to !== 'High-Yield Savings') throw new Error('swap did not reverse the accounts');
+    await pickAcct(dev2, 'txn-account', 'Cash'); // an unsaved manual change
+    await dev2.keyboard.press('Escape'); await sleep(300); await click(dev2, 'Add transaction'); await click(dev2, 'Transfer', '.seg button'); await sleep(250);
+    f = await chosen(dev2, 'From account'); to = await chosen(dev2, 'To account');
+    if (f !== 'High-Yield Savings' || to !== 'Everyday Checking') throw new Error(`an unsaved change leaked into the preference: ${f} -> ${to}`);
+    await sql(`update accounts set is_archived=true where id=2`); await open(); // the remembered From is now archived
+    f = await chosen(dev2, 'From account'); to = await chosen(dev2, 'To account');
+    if (f === 'High-Yield Savings' || to === 'High-Yield Savings' || (f && f === to)) throw new Error(`archived account was offered: ${f} -> ${to}`);
+    if (page.errors.length || dev2.errors.length) throw new Error([...page.errors, ...dev2.errors].join('; '));
+  } finally { await dev2.close(); }
+});
+
+await test('TRANSFER: Swap reverses From/To, keeps the amount, updates the balance previews; balances show beside account names', async (page) => {
+  await go(page, '/'); await click(page, 'Add transaction'); await click(page, 'Transfer', '.seg button');
+  await page.type('input[aria-label=Amount]', '100');
+  await pickAcct(page, 'txn-to-account', 'Cash'); await pickAcct(page, 'txn-account', 'Everyday'); await pickAcct(page, 'txn-to-account', 'High-Yield');
+  const prev = () => page.evaluate(() => [...document.querySelectorAll('[data-testid=bal-preview]')].map((e) => e.innerText.replace(/\s+/g, ' ')));
+  let p = await prev(); if (!/4,820\.15 → .*4,720\.15/.test(p[0]) || !/2,400\.00 → .*2,500\.00/.test(p[1])) throw new Error('previews: ' + p.join(' | '));
+  await page.focus('[data-testid=txn-swap]'); await page.keyboard.press('Enter'); await sleep(300); // keyboard-operable
+  p = await prev(); if (!/2,400\.00 → .*2,300\.00/.test(p[0]) || !/4,820\.15 → .*4,920\.15/.test(p[1])) throw new Error('previews after swap: ' + p.join(' | '));
+  if (await page.evaluate(() => document.querySelector('input[aria-label=Amount]').value) !== '100') throw new Error('amount lost on swap');
+  await pickAcct(page, 'txn-to-account', 'Rewards'); p = await prev(); if (!/1,240\.50 → .*1,140\.50/.test(p[1])) throw new Error('a card shows what is owed: ' + p.join(' | '));
+  await page.evaluate(() => document.querySelector('[data-testid=txn-to-account-btn]').click()); await sleep(250);
+  const o = await page.evaluate(() => [...document.querySelectorAll('[role=dialog] .picker [role=option]')].map((x) => x.innerText.replace(/\s+/g, ' ')));
+  if (!o.some((t) => /Cash Wallet.*\$140\.00/.test(t)) || !o.some((t) => /Rewards Visa.*owed/.test(t))) throw new Error('account balances missing in the picker: ' + o.join(' | '));
+  if (o.some((t) => /High-Yield/.test(t))) throw new Error('the From account is offered as the To account');
+});
+
+await test('CATEGORY search: type to filter, best match highlighted, Enter/Tab accept, Esc closes, hidden categories excluded, group shown', async (page) => {
+  await sql(`update categories set is_hidden=true where name='Streaming'`);
+  await go(page, '/'); await click(page, 'Add transaction'); await page.type('input[aria-label=Amount]', '9'); await page.type('#payee', 'Cafe X'); const n0 = await nTxn();
+  await click(page, 'All categories', '[data-testid=all-categories]');
+  const opts = () => page.evaluate(() => [...document.querySelectorAll('[data-testid=cat-picker] [role=option]')].map((o) => ({ t: o.querySelector('.li-title').innerText.trim(), sub: o.querySelector('.li-sub')?.innerText ?? '', active: o.getAttribute('data-active') === 'true', sel: o.getAttribute('aria-selected') === 'true' })));
+  if (await page.evaluate(() => document.activeElement.getAttribute('aria-label')) !== 'Search All categories') throw new Error('search box not focused');
+  let o = await opts(); if (o.some((x) => x.t === 'Streaming')) throw new Error('an archived category is offered'); if (!o[0].active) throw new Error('first not highlighted'); if (!o.every((x) => x.sub)) throw new Error('group context missing');
+  await page.keyboard.type('vac'); await sleep(150); o = await opts(); if (o.length !== 1 || o[0].t !== 'Vacation Fund' || !o[0].active) throw new Error('filter: ' + JSON.stringify(o));
+  await page.keyboard.press('Enter'); await sleep(300);
+  if (!(await page.evaluate(() => [...document.querySelectorAll('[role=dialog] .chips .chip')].some((c) => c.getAttribute('aria-pressed') === 'true' && /Vacation Fund/.test(c.innerText))))) throw new Error('Enter did not select it');
+  if (!(await dialogOpen(page)) || await nTxn() !== n0) throw new Error('Enter closed or submitted the transaction');
+  await click(page, 'All categories', '[data-testid=all-categories]'); o = await opts(); if (!o.find((x) => x.t === 'Vacation Fund')?.sel) throw new Error('the selected category is not indicated');
+  await page.keyboard.type('o'); await sleep(150); o = await opts(); if (o.length < 3) throw new Error('expected several matches'); const first = o[0].t;
+  await page.keyboard.press('ArrowDown'); await sleep(100); o = await opts(); if (!o[1].active || o[0].active) throw new Error('ArrowDown');
+  await page.keyboard.press('ArrowUp'); await sleep(100); o = await opts(); if (!o[0].active) throw new Error('ArrowUp');
+  await page.keyboard.press('Tab'); await sleep(300);
+  if (!(await page.evaluate((f) => [...document.querySelectorAll('[role=dialog] .chips .chip')].some((c) => c.getAttribute('aria-pressed') === 'true' && c.innerText.includes(f)), first))) throw new Error('Tab did not accept ' + first);
+  if (await page.evaluate(() => document.activeElement.getAttribute('aria-label') === 'Search All categories')) throw new Error('focus stayed in the search');
+  await click(page, 'All categories', '[data-testid=all-categories]'); await page.keyboard.press('Escape'); await sleep(250);
+  if ((await opts()).length || !(await dialogOpen(page))) throw new Error('Escape should close only the list');
+});
+
+await test('RECONCILE: a negative actual balance can be entered; positive → negative → zero → positive land exactly on target; history is kept', async (page) => {
+  const rec = async (v) => {
+    await go(page, '/accounts/1'); await click(page, 'Reconcile'); await page.type('#act', v); await click(page, 'Preview difference');
+    await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => /Record adjustment|Mark reconciled/.test(b.innerText)).click()); await sleep(1000);
+    return (await sql('select balance::float b from accounts where id=1'))[0].b;
+  };
+  const kept = Number((await sql(`select count(*) n from transactions where not coalesce(is_adjustment,false)`))[0].n);
+  const dis = await (async () => { await go(page, '/accounts/1'); await click(page, 'Reconcile'); await page.type('#act', '-'); const off = await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => /Preview difference/.test(b.innerText)).disabled); await page.keyboard.press('Escape'); await sleep(300); return off; })();
+  if (!dis) throw new Error('a lone minus sign should not be accepted');
+  if (await rec('-128.38') !== -128.38) throw new Error('negative target not reached');
+  const [adj] = await sql(`select type, amount::float a from transactions where is_adjustment and account_id=1 order by id desc limit 1`); if (adj.type !== 'Expense' || Math.abs(adj.a - 4948.53) > 0.001) throw new Error('adjustment: ' + JSON.stringify(adj));
+  if (await rec('0') !== 0) throw new Error('zero not reached');
+  if (await rec('75.25') !== 75.25) throw new Error('positive after negative not reached');
+  if (await rec('-5,000.5') !== -5000.5) throw new Error('thousands separator / signed value');
+  const after = Number((await sql(`select count(*) n from transactions where not coalesce(is_adjustment,false)`))[0].n);
+  if (after !== kept) throw new Error('ordinary transactions were changed to force a match');
+  await go(page, '/accounts/1'); const t = await page.evaluate(() => document.body.innerText); if (!/−\$5,000\.50/.test(t)) throw new Error('negative balance not displayed: ');
+});
+
+await test('PLAN rows: a quiet Move money shortcut opens the one Move Money dialog with the item prefilled; Pay buttons are gone', async (page) => {
+  await go(page, '/'); await click(page, 'Electric details'); await sleep(300); if (!/Record payment/.test(await detail(page))) throw new Error('Home rows should open the item, where payments are managed');
+  await page.keyboard.press('Escape'); await sleep(300);
+  const pays = async () => page.evaluate(() => [...document.querySelectorAll('button')].filter((b) => b.innerText.trim() === 'Pay').length);
+  if (await pays()) throw new Error('Home still has Pay buttons');
+  await go(page, '/plan'); if (await pays()) throw new Error('Plan still has Pay buttons');
+  const click1 = (name) => page.evaluate((name) => { const r = [...document.querySelectorAll('[data-testid=plan-row]')].find((x) => x.querySelector('.li-title').innerText.trim() === name); r.querySelector('[data-testid=row-move]').click(); }, name);
+  await click1('Rent'); await sleep(500);
+  let t = await page.evaluate(() => document.querySelector('[role=dialog]').innerText); if (!/Move money/.test(t)) throw new Error('dialog did not open');
+  if (await chosen(page, 'From') !== 'Rent') throw new Error('From should be Rent, got ' + await chosen(page, 'From'));
+  await page.keyboard.press('Escape'); await sleep(250); if (await page.evaluate(() => !!document.querySelector('[role=dialog] .picker'))) { await page.keyboard.press('Escape'); await sleep(250); }
+  if (await dialogOpen(page)) await page.keyboard.press('Escape'); await sleep(300);
+  await click1('Streaming'); await sleep(500);
+  if (await chosen(page, 'To') !== 'Streaming' || await chosen(page, 'From') !== 'Ready to Assign') throw new Error(`empty item: ${await chosen(page, 'From')} -> ${await chosen(page, 'To')}`);
+  await page.keyboard.press('Escape'); await sleep(300);
+  const gasHas = await page.evaluate(() => { const r = [...document.querySelectorAll('[data-testid=plan-row]')].find((x) => x.querySelector('.li-title').innerText.trim() === 'Gas'); return { move: !!r.querySelector('[data-testid=row-move]'), cover: /Cover/.test(r.innerText) }; });
+  if (gasHas.move || !gasHas.cover) throw new Error('an overspent item should keep its Cover action only');
+  // discoverable by keyboard: focus reveals it
+  await page.evaluate(() => document.querySelector('[data-testid=plan-row]').focus()); await sleep(250);
+  const op = await page.evaluate(() => getComputedStyle(document.querySelector('[data-testid=plan-row] [data-testid=row-move]')).opacity); if (Number(op) < 1) throw new Error('shortcut not revealed on focus: ' + op);
+  const lab = await page.evaluate(() => document.querySelector('[data-testid=row-move]').getAttribute('aria-label')); if (!/^Move money (from|to) /.test(lab)) throw new Error('no accessible name: ' + lab);
+});
+await test('PLAN rows (phone): the Move money shortcut is visible without hover', async () => {
+  const page = await fresh({ width: 390, height: 844, isMobile: true, hasTouch: true }); const name = 'PLAN rows (phone): the Move money shortcut is visible without hover';
+  try { await go(page, '/plan'); const op = await page.evaluate(() => Number(getComputedStyle(document.querySelector('[data-testid=row-move]')).opacity)); if (op < 0.5) throw new Error('hidden on touch: ' + op); results.push([name, true]); }
+  catch (e) { results.push([name, false, e.message]); }
+  await page.close();
+});
+
+await test('MOVE MONEY keyboard: search, best match highlighted, Tab accepts and advances, Enter never submits, Esc closes, no invalid pairs', async (page) => {
+  await go(page, '/plan'); await page.evaluate(() => document.querySelector('[data-testid=plan-move]').click()); await sleep(500);
+  const searchFocused = () => page.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? '');
+  if (await searchFocused() !== 'Search From') throw new Error('From search not focused: ' + await searchFocused());
+  const act = () => page.evaluate(() => [...document.querySelectorAll('[role=dialog] [role=option]')].find((o) => o.getAttribute('data-active') === 'true')?.querySelector('.li-title').innerText.trim());
+  await page.keyboard.type('ren'); await sleep(200); if (await act() !== 'Rent') throw new Error('Rent not highlighted: ' + await act());
+  await page.keyboard.press('Tab'); await sleep(400);
+  if (await chosen(page, 'From') !== 'Rent') throw new Error('Tab did not accept From');
+  if (await searchFocused() !== 'Search To') throw new Error('focus did not advance to To: ' + await searchFocused());
+  const toIds = await page.evaluate(() => [...document.querySelectorAll('[data-testid=move-to] [role=option]')].map((o) => o.innerText));
+  if (toIds.some((t) => /^Rent/.test(t))) throw new Error('the From item is offered as To');
+  await page.keyboard.type('gro'); await sleep(200); await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowUp'); await page.keyboard.press('Enter'); await sleep(400);
+  if (await chosen(page, 'To') !== 'Groceries') throw new Error('Enter did not accept To: ' + await chosen(page, 'To'));
+  if (!(await dialogOpen(page))) throw new Error('Enter submitted or closed the dialog');
+  const m0 = (await sql('select assigned_amount::float a from categories where name=\'Groceries\''))[0].a;
+  await page.evaluate(() => document.querySelector('[data-testid=move-to-btn]').click()); await sleep(250); await page.keyboard.press('Escape'); await sleep(250);
+  if (!(await dialogOpen(page))) throw new Error('Escape closed the whole dialog');
+  await click(page, 'Swap', '[data-testid=move-swap]'); if (await chosen(page, 'From') !== 'Groceries' || await chosen(page, 'To') !== 'Rent') throw new Error('swap');
+  await click(page, 'Swap', '[data-testid=move-swap]');
+  await page.focus('[role=dialog] input[inputmode=decimal]'); await page.keyboard.type('10'); await page.keyboard.press('Enter'); await sleep(1000);
+  const m1 = (await sql('select assigned_amount::float a from categories where name=\'Groceries\''))[0].a;
+  if (Math.abs(m1 - (m0 + 10)) > 0.001) throw new Error(`Groceries ${m0} -> ${m1}, expected +10`);
+  if (await dialogOpen(page)) throw new Error('dialog should close after moving');
+});
+
+await test('RECOGNIZE: a full payment recorded as an ordinary transaction counts automatically; Undo reverses everything', async (page) => {
+  const b0 = Number((await sql('select balance::float b from accounts where id=1'))[0].b); const n0 = await nTxn();
+  await addTxn(page, { amount: 85, payee: 'Phone Co', cat: 'Phone' });
+  const [a] = await sql(`select (select balance::float from accounts where id=1) b, (select count(*) from bill_payments where category_id=3) bp, (select due_date::text from categories where id=3) d`);
+  if (await nTxn() !== n0 + 1 || Math.abs(a.b - (b0 - 85)) > 0.001) throw new Error('one transaction, one debit expected: ' + JSON.stringify(a));
+  if (Number(a.bp) !== 2 || a.d !== '2026-12-22') throw new Error('not recognised as the Phone payment: ' + JSON.stringify(a));
+  const tt = await toastText(page); if (!/counted as your Phone payment/.test(tt)) throw new Error('toast: ' + tt);
+  await click(page, 'Undo', '.toast button'); await sleep(900);
+  const [u] = await sql(`select (select balance::float from accounts where id=1) b, (select count(*) from bill_payments where category_id=3) bp, (select due_date::text from categories where id=3) d`);
+  if (await nTxn() !== n0 || Math.abs(u.b - b0) > 0.001 || Number(u.bp) !== 1 || u.d !== '2026-11-22') throw new Error('undo left a trace: ' + JSON.stringify(u));
+});
+await test('RECOGNIZE: a linked transaction is locked (no edit/delete) and says why', async (page) => {
+  await addTxn(page, { amount: 85, payee: 'Phone Co', cat: 'Phone' });
+  await go(page, '/activity'); await sleep(300);
+  const hit = await page.evaluate(() => { const r = [...document.querySelectorAll('button')].find((x) => /Phone Co/.test(x.innerText) && x.offsetParent); if (!r) return false; r.click(); return true; });
+  if (!hit) throw new Error('row not found: ' + (await page.evaluate(() => document.body.innerText.slice(0, 300))));
+  await sleep(500);
+  const pane = await page.evaluate(() => document.querySelector('.pane')?.innerText ?? ''); if (/Delete…/.test(pane)) throw new Error('a linked transaction offers Delete');
+  await click(page, 'Details', '.pane button'); await sleep(400);
+  const d = await page.evaluate(() => document.querySelector('[role=dialog]')?.innerText ?? '');
+  if (/Delete/.test(d) || /Edit/.test(d)) throw new Error('linked transaction can be changed: ' + d.slice(0, 200));
+  if (!/counts as a payment toward Phone/.test(d)) throw new Error('no explanation: ' + d.slice(0, 260));
+});
+await test('RECOGNIZE: a smaller amount asks; partial is tracked by explicit link; the completing payment settles; unrelated spending never counts', async (page) => {
+  await sql(`insert into transactions (date, amount, payee, category_id, account_id, type, entity_id, status) values ('2026-11-08', 40, 'Unrelated Electric Thing', 2, 1, 'Expense', 'personal', 'posted')`);
+  await addTxn(page, { amount: 50, payee: 'Power Co', cat: 'Electric' });
+  const t = await page.evaluate(() => document.querySelector('[role=dialog]')?.innerText ?? ''); if (!/Is this a payment toward Electric\?/.test(t)) throw new Error('no question: ' + t.slice(0, 160));
+  if (!(await page.evaluate(() => document.querySelector('[data-testid=pay-choice-partial]').checked))) throw new Error('partial should be the default');
+  await click(page, 'Confirm', '[data-testid=advance-due]'); await sleep(1000);
+  let [p] = await sql(`select (select count(*) from bill_partials) bp, (select sum(amount)::float from bill_partials) s, (select count(*) from bill_payments where category_id=2) pay, (select due_date::text from categories where id=2) d`);
+  if (Number(p.bp) !== 1 || p.s !== 50 || Number(p.pay) !== 0 || p.d !== '2026-11-14') throw new Error('partial: ' + JSON.stringify(p));
+  await go(page, '/plan'); await rowClick(page, 'Electric'); await sleep(400); const e = await detail(page);
+  if (!/Paid so far/.test(e) || !/\$50\.00/.test(e) || !/\$68\.40 remaining/.test(e)) throw new Error('paid-so-far must count only the linked $50 (not the unrelated $40): ' + e.slice(0, 300));
+  await addTxn(page, { amount: 68.4, payee: 'Power Co', cat: 'Electric' }); // completes it: no question
+  [p] = await sql(`select (select count(*) from bill_partials) bp, (select count(*) from bill_payments where category_id=2) pay, (select due_date::text from categories where id=2) d`);
+  if (Number(p.pay) !== 1 || p.d !== '2026-12-14' || Number(p.bp) !== 1) throw new Error('completion: ' + JSON.stringify(p));
+});
+await test('RECOGNIZE: a partial can be undone from the item (the transaction is kept unless chosen)', async (page) => {
+  await addTxn(page, { amount: 50, payee: 'Power Co', cat: 'Electric' }); await click(page, 'Confirm', '[data-testid=advance-due]'); await sleep(900);
+  const n0 = await nTxn();
+  await go(page, '/'); await click(page, 'Electric details'); await click(page, 'Record payment', '[data-testid=record-payment]');
+  await click(page, 'Undo', '[data-testid=undo-partial]'); await click(page, 'Undo payment', '[data-testid=undo-partial-confirm]'); await sleep(900);
+  const [p] = await sql(`select (select count(*) from bill_partials) bp`); if (Number(p.bp) !== 0 || await nTxn() !== n0) throw new Error('undo: ' + JSON.stringify(p));
+});
+await test('RECOGNIZE: no schedule, too early, or backdated → an ordinary transaction; answering "no" links nothing', async (page) => {
+  const n0 = await nTxn();
+  await addTxn(page, { amount: 40, payee: 'Trader Joe\'s', cat: 'Groceries' });
+  await addTxn(page, { amount: 1500, payee: 'Landlord', cat: 'Rent' }); // next rent is Dec 1: far too early to be it
+  await addTxn(page, { amount: 118.4, payee: 'Power Co', cat: 'Electric', date: '2026-09-01' }); // backdated before this cycle
+  if (await dialogOpen(page)) throw new Error('a question was asked for a non-match');
+  const [p] = await sql(`select (select count(*) from bill_payments) bp, (select count(*) from bill_partials) bq`); if (Number(p.bp) !== 2 || Number(p.bq) !== 0) throw new Error('something was linked: ' + JSON.stringify(p));
+  if (await nTxn() !== n0 + 3) throw new Error('the transactions themselves must still be recorded');
+  await addTxn(page, { amount: 30, payee: 'Power Co', cat: 'Electric' }); await page.evaluate(() => document.querySelector('[data-testid=pay-choice-none]').click()); await sleep(200);
+  await click(page, 'Keep as a transaction', '[data-testid=advance-due]'); await sleep(900);
+  const [q] = await sql(`select (select count(*) from bill_payments) bp, (select count(*) from bill_partials) bq`); if (Number(q.bp) !== 2 || Number(q.bq) !== 0) throw new Error('"no" still linked: ' + JSON.stringify(q));
+});
+await test('RECOGNIZE: several missed payments → asks which; confirming pays the oldest, the debt falls, nothing doubles', async (page) => {
+  await addTxn(page, { amount: 320, payee: 'Loan Co', cat: 'Car Loan' });
+  const t = await page.evaluate(() => document.querySelector('[role=dialog]')?.innerText ?? ''); if (!/oldest missed payment/.test(t)) throw new Error('no backlog question: ' + t.slice(0, 200));
+  const n0 = await nTxn(); await click(page, 'Confirm', '[data-testid=advance-due]'); await sleep(1000);
+  const [a] = await sql(`select (select balance::float from categories where id=5) owed, (select due_date::text from categories where id=5) d, (select count(*) from bill_payments where category_id=5) bp`);
+  if (a.owed !== 8080 || a.d !== '2026-10-27' || Number(a.bp) !== 1 || await nTxn() !== n0) throw new Error(JSON.stringify(a));
 });
 await browser.close(); await new Promise((r) => pv.httpServer.close(r)); backend.close(); fs.rmSync(outDir, { recursive: true, force: true });
 for (const [n, ok, why] of results) console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${why ? '  — ' + why : ''}`);

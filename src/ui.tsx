@@ -108,7 +108,8 @@ export function Seg<T extends string>({ value, onChange, options, block }: { val
   return (
     <div className={cn('seg', block && 'block')} role="group">
       {options.map((o) => (
-        <button key={o.v} aria-pressed={value === o.v} onClick={() => onChange(o.v)}>{o.label}</button>
+        // type="button": inside a form these were implicit SUBMIT buttons, so pressing Enter in a text field "clicked" the first one (Expense) and flipped the transaction type.
+        <button type="button" key={o.v} aria-pressed={value === o.v} onClick={() => onChange(o.v)}>{o.label}</button>
       ))}
     </div>
   );

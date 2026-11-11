@@ -363,3 +363,127 @@ describe('Plan items: one save, one archive (migration 019)', () => {
     expect((await one(tx, 'select bill_paused from categories where id=2')).bill_paused).toBe(true);
   }));
 });
+
+// ── migration 020: transaction-first payments. A partial payment is linked explicitly (bill_partials); unrelated category spending never counts. ──
+describe('explicit partial payments (migration 020)', () => {
+  const mk = async (tx, o) => num(tx, `select fos_create_transaction($1::jsonb)`, [JSON.stringify({ date: '2026-11-10', amount: 50, payee: 'Power Co', type: 'Expense', account_id: 1, category_id: 2, ...o })]);
+  const link = (tx, id, o = {}) => pay(tx, { category_id: 2, due: '2026-11-14', mode: 'link', transaction_id: id, ...o });
+
+  it('linking a smaller transaction records an explicit partial; the bill stays due and nothing else moves', () => sandbox(async (tx) => {
+    const b = await bal(tx, 1), e = await avail(tx, 2);
+    const id = await mk(tx, { amount: 50 });
+    const afterTxn = [await bal(tx, 1), await avail(tx, 2)];
+    const r = await link(tx, id, { settle: false });
+    expect(r.settled).toBe(false); expect(r.paid_before).toBe(0);
+    expect(await due(tx, 2)).toBe('2026-11-14');
+    expect(await num(tx, 'select count(*) from bill_partials where category_id=2')).toBe(1);
+    expect(await num(tx, 'select count(*) from bill_payments where category_id=2')).toBe(0);
+    expect([await bal(tx, 1), await avail(tx, 2)]).toEqual(afterTxn); // linking is bookkeeping only
+    expect(b - afterTxn[0]).toBeCloseTo(50, 2); expect(e - afterTxn[1]).toBeCloseTo(50, 2);
+  }));
+
+  it('the payment that completes what is owed settles it (even when asked not to), counting earlier linked partials only', () => sandbox(async (tx) => {
+    const p1 = await mk(tx, { amount: 50 }); await link(tx, p1, { settle: false });
+    await mk(tx, { amount: 500, payee: 'Unrelated big purchase' }); // same category, NOT linked: must not count
+    const p2 = await mk(tx, { amount: 68.4, date: '2026-11-11' });
+    const r = await link(tx, p2, { settle: false });
+    expect(r.settled).toBe(true); expect(r.paid_before).toBe(50);
+    expect(await due(tx, 2)).toBe('2026-12-14');
+    expect(await num(tx, 'select count(*) from bill_payments where category_id=2')).toBe(1);
+  }));
+
+  it('an unlinked transaction in the same category is not a payment; a too-small payment alone does not settle', () => sandbox(async (tx) => {
+    await mk(tx, { amount: 118.4 }); // ordinary spending, never linked
+    expect(await num(tx, 'select count(*) from bill_payments where category_id=2')).toBe(0);
+    expect(await due(tx, 2)).toBe('2026-11-14');
+    const small = await mk(tx, { amount: 20 }); const r = await link(tx, small, { settle: false });
+    expect(r.settled).toBe(false);
+  }));
+
+  it('one transaction can only be linked once, and only to its own category; income and scheduled rows are refused', () => sandbox(async (tx) => {
+    const id = await mk(tx, { amount: 40 }); await link(tx, id, { settle: false });
+    await fails(tx, `select fos_pay_bill_v2($1::jsonb)`, [JSON.stringify({ category_id: 2, due: '2026-11-14', mode: 'link', transaction_id: id, settle: false })], /already linked/);
+    const other = await mk(tx, { amount: 30, category_id: 9 });
+    await fails(tx, `select fos_pay_bill_v2($1::jsonb)`, [JSON.stringify({ category_id: 2, due: '2026-11-14', mode: 'link', transaction_id: other })], /different category/);
+    const inc = await mk(tx, { amount: 30, type: 'Income', category_id: null });
+    await fails(tx, `select fos_pay_bill_v2($1::jsonb)`, [JSON.stringify({ category_id: 2, due: '2026-11-14', mode: 'link', transaction_id: inc })], /different category|income cannot/);
+    const sch = await mk(tx, { amount: 30, date: '2026-12-01', scheduled: true });
+    await fails(tx, `select fos_pay_bill_v2($1::jsonb)`, [JSON.stringify({ category_id: 2, due: '2026-11-14', mode: 'link', transaction_id: sch })], /posted/);
+  }));
+
+  it('a linked transaction cannot be deleted from under its payment; undoing the partial unlinks and (optionally) deletes it, restoring everything', () => sandbox(async (tx) => {
+    const b = await bal(tx, 1), e = await avail(tx, 2);
+    const id = await mk(tx, { amount: 50 }); await link(tx, id, { settle: false });
+    await fails(tx, `select fos_delete_transaction($1)`, [id], /confirms a bill payment/);
+    await tx.query(`select fos_unpay_partial($1, true)`, [id]);
+    expect(await num(tx, 'select count(*) from bill_partials')).toBe(0);
+    expect(await num(tx, 'select count(*) from transactions where id=$1', [id])).toBe(0);
+    expect(await bal(tx, 1)).toBeCloseTo(b, 2); expect(await avail(tx, 2)).toBeCloseTo(e, 2);
+  }));
+
+  it('a debt reduced by a partial is restored exactly by the server (a wrong client figure is ignored); undo is refused once completed', () => sandbox(async (tx) => {
+    const r = await pay(tx, { category_id: 5, due: '2026-09-27', mode: 'post', account_id: 1, amount: 100, settle: false });
+    expect(await owed(tx, 5)).toBe(8300);
+    await tx.query(`select fos_unpay_bill(5, '2026-09-27', true, $1, 9999)`, [r.transaction_id]); // client figure is nonsense on purpose
+    expect(await owed(tx, 5)).toBe(8400);
+    const r2 = await pay(tx, { category_id: 5, due: '2026-09-27', mode: 'post', account_id: 1, amount: 100, settle: false });
+    await pay(tx, { category_id: 5, due: '2026-09-27', mode: 'post', account_id: 1, amount: 220, settle: false }); // 100 + 220 = 320: completes it
+    expect(await due(tx, 5)).toBe('2026-10-27'); expect(await owed(tx, 5)).toBe(8400 - 320);
+    await fails(tx, `select fos_unpay_partial($1, false)`, [r2.transaction_id], /completed/);
+    await tx.query(`select fos_unpay_bill(5, '2026-09-27', true)`); // undo the completing payment (and its transaction): the partial counts again
+    expect(await due(tx, 5)).toBe('2026-09-27'); expect(await owed(tx, 5)).toBe(8300);
+    await tx.query(`select fos_unpay_partial($1, true)`, [r2.transaction_id]);
+    expect(await owed(tx, 5)).toBe(8400);
+  }));
+
+  it('post-mode default amount is what is still owed, and a retry with the same request id never double-pays', () => sandbox(async (tx) => {
+    const p1 = await mk(tx, { amount: 50 }); await link(tx, p1, { settle: false });
+    const o = { category_id: 2, due: '2026-11-14', mode: 'post', account_id: 1, request_id: '22222222-2222-2222-2222-222222222222' };
+    const r = await pay(tx, o); const again = await pay(tx, o);
+    expect(r.amount).toBeCloseTo(68.4, 2); expect(r.settled).toBe(true); expect(again.duplicate).toBe(true);
+    expect(await num(tx, 'select count(*) from bill_payments where category_id=2')).toBe(1);
+  }));
+
+  it('full round trip leaves balances, envelopes and Ready to Assign exactly as they started', () => sandbox(async (tx) => {
+    const start = [await bal(tx, 1), await avail(tx, 2), await rtaOf(tx), await due(tx, 2)];
+    const p1 = await mk(tx, { amount: 50 }); await link(tx, p1, { settle: false });
+    const p2 = await mk(tx, { amount: 68.4 }); await link(tx, p2);
+    await tx.query(`select fos_unpay_bill(2, '2026-11-14', true)`);
+    await tx.query(`select fos_unpay_partial($1, true)`, [p1]);
+    expect([await bal(tx, 1), await avail(tx, 2), await rtaOf(tx), await due(tx, 2)]).toEqual(start);
+  }));
+});
+
+describe('reconciliation to negative balances, and per-user isolation', () => {
+  const reco = (tx, a, v) => tx.query(`select fos_reconcile($1, $2, '2026-11-10')`, [a, v]);
+  it('positive → negative → zero → positive each land exactly on the target, with one visible adjustment per change and history untouched', () => sandbox(async (tx) => {
+    const ordinary = await num(tx, `select count(*) from transactions where not coalesce(is_adjustment,false)`);
+    for (const target of [-128.38, 0, 75.25, -5000.5, 4820.15]) {
+      await reco(tx, 1, target);
+      expect(await bal(tx, 1)).toBe(target);
+    }
+    expect(await num(tx, `select count(*) from transactions where not coalesce(is_adjustment,false)`)).toBe(ordinary);
+    expect(await num(tx, `select count(*) from account_reconciliations where account_id=1`)).toBeGreaterThanOrEqual(5);
+    const last = await one(tx, `select type, amount::float a from transactions where is_adjustment and account_id=1 order by id desc limit 1`);
+    expect(last.type).toBe('Income'); expect(last.a).toBeCloseTo(5000.5 + 4820.15, 2); // −5,000.50 → 4,820.15 is money coming in
+  }));
+  it('the adjustment direction follows the sign: overdrawn target is an expense, recovery is income', () => sandbox(async (tx) => {
+    await reco(tx, 1, -128.38);
+    expect((await one(tx, `select type from transactions where is_adjustment and account_id=1 order by id desc limit 1`)).type).toBe('Expense');
+    await reco(tx, 1, 50);
+    expect((await one(tx, `select type from transactions where is_adjustment and account_id=1 order by id desc limit 1`)).type).toBe('Income');
+    expect(await bal(tx, 1)).toBe(50);
+  }));
+  it('a different signed-in user sees none of the owner’s data and cannot create anything (so a remembered transfer pair, derived from it, can never cross users)', async () => {
+    try {
+      await asOwner(db, async (tx) => {
+        expect(await num(tx, 'select count(*) from transactions')).toBe(0);
+        expect(await num(tx, 'select count(*) from accounts')).toBe(0);
+        await fails(tx, `select fos_create_transaction($1::jsonb)`, [JSON.stringify({ date: '2026-11-10', amount: 5, payee: 'x', type: 'Transfer', account_id: 1, to_account_id: 2 })]);
+        await fails(tx, `select fos_pay_bill_v2($1::jsonb)`, [JSON.stringify({ category_id: 2, due: '2026-11-14', mode: 'external' })]);
+        expect(await num(tx, 'select count(*) from bill_partials')).toBe(0);
+        throw ROLLBACK;
+      }, '00000000-0000-0000-0000-0000000000e2');
+    } catch (e) { if (e !== ROLLBACK) throw e; }
+  });
+});

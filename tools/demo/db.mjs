@@ -8,7 +8,7 @@ import { tables } from './fixture.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const DEMO_UID = '00000000-0000-0000-0000-0000000000d1';
-export const MIGRATIONS = ['000_supabase_stubs_and_base', '011a_additive_ledger_engine', '011b_lock_down_access', '012_sheets_sync_token', '013_bill_anchor_and_pause', '014_credit_tracker', '015_bill_amount', '016_account_management', '017_bill_archive', '018_payments_scheduling_recurrence', '019_plan_items'];
+export const MIGRATIONS = ['000_supabase_stubs_and_base', '011a_additive_ledger_engine', '011b_lock_down_access', '012_sheets_sync_token', '013_bill_anchor_and_pause', '014_credit_tracker', '015_bill_amount', '016_account_management', '017_bill_archive', '018_payments_scheduling_recurrence', '019_plan_items', '020_explicit_partial_payments'];
 const EXTRA = (process.env.DEMO_EXTRA_MIGRATIONS || '').split(',').filter(Boolean);
 
 const q = (id) => { if (!/^[a-z_][a-z0-9_]*$/i.test(id)) throw new Error(`bad identifier ${id}`); return `"${id}"`; };

@@ -1,7 +1,7 @@
 // Finances service worker: caches the app shell so it opens instantly and installs as an app.
 // It NEVER caches or serves data: only same-origin GET requests for the app's own files are cached.
-const CACHE = 'fos-shell-v2'; // bumped so installs drop the old cached manifest (it still said "Finance OS")
-self.addEventListener('install', (e) => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/', '/manifest.webmanifest', '/icon-192.png']))); });
+const CACHE = 'fos-shell-v3'; // bumped so installs drop every old cached file, including the previous (green) icons
+self.addEventListener('install', (e) => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/', '/manifest.webmanifest', '/icons/icon-192.png', '/favicon.svg']))); });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
 });

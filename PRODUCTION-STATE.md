@@ -44,3 +44,9 @@ Site: https://marrero-finance.netlify.app/ (existing Netlify site; GitHub repo R
 - Migration 016 applied to production (backup db-full-2026-11-02T16-44-43): accounts.is_archived/archived_at + fos_delete_unused_account (owner-only, refuses any account with history). Nothing else changed.
 - Transfers drawn with direction; Move Money rebuilt; Budget filters redefined; payee autofill/keyboard; PWA manifest fetched fresh + cache bumped.
 - Open decision: $9.00 TikTok Shop (Oct 31) explains the full Daily Operations recorded vs derived gap; not changed.
+
+## Transaction & Plan usability pass (migration 020)
+- Migration 020 applied to production 2026-11-11 after verified backup db-full-2026-11-11T22-10-17 (restore verified; dry run on a copy built from it and a rolled-back dry run on production both passed). Adds one table, `bill_partials` (owner-only RLS, empty), and replaces `fos_pay_bill_v2`, `fos_unpay_bill`, `fos_delete_transaction`; adds `fos_unpay_partial`. A post-migration backup (db-full-2026-11-11T22-18-05) shows every existing table byte-identical.
+- Rollback (structure only): `drop function fos_unpay_partial(bigint, boolean); drop table bill_partials;` then re-run 018 to restore the previous functions. The previous app keeps working against the migrated database.
+- Remembered transfer accounts need no table: the last saved transfer in `transactions` is the preference, so it syncs across devices and inherits the owner-only access rules.
+- Icons regenerate with `node tools/make-icons.mjs`; the service-worker cache name was bumped so installed copies drop the old icons.

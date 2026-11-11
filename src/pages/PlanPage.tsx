@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Archive, ChevronDown, ChevronRight, Plus, Search, Wallet } from 'lucide-react';
+import { Archive, ArrowLeftRight, ChevronDown, ChevronRight, Plus, Search, Wallet } from 'lucide-react';
 import { useStore } from '../store';
 import { envelope, groupBills, readyToAssign, upcomingBills, type BillGroup, type Category } from '../data';
 import { cn, diffDays, fmtDate, mon, money, relDay, sum } from '../lib';
@@ -18,12 +18,11 @@ export function BillList({ groups }: { groups: BillGroup[] }) {
         return (
           <div key={g.bill.id} className="rowx">
             <div className={cn('datebox', late && 'late')}><b className="num">{fmtDate(n.date, 'day')}</b><span>{mon(n.date)}</span></div>
-            <button className="grow" style={{ textAlign: 'left', minWidth: 0 }} onClick={() => openModal({ type: 'bill', billId: g.bill.id, date: n.date })} aria-label={`${g.bill.name} details`}>
+            <button className="grow" style={{ textAlign: 'left', minWidth: 0 }} onClick={() => openModal({ type: 'category', id: g.bill.categoryId ?? g.bill.id })} aria-label={`${g.bill.name} details`}>
               <div className="row gap8 wrapnames"><span className="li-title ellipsis">{g.bill.name}</span>{g.missed > 1 ? <StatusPill status="late">{g.missed} missed</StatusPill> : late ? <StatusPill status="late">Overdue</StatusPill> : soon ? <StatusPill status="warn">Due soon</StatusPill> : null}</div>
               <div className="li-sub ellipsis">{late ? (g.missed > 1 ? `${g.missed} payments missed · since ${fmtDate(n.date)}` : `Was due ${relDay(n.date, data.today).toLowerCase()}`) : relDay(n.date, data.today)}</div>
             </button>
             <div className="right"><div className="amt-md num"><Money v={g.bill.amount} /></div>{late && g.missed > 1 && <div className="xs muted num">{money(g.total)} total</div>}</div>
-            <button className={cn('btn sm', (late || soon) && 'primary')} onClick={() => openModal({ type: 'bill', billId: g.bill.id, date: n.date })}>Pay</button>
           </div>
         );
       })}
@@ -126,14 +125,15 @@ export function Plan({ query }: { query: URLSearchParams }) {
                   <><button className="group-toggle" aria-expanded={open} aria-label={`${g.name}, ${rows.length} items`} onClick={() => toggleGroup(g.id)}><span className="t"><ChevronDown />{g.name}<span className="muted" style={{ fontWeight: 500 }}>· {rows.length}</span></span><span className="small muted num">{money(sum(rows, (r) => r.env.avail), { cents: false })}</span></button>
                   {open && <div className="group">
                     {rows.map((it) => {
-                      const st = status(it); const over = it.env.avail < 0; const late = !!it.g && it.g.missed > 0; const soon = !!it.g && !late && diffDays(it.g.next.date, data.today) <= 3;
+                      const st = status(it); const over = it.env.avail < 0; const late = !!it.g && it.g.missed > 0
                       return (
                         <div key={it.cat.id} className="plan-row" role="button" tabIndex={0} aria-selected={sel === it.cat.id} data-testid="plan-row" onClick={() => pick(it.cat.id)}
-                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(it.cat.id); } }}>
+                          onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); pick(it.cat.id); } }}>
                           <div className={cn('li-ico', over || late ? 'neg' : 'planned')}><CatIcon k={it.cat.icon} /></div>
                           <div className="grow"><div className="li-title ellipsis">{it.cat.name}</div><div className={cn('li-sub', st.tone === 'neg' && 'neg')} style={st.tone === 'neg' ? { fontWeight: 560 } : undefined}>{st.text || ' '}</div></div>
-                          {it.bill && it.g && (late || soon) && <button className="btn sm primary" onClick={(e) => { e.stopPropagation(); openModal({ type: 'bill', billId: it.bill!.id, date: it.g!.next.date }); }}>Pay</button>}
-                          {over && <button className="btn sm" onClick={(e) => { e.stopPropagation(); openModal({ type: 'move', to: it.cat.id, amount: -it.env.avail }); }}>Cover</button>}
+                          {over ? <button className="btn sm" onClick={(e) => { e.stopPropagation(); openModal({ type: 'move', to: it.cat.id, amount: -it.env.avail }); }}>Cover</button>
+                            : <button type="button" className="row-move" data-testid="row-move" aria-label={`Move money ${it.env.avail > 0 ? 'from' : 'to'} ${it.cat.name}`} title="Move money"
+                                onClick={(e) => { e.stopPropagation(); openModal({ type: 'move', ...(it.env.avail > 0 ? { from: it.cat.id } : { from: 'rta', to: it.cat.id, amount: it.env.remaining || undefined }) }); }}><ArrowLeftRight size={16} /></button>}
                           <div style={{ minWidth: 100, textAlign: 'right' }}><div className={cn('amt-md num', over && 'neg')} style={{ fontSize: 18 }}><Money v={it.env.avail} /></div><div className="avail-cap">available</div></div>
                           <ChevronRight size={18} className="muted" />
                         </div>

@@ -2,9 +2,10 @@ import { useMemo, useRef, useState, useEffect, type ReactNode } from 'react';
 import { Archive, ArrowLeftRight, ArrowRight, ArrowUpDown, ChevronDown, Bell, Check, CircleCheck, Download, Eye, FlaskConical, Info, Landmark, LogOut, ListChecks, Pencil, Plus, Scale, Split, StickyNote, Trash, TriangleAlert, Wallet } from 'lucide-react';
 import { useStore } from './store';
 import {
-  allEnvelopes, envelope, readyToAssign, staleness, billOccurrences, drift, rollForward, nextDueDate, paidTowardCurrent, type Account, type Bill, type BillPeriod, type Category, type Txn, type Income, type Repeat as Rep,
+  allEnvelopes, envelope, readyToAssign, staleness, billOccurrences, drift, rollForward, nextDueDate, paidTowardCurrent, lastTransferPair, matchBillPayment, type PayMatch, type Account, type Bill, type BillPeriod, type Category, type Txn, type Income, type Repeat as Rep,
 } from './data';
-import { addDays, centsToInput, cn, diffDays, fmtDate, money, monthKey, relDay, sum, toCents, plural, todayISO } from './lib';
+import { addDays, centsToInput, cn, diffDays, fmtDate, money, monthKey, relDay, sum, toCents, plural, todayISO, parseSignedCents, signedInput } from './lib';
+import { SearchSelect, type PickOption } from './pickers';
 import { CatIcon, Callout, Money, Seg, Sheet, StatusPill, ThemeSwitch } from './ui';
 import { exportEverything, newRequestId } from './db';
 import { ItemSheet, ItemAddSheet, ItemEditSheet, ArchiveItemSheet } from './itemSheets';
@@ -13,21 +14,25 @@ import { Gauge, Moon, Sun } from 'lucide-react';
 
 const go = (path: string) => { location.hash = path; };
 
-export function MoneyInput({ value, onChange, autoFocus, big, placeholder = '0.00', id, invalid }: { value: string; onChange: (v: string) => void; autoFocus?: boolean; big?: boolean; placeholder?: string; id?: string; invalid?: boolean }) {
+export function MoneyInput({ value, onChange, autoFocus, big, placeholder = '0.00', id, invalid, signed }: { value: string; onChange: (v: string) => void; autoFocus?: boolean; big?: boolean; placeholder?: string; id?: string; invalid?: boolean; signed?: boolean }) {
   return (
     <div style={{ position: 'relative' }}>
       <span style={{ position: 'absolute', left: 13, top: big ? 11 : 10, color: 'var(--ink-4)', fontWeight: 560 }}>$</span>
-      <input id={id} className="input num" inputMode="decimal" autoFocus={autoFocus} placeholder={placeholder} value={value} aria-invalid={invalid}
-        onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1'))}
+      <input id={id} className="input num" inputMode={signed ? 'text' : 'decimal'} autoFocus={autoFocus} placeholder={placeholder} value={value} aria-invalid={invalid}
+        onChange={(e) => onChange(signed ? signedInput(e.target.value) : e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1'))}
         style={{ paddingLeft: 26, textAlign: 'right', fontWeight: 600, ...(invalid ? { borderColor: 'var(--neg)' } : {}) }} />
     </div>
   );
 }
 
 /** Accounts as chips when there are few, as a clean menu when there are many. */
-export function AccountPick({ accounts, value, onPick, label }: { accounts: Account[]; value: string; onPick: (id: string) => void; label: string }) {
-  if (accounts.length <= 4) return <div className="chips">{accounts.map((a) => <button type="button" key={a.id} className="chip" aria-pressed={value === a.id} onClick={() => onPick(a.id)}>{a.name}</button>)}</div>;
-  return <select className="select" aria-label={label} value={value} onChange={(e) => onPick(e.target.value)}><option value="" disabled>Choose an account…</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>;
+/** An account's recorded balance, exactly as the Accounts page computes it (a card shows what is owed). Nothing "available to spend" is invented. */
+export const balText = (a: Account) => (a.type === 'credit' ? `${money(a.balance)} owed` : money(a.balance));
+const ACCT_KIND: Record<string, string> = { checking: 'Checking', savings: 'Savings', cash: 'Cash', credit: 'Credit card' };
+export function AccountPick({ accounts, value, onPick, label, testid, asChips }: { accounts: Account[]; value: string; onPick: (id: string) => void; label: string; testid?: string; asChips?: boolean }) {
+  if (asChips ?? accounts.length <= 4) return <div className="chips" role="group" aria-label={label}>{accounts.map((a) => <button type="button" key={a.id} className="chip" aria-pressed={value === a.id} onClick={() => onPick(a.id)}>{a.name}<span className={cn('chip-bal num', a.balance < 0 && 'neg')}>{balText(a)}</span></button>)}</div>;
+  const options: PickOption[] = accounts.map((a) => ({ id: a.id, label: a.name, sub: ACCT_KIND[a.type] ?? undefined, right: <span className={a.balance < 0 ? 'neg' : undefined}>{balText(a)}</span> }));
+  return <SearchSelect options={options} value={value} onPick={onPick} label={label} testid={testid ?? `acct-${label.toLowerCase().replace(/\W+/g, '-')}`} placeholder="Choose an account…" searchPlaceholder="Search accounts…" />;
 }
 const groupCats = (cats: Category[], groups: { id: string; name: string }[]) => groups.map((g) => ({ g, items: cats.filter((c) => c.groupId === g.id && !c.hidden) })).filter((x) => x.items.length);
 
@@ -35,12 +40,13 @@ const groupCats = (cats: Category[], groups: { id: string; name: string }[]) => 
 // Transaction: add / view / edit
 // ═══════════════════════════════════════════════════════════
 export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'view' | 'edit'; id?: string; prefill?: Partial<Txn> }) {
-  const { data, closeModal, addTxn, updateTxn, deleteTxn, payBill, unpayBill, toast, openModal } = useStore();
+  const { data, closeModal, addTxn, updateTxn, deleteTxn, payBill, unpayBill, unpayPartial, toast, openModal } = useStore();
   const existing = id ? data.txns.find((t) => t.id === id) : undefined;
   const [mode, setMode] = useState(initialMode);
   const [confirmDel, setConfirmDel] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [adv, setAdv] = useState<{ bill: Bill; id: string; t: Omit<Txn, 'id'> } | null>(null);
+  const [adv, setAdv] = useState<{ m: Extract<PayMatch, { kind: 'ask' }>; id: string; t: Omit<Txn, 'id'> } | null>(null);
+  const [payChoice, setPayChoice] = useState<'partial' | 'full' | 'none'>('none');
 
   const seed: Partial<Txn> = existing ?? prefill ?? {};
   // Opened from an account's own page? Use that account (read once, when the sheet opens, so context never goes stale).
@@ -54,8 +60,12 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
   const [amount, setAmount] = useState(seed.amount ? centsToInput(seed.amount) : '');
   const [payee, setPayee] = useState(seed.payee ?? '');
   const [categoryId, setCategoryId] = useState(seed.categoryId ?? '');
-  const [accountId, setAccountId] = useState(seed.accountId ?? ctxAcct ?? defaultAcct);
-  const [toAccountId, setToAccountId] = useState(seed.toAccountId ?? '');
+  // A new transfer starts from the last SAVED transfer's From/To (never from an unsaved or canceled form). Anything chosen by hand is never overwritten.
+  const xferStart = (current: string) => { const p = lastTransferPair(data); const from = ctxAcct ?? p.from ?? current; return { from, to: p.to && p.to !== from ? p.to : p.from && p.from !== from ? p.from : '' }; };
+  const startX = initialMode === 'add' && seed.type === 'transfer' && !seed.toAccountId ? xferStart(seed.accountId ?? ctxAcct ?? defaultAcct) : null;
+  const [accountId, setAccountId] = useState(startX?.from ?? seed.accountId ?? ctxAcct ?? defaultAcct);
+  const [toAccountId, setToAccountId] = useState(startX?.to ?? seed.toAccountId ?? '');
+  const [xferTouched, setXferTouched] = useState(initialMode !== 'add' || !!seed.toAccountId);
   const [date, setDate] = useState(seed.date ?? data.today);
   const [notes, setNotes] = useState(seed.notes ?? '');
   const [splitOn, setSplitOn] = useState(!!seed.splits?.length);
@@ -69,6 +79,7 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
   const [acctTouched, setAcctTouched] = useState(mode !== 'add');
   const [autoCat, setAutoCat] = useState(false);
   const [showAllCats, setShowAllCats] = useState(false);
+  const allCatsBtn = useRef<HTMLButtonElement>(null);
   const amtRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { if (mode !== 'view') amtRef.current?.focus(); }, [mode]);
@@ -132,19 +143,23 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
   const splitOk = !splitOn || (lines.filter((l) => l.categoryId && toCents(l.amount) > 0).length >= 2 && splitRemaining === 0);
   const valid = cents > 0 && accountId && (type === 'transfer' ? toAccountId && toAccountId !== accountId : type === 'income' ? !!payee.trim() : !!payee.trim() && (splitOn ? splitOk : !!categoryId));
 
-  const sourceAcct = acct(accountId);
-  const afterBal = sourceAcct && cents > 0
-    ? sourceAcct.type === 'credit' ? sourceAcct.balance + (type === 'income' ? -cents : cents) : sourceAcct.balance + (type === 'income' ? cents : -cents)
-    : null;
-
-  /** A recurring, active bill this new payment plausibly settles — only a full-or-larger payment close to the due date, never a debt or a paused bill. */
-  const billForNewTxn = (t: Omit<Txn, 'id'>): Bill | undefined => {
-    if (t.type === 'income' || t.splits?.length || !t.categoryId || t.scheduled || t.date > data.today) return undefined;
-    const b = data.bills.find((x) => x.categoryId === t.categoryId);
-    if (!b || b.paused || !b.date || b.paid[b.date] || t.amount < b.amount) return undefined;
-    const early = b.period === 'Weekly' ? 3 : b.period === 'Bi-Weekly' ? 7 : b.period === 'Yearly' ? 45 : 15;
-    return t.date >= addDays(b.date, -early) ? b : undefined;
+  // Before/after for an account, using the same recorded balance as the Accounts page. When editing, the transaction's own effect is taken out first.
+  const hypo: Txn = { id: 'preview', date, amount: cents, type, accountId, toAccountId: type === 'transfer' ? toAccountId : undefined, payee: '' };
+  const balLine = (aid: string) => {
+    const a = acct(aid); if (!a) return null;
+    const base = a.balance - (existing && !existing.scheduled ? delta(a, existing) : 0);
+    const after = cents > 0 && date <= data.today ? base + delta(a, hypo) : null;
+    return <div className="xs muted num" data-testid="bal-preview" style={{ marginTop: 2 }}>{a.type === 'credit' ? 'Owed' : 'Recorded balance'} <span className={base < 0 ? 'neg' : undefined}>{money(base)}</span>{after != null && <> → <b className={after < 0 ? 'neg' : undefined} style={after < 0 ? undefined : { color: 'var(--ink-2)' }}>{money(after)}</b> after this</>}</div>;
   };
+  const changeType = (v: Txn['type']) => {
+    setType(v); setHint('');
+    if (v === 'transfer' && mode === 'add' && !xferTouched) { const x = xferStart(accountId); setAccountId(x.from); setToAccountId(x.to); }
+  };
+  const pickFrom = (id: string) => { if (id === toAccountId) setToAccountId(accountId); setAccountId(id); setAcctTouched(true); setXferTouched(true); };
+  const pickTo = (id: string) => { if (id === accountId) setAccountId(toAccountId); setToAccountId(id); setXferTouched(true); };
+  const swapAccounts = () => { if (!toAccountId) return; const f = accountId; setAccountId(toAccountId); setToAccountId(f); setXferTouched(true); };
+  const catOptions: PickOption[] = useMemo(() => groupCats(data.categories, data.groups).flatMap(({ g, items }) => items.map((c) => ({ id: c.id, label: c.name, sub: g.name, icon: <CatIcon k={c.icon} /> }))), [data.categories, data.groups]);
+
   const buildTxn = (): Omit<Txn, 'id'> => {
     const toAcct = acct(toAccountId);
     const autoCat = type === 'transfer' && toAcct?.type === 'credit' ? data.categories.find((c) => c.cardAccountId === toAcct.id)?.id : undefined;
@@ -167,28 +182,53 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
     } else {
       const newId = await addTxn(t);
       if (newId) {
-        const added = () => toast(`${t.scheduled ? 'Scheduled' : t.type === 'income' ? 'Income added' : t.type === 'transfer' ? 'Transfer added' : 'Expense added'} · ${money(t.amount)}`, () => { void deleteTxn(newId); });
-        const b = billForNewTxn(t);
-        if (b) { setAdv({ bill: b, id: newId, t }); setSaving(false); return; }
-        added(); closeModal();
+        const label = t.scheduled ? 'Scheduled' : t.type === 'income' ? 'Income added' : t.type === 'transfer' ? 'Transfer added' : 'Expense added';
+        // Transaction-first payments: if this clearly pays a scheduled item, count it (through the same atomic path as every other payment);
+        // if it might, ask; otherwise it stays an ordinary transaction. Nothing is ever marked paid on a guess.
+        const m = matchBillPayment(data, t);
+        if (m.kind === 'auto') {
+          const r = await payBill({ billId: m.bill.id, due: m.due, mode: 'link', transactionId: newId, settle: true });
+          if (r) { toast(`${label} · ${money(t.amount)} · counted as your ${m.bill.name} payment`, () => { void unpayBill(m.bill.id, m.due, true); }); closeModal(); setSaving(false); return; }
+          // refused (for example another device already paid it): the transaction itself is kept as an ordinary one
+        } else if (m.kind === 'ask') { setPayChoice(m.reason === 'partial' ? 'partial' : m.reason === 'backlog' ? 'full' : 'none'); setAdv({ m, id: newId, t }); setSaving(false); return; }
+        toast(`${label} · ${money(t.amount)}`, () => { void deleteTxn(newId); }); closeModal();
       }
     }
     setSaving(false);
   };
 
-  // ── a new expense that looks like a bill payment: offer to count it, never silently ──
+  // ── it might be a payment toward a scheduled item: the user decides ──
   if (adv) {
-    const { bill, t, id: newId } = adv;
+    const { m, t, id: newId } = adv; const { bill } = m;
     const finish = () => { toast(`${t.type === 'transfer' ? 'Transfer' : 'Expense'} added · ${money(t.amount)}`, () => { void deleteTxn(newId); }); closeModal(); };
+    const left = Math.max(0, m.remaining - t.amount);
+    const opts: { v: 'partial' | 'full' | 'none'; title: string; text: string }[] = [
+      ...(m.reason === 'partial' ? [{ v: 'partial' as const, title: 'A partial payment', text: `${money(t.amount)} toward ${bill.name}${m.paidBefore > 0 ? ` (${money(m.paidBefore)} already paid)` : ''}. ${money(left)} stays due.` }] : []),
+      { v: 'full', title: m.reason === 'backlog' ? `Pay the oldest missed payment (${fmtDate(m.due)})` : 'Count it as the full payment', text: `Marks ${bill.name} paid${bill.recurring ? ' and moves it to its next due date' : ''}${bill.isDebt ? ', and lowers what you owe by the amount paid' : ''}.` },
+      { v: 'none', title: 'No — just a transaction', text: 'Nothing about the schedule changes.' },
+    ];
+    const confirmPay = async () => {
+      if (payChoice === 'none') { finish(); return; }
+      setSaving(true);
+      const r = await payBill({ billId: bill.id, due: m.due, mode: 'link', transactionId: newId, settle: payChoice === 'full' });
+      if (!r) { setSaving(false); return; }
+      toast(r.settled ? `${bill.name} marked paid · ${money(t.amount)}` : `${money(t.amount)} recorded toward ${bill.name} · ${money(Math.max(0, m.remaining - t.amount))} still due`,
+        () => { void (r.settled ? unpayBill(bill.id, m.due, true) : unpayPartial(newId, true)); });
+      closeModal();
+    };
     return (
-      <Sheet title={`Count this as your ${bill.name} payment?`} sub={`${money(t.amount)} recorded · ${bill.name} due ${fmtDate(bill.date!)}`} onClose={finish}
-        footer={<><button className="btn" data-testid="keep-due" disabled={saving} onClick={finish}>No, just the transaction</button>
-          <button className="btn primary" data-testid="advance-due" disabled={saving} onClick={async () => {
-            setSaving(true);
-            const r = await payBill({ billId: bill.id, due: bill.date!, mode: 'link', transactionId: newId });
-            if (r) { toast(`${bill.name} marked paid`, () => { void unpayBill(bill.id, bill.date!, false); }); closeModal(); } else setSaving(false);
-          }}>Yes, mark it paid</button></>}>
-        <Callout icon={<Info />}>Your transaction is kept either way. Marking it paid {bill.isDebt ? 'also lowers what you owe and ' : ''}moves {bill.name} to its next due date.</Callout>
+      <Sheet title={`Is this a payment toward ${bill.name}?`} sub={`${money(t.amount)} recorded · ${bill.name} ${money(bill.amount)} due ${fmtDate(m.due)}`} onClose={finish}
+        footer={<><button className="btn" data-testid="keep-due" disabled={saving} onClick={finish}>Skip</button>
+          <button className="btn primary" data-testid="advance-due" disabled={saving} onClick={confirmPay}>{payChoice === 'none' ? 'Keep as a transaction' : 'Confirm'}</button></>}>
+        <div className="stack gap8" role="radiogroup" aria-label="What this transaction was">
+          {opts.map((o) => (
+            <label key={o.v} className="rowx" style={{ cursor: 'pointer', alignItems: 'flex-start' }}>
+              <input type="radio" name="pay-choice" checked={payChoice === o.v} onChange={() => setPayChoice(o.v)} style={{ marginTop: 4 }} data-testid={`pay-choice-${o.v}`} />
+              <div className="grow"><div className="li-title">{o.title}</div><div className="li-sub">{o.text}</div></div>
+            </label>
+          ))}
+        </div>
+        <div style={{ marginTop: 12 }}><Callout icon={<Info />}>Your transaction is kept whichever you choose.</Callout></div>
       </Sheet>
     );
   }
@@ -230,7 +270,7 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
           {t.billId && <div className="kv"><span className="k">Bill</span><span className="v">{data.bills.find((b) => b.id === t.billId)?.name}</span></div>}
           <div className="kv"><span className="k">Notes</span><span className="v" style={{ maxWidth: 260 }}>{t.notes || <span className="muted">—</span>}</span></div>
         </div>
-        {(t.adjustment || t.billId || t.incomeId) && <div style={{ marginTop: 14 }}><Callout>{t.adjustment ? 'Reconciliation adjustments are a permanent record and can’t be edited or deleted.' : t.billId ? 'This transaction confirms a bill payment. Undo the payment from the bill first if it needs changing.' : 'This transaction confirms received income, so it is locked.'}</Callout></div>}
+        {(t.adjustment || t.billId || t.incomeId) && <div style={{ marginTop: 14 }}><Callout>{t.adjustment ? 'Reconciliation adjustments are a permanent record and can’t be edited or deleted.' : t.billId ? `This transaction counts as ${t.billPartial ? 'a partial' : 'a'} payment toward ${data.bills.find((b) => b.id === t.billId)?.name ?? 'a scheduled item'}. Undo the payment from that item first if it needs changing.` : 'This transaction confirms received income, so it is locked.'}</Callout></div>}
         {t.type === 'income' && !t.adjustment && !t.incomeId && <div style={{ marginTop: 14 }}><Callout>Income lands in <b>Ready to Assign</b>, then you give it a job in Budget.</Callout></div>}
       </Sheet>
     );
@@ -243,7 +283,7 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
     <Sheet title={title} onClose={existing ? () => setMode('view') : closeModal} wide
       footer={<button className="btn primary lg" disabled={!valid || saving} onClick={save}>{saving ? 'Saving…' : existing ? 'Save changes' : date > data.today ? `Schedule ${verb}` : `Add ${verb}`}{cents > 0 ? ` · ${money(cents)}` : ''}</button>}>
       <form onSubmit={(e) => { e.preventDefault(); save(); }}>
-        <Seg block value={type} onChange={(v) => { setType(v); setHint(''); }} options={[{ v: 'expense', label: 'Expense' }, { v: 'income', label: 'Income' }, { v: 'transfer', label: 'Transfer' }]} />
+        <Seg block value={type} onChange={changeType} options={[{ v: 'expense', label: 'Expense' }, { v: 'income', label: 'Income' }, { v: 'transfer', label: 'Transfer' }]} />
         <div className="amount-input">
           <span>$</span>
           <input ref={amtRef} inputMode="decimal" placeholder="0.00" aria-label="Amount" value={amount}
@@ -275,13 +315,11 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
             <label>Category</label>
             <div className="chips">
               {chipCats.map((k) => { const c = catById(k)!; return <button type="button" key={k} className="chip" aria-pressed={categoryId === k} onClick={() => { setCategoryId(k); setCatTouched(true); setAutoCat(false); }}><CatIcon k={c.icon} />{c.name}</button>; })}
-              <button type="button" className="chip" onClick={() => setShowAllCats((v) => !v)}>{showAllCats ? 'Hide' : 'All categories'}</button>
+              <button type="button" ref={allCatsBtn} className="chip" data-testid="all-categories" aria-expanded={showAllCats} aria-haspopup="listbox" onClick={() => setShowAllCats((v) => !v)}>{showAllCats ? 'Hide' : 'All categories'}</button>
             </div>
             {showAllCats && (
-              <select className="select" value={categoryId} onChange={(e) => { setCategoryId(e.target.value); setCatTouched(true); setAutoCat(false); }} aria-label="All categories">
-                <option value="">Choose a category…</option>
-                {groupCats(data.categories, data.groups).map(({ g, items }) => <optgroup key={g.id} label={g.name}>{items.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup>)}
-              </select>
+              <SearchSelect inline={{ onClose: () => setShowAllCats(false), anchor: allCatsBtn }} options={catOptions} value={categoryId} label="All categories" testid="cat-picker" placeholder="Choose a category" searchPlaceholder="Search categories…"
+                onPick={(cid) => { setCategoryId(cid); setCatTouched(true); setAutoCat(false); }} />
             )}
           </div>
         )}
@@ -289,18 +327,20 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
 
         <div className="field" style={{ marginTop: 16 }}>
           <label>{type === 'transfer' ? 'From' : type === 'income' ? 'Deposit to' : 'Account'}</label>
-          <AccountPick accounts={data.accounts} value={accountId} label="Account" onPick={(id) => { setAccountId(id); setAcctTouched(true); }} />
-          {sourceAcct && afterBal != null && type !== 'transfer' && (
-            <div className="xs muted num" style={{ marginTop: 2 }}>Recorded balance {money(sourceAcct.balance)} → <b style={{ color: 'var(--ink-2)' }}>{money(afterBal)}</b> after this</div>
-          )}
+          <AccountPick accounts={type === 'transfer' ? data.accounts.filter((a) => a.id !== toAccountId) : data.accounts} value={accountId} label={type === 'transfer' ? 'From account' : 'Account'} testid="txn-account" asChips={data.accounts.length <= 4} onPick={pickFrom} />
+          {balLine(accountId)}
         </div>
 
-        {type === 'transfer' && (
-          <div className="field" style={{ marginTop: 16 }}>
-            <label>To</label>
-            <AccountPick accounts={data.accounts.filter((a) => a.id !== accountId)} value={toAccountId} label="To account" onPick={setToAccountId} />
-            {acct(toAccountId)?.type === 'credit' && <div className="xs muted">Counts toward the card’s payment envelope in your budget.</div>}
+        {type === 'transfer' && (<>
+          <div className="row" style={{ justifyContent: 'center', marginTop: 10 }}>
+            <button type="button" className="btn sm" data-testid="txn-swap" onClick={swapAccounts} disabled={!toAccountId} aria-label="Swap From and To accounts"><ArrowUpDown size={14} />Swap</button>
           </div>
+          <div className="field" style={{ marginTop: 8 }}>
+            <label>To</label>
+            <AccountPick accounts={data.accounts.filter((a) => a.id !== accountId)} value={toAccountId} label="To account" testid="txn-to-account" asChips={data.accounts.length <= 4} onPick={pickTo} />
+            {balLine(toAccountId)}
+            {acct(toAccountId)?.type === 'credit' && <div className="xs muted">Counts toward the card’s payment envelope in your budget.</div>}
+          </div></>
         )}
 
         <button type="button" className="btn ghost sm" style={{ marginTop: 14, marginLeft: -8 }} onClick={() => setMore((v) => !v)} aria-expanded={more}>
@@ -321,10 +361,7 @@ export function TxnSheet({ mode: initialMode, id, prefill }: { mode: 'add' | 'vi
                   <div className="stack gap8 fade-in">
                     {lines.map((l, i) => (
                       <div className="row gap8" key={i}>
-                        <select className="select" style={{ flex: 1.4 }} aria-label={`Split ${i + 1} category`} value={l.categoryId} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, categoryId: e.target.value } : x)))}>
-                          <option value="">Category…</option>
-                          {groupCats(data.categories, data.groups).map(({ g, items }) => <optgroup key={g.id} label={g.name}>{items.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup>)}
-                        </select>
+                        <div style={{ flex: 1.4, minWidth: 0 }}><SearchSelect options={catOptions} value={l.categoryId} label={`Split ${i + 1} category`} testid={`split-cat-${i}`} placeholder="Category…" searchPlaceholder="Search categories…" onPick={(cid) => setLines(lines.map((x, j) => (j === i ? { ...x, categoryId: cid } : x)))} /></div>
                         <div style={{ flex: 1 }}><MoneyInput value={l.amount} onChange={(v) => setLines(lines.map((x, j) => (j === i ? { ...x, amount: v } : x)))} /></div>
                       </div>
                     ))}
@@ -428,54 +465,10 @@ export function AssignSheet() {
 // Move money
 // ═══════════════════════════════════════════════════════════
 interface PickItem { id: string; name: string; group: string; avail: number; need: number }
-/** Compact searchable select: shows the current choice; opens a short list with a search box (type, ↑/↓, Enter, Esc). */
+/** Budget-item picker for Move Money: the shared searchable picker (type, best match highlighted, ↑/↓, Enter accepts, Tab accepts and moves on, Esc closes). */
 function EnvSelect({ items, value, onPick, label, testid, disabledIds, placeholder, hint, autoFocus }: { items: PickItem[]; value: string; onPick: (id: string) => void; label: string; testid: string; disabledIds?: (it: PickItem) => boolean; placeholder: string; hint?: (it: PickItem) => string; autoFocus?: boolean }) {
-  const [open, setOpen] = useState(!!autoFocus && !value);
-  const [q, setQ] = useState('');
-  const [hi, setHi] = useState(0);
-  const [showAll, setShowAll] = useState(false);
-  const cur = items.find((i) => i.id === value);
-  const nq = q.trim().toLowerCase();
-  const off = (i: PickItem) => !!disabledIds?.(i);
-  const usable = items.filter((i) => !off(i)), unusable = items.filter(off);
-  const base = nq || showAll ? [...usable, ...unusable] : usable;
-  const list = nq ? base.filter((i) => i.name.toLowerCase().includes(nq) || i.group.toLowerCase().includes(nq)) : base;
-  const choose = (it: PickItem) => { if (off(it)) return; onPick(it.id); setOpen(false); setQ(''); setShowAll(false); };
-  return (
-    <div className="stack gap8" data-testid={testid}>
-      <button type="button" className="row between card" aria-label={`${label}: ${cur ? cur.name : 'none chosen'}`} aria-expanded={open} data-testid={`${testid}-btn`}
-        style={{ boxShadow: 'none', background: 'var(--surface-2)', padding: '10px 14px', width: '100%', textAlign: 'left', gap: 10 }} onClick={() => setOpen((v) => !v)}>
-        <div style={{ minWidth: 0 }}>
-          <div className="li-title ellipsis">{cur ? cur.name : <span className="muted">{placeholder}</span>}</div>
-          {cur && <div className="li-sub ellipsis">{hint ? hint(cur) : cur.group}</div>}
-        </div>
-        <div className="row gap8">{cur && <b className="num small">{money(cur.avail)}</b>}<ChevronDown size={16} className="muted" /></div>
-      </button>
-      {open && (
-        <div className="picker fade-in">
-          <input className="input" autoFocus placeholder={`Search ${label.toLowerCase()}…`} aria-label={`Search ${label}`} value={q}
-            onChange={(e) => { setQ(e.target.value); setHi(0); }}
-            onKeyDown={(e) => {
-              if (e.key === 'ArrowDown') { e.preventDefault(); setHi((h) => Math.min(list.length - 1, h + 1)); }
-              else if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => Math.max(0, h - 1)); }
-              else if (e.key === 'Enter') { e.preventDefault(); if (list[hi]) choose(list[hi]); }
-              else if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); }
-            }} />
-          <div role="listbox" aria-label={label} style={{ maxHeight: 200, overflowY: 'auto', marginTop: 6 }}>
-            {list.length === 0 && <div className="small muted" style={{ padding: 10 }}>{nq ? `Nothing matches “${q}”.` : 'Nothing available.'}</div>}
-            {list.map((it, i) => (
-              <button type="button" key={it.id} role="option" aria-selected={value === it.id} aria-disabled={off(it)} data-id={it.id} className="li hover" onClick={() => choose(it)}
-                style={{ padding: '8px 10px', borderRadius: 10, width: '100%', textAlign: 'left', opacity: off(it) ? 0.5 : 1, cursor: off(it) ? 'default' : undefined, background: value === it.id ? 'var(--planned-soft)' : i === hi && nq ? 'var(--surface-2)' : undefined }}>
-                <div className="grow" style={{ minWidth: 0 }}><div className="li-title ellipsis" style={{ fontSize: 14 }}>{it.name}</div><div className="li-sub ellipsis" style={{ fontSize: 12 }}>{hint ? hint(it) : it.group}</div></div>
-                <div className="right num small" style={{ fontWeight: 600 }}>{money(it.avail)}</div>
-              </button>
-            ))}
-          </div>
-          {unusable.length > 0 && !nq && <button type="button" className="sect-link" style={{ marginTop: 6 }} onClick={() => setShowAll((v) => !v)}>{showAll ? 'Hide empty ones' : `Show ${unusable.length} with nothing to move`}</button>}
-        </div>
-      )}
-    </div>
-  );
+  const options: PickOption[] = items.map((i) => ({ id: i.id, label: i.name, sub: hint ? hint(i) : i.group, right: money(i.avail), disabled: !!disabledIds?.(i), keywords: i.group }));
+  return <SearchSelect options={options} value={value} onPick={onPick} label={label} testid={testid} placeholder={placeholder} searchPlaceholder="Search categories…" autoOpen={!!autoFocus && !value} disabledLabel={(n, shown) => (shown ? 'Hide empty ones' : `Show ${n} with nothing to move`)} />;
 }
 
 /** Move Money: From → To → Amount. One dialog for every entry point (Cover, Assign, Move). Budget allocations only — never touches bank balances. */
@@ -536,12 +529,12 @@ export function MoveSheet({ from: f0, to: t0, amount: a0 }: { from?: string; to?
       footer={<button className="btn primary lg" disabled={!valid || saving} onClick={go}>{valid ? `Move ${money(cents)}` : 'Move money'}</button>}>
       <form className="stack gap12" onSubmit={(e) => { e.preventDefault(); void go(); }}>
         <div className="field"><label>From</label>
-          <EnvSelect items={fromItems} value={from} onPick={setFrom} label="From" testid="move-from" placeholder="Choose where the money comes from" disabledIds={(i) => i.avail <= 0} hint={fromHint} autoFocus={!from} /></div>
+          <EnvSelect items={fromItems} value={from} onPick={(id) => { setFrom(id); if (id === to) setTo(''); }} label="From" testid="move-from" placeholder="Choose where the money comes from" disabledIds={(i) => i.avail <= 0} hint={fromHint} autoFocus={!from} /></div>
         <div className="row" style={{ justifyContent: 'center' }}>
           <button type="button" className="btn sm" data-testid="move-swap" onClick={swap} disabled={!from && !to} aria-label="Swap From and To"><ArrowUpDown size={14} />Swap</button>
         </div>
         <div className="field"><label>To</label>
-          <EnvSelect items={toItems} value={to} onPick={(id) => { setTo(id); }} label="To" testid="move-to" placeholder="Choose where it goes" hint={toHint} autoFocus={!!from && !to} /></div>
+          <EnvSelect key={`to-${from}`} items={toItems} value={to} onPick={(id) => { setTo(id); }} label="To" testid="move-to" placeholder="Choose where it goes" hint={toHint} autoFocus={!!from && !to} /></div>
         <div className="field"><label htmlFor="mv-amt">Amount</label>
           <MoneyInput value={amt} onChange={setAmt} invalid={!!problem && cents > 0} autoFocus={!!from && !!to} />
           <div className="row between small" style={{ marginTop: 6, gap: 8, flexWrap: 'wrap' }}>
@@ -573,8 +566,9 @@ export function MoveSheet({ from: f0, to: t0, amount: a0 }: { from?: string; to?
 // Bill
 // ═══════════════════════════════════════════════════════════
 export function BillSheet({ billId, date }: { billId: string; date: string }) {
-  const { data, closeModal, openModal, payBill, unpayBill, toast } = useStore();
+  const { data, closeModal, openModal, payBill, unpayBill, unpayPartial, toast } = useStore();
   const bill = data.bills.find((b) => b.id === billId)!;
+  const [undoingPartial, setUndoingPartial] = useState<string | null>(null);
   const occ = billOccurrences(data, date, date).find((o) => o.bill.id === billId);
   const requestId = useRef(newRequestId()); // one id per sheet: a double-tap or retry can never record the payment twice
   const liquid = data.accounts.filter((a) => a.type !== 'credit');
@@ -598,13 +592,13 @@ export function BillSheet({ billId, date }: { billId: string; date: string }) {
   const isOldest = !!bill.date && date === bill.date;
   const statusPill = occ.paid ? <StatusPill status="ok">Paid</StatusPill> : n < 0 ? <StatusPill status="late">{-n} days overdue</StatusPill> : n <= 3 ? <StatusPill status="warn">Due {relDay(date).toLowerCase()}</StatusPill> : <StatusPill status="muted">{relDay(date)}</StatusPill>;
   const cents = toCents(amt);
-  const partial = tab !== 'link' && cents > 0 && paidSoFar + cents < bill.amount; // still short of the full payment, counting what was already paid
   const toCard = !!bill.toAccountId;
   const a = data.accounts.find((x) => x.id === acctId);
   const debtNow = cat?.isDebt ? cat.debtBalance ?? 0 : null;
   const candidates = data.txns.filter((t) => !t.scheduled && !t.billId && !t.adjustment && (t.type === 'expense' || t.type === 'transfer') && t.categoryId === bill.categoryId && diffDays(data.today, t.date) <= 120).slice(0, 12);
   const linked = data.txns.find((t) => t.id === linkId);
   const payCents = tab === 'link' ? linked?.amount ?? 0 : cents;
+  const partial = payCents > 0 && paidSoFar + payCents < bill.amount; // still short of the full payment, counting only explicitly linked earlier partials
   const next = bill.recurring && bill.date ? nextDueDate(bill.period, bill.anchor ?? bill.date, bill.date) : null;
   const valid = tab === 'pay' ? cents > 0 && !!a && paidOn <= data.today : tab === 'link' ? !!linked : cents > 0;
 
@@ -613,9 +607,27 @@ export function BillSheet({ billId, date }: { billId: string; date: string }) {
     setSaving(true);
     const r = await payBill({ billId, due: date, mode: tab === 'pay' ? 'post' : tab === 'link' ? 'link' : 'external', amount: tab === 'link' ? undefined : cents, accountId: tab === 'pay' ? acctId : undefined, paidOn: tab === 'link' ? undefined : paidOn, transactionId: tab === 'link' ? linkId : undefined, settle: partial ? settle : true, requestId: requestId.current });
     if (!r) { setSaving(false); return; }
-    toast(r.settled ? `${bill.name} paid · ${money(r.amount)}` : `${money(r.amount)} recorded toward ${bill.name} · still due`, () => { void unpayBill(billId, date, r.created, r.settled ? undefined : { transactionId: r.transactionId, debtApplied: r.debtApplied }); });
+    toast(r.settled ? `${bill.name} paid · ${money(r.amount)}` : `${money(r.amount)} recorded toward ${bill.name} · still due`,
+      r.settled ? () => { void unpayBill(billId, date, r.created); } : r.transactionId ? () => { void unpayPartial(r.transactionId!, r.created); } : undefined);
     closeModal();
   };
+
+  // ── undo one explicitly linked partial payment ──
+  const partials = (data.billPartials ?? []).filter((p) => p.billId === billId && p.due === bill.date);
+  const undoP = undoingPartial ? partials.find((p) => p.txnId === undoingPartial) : undefined;
+  if (undoP && !occ.paid) {
+    const pt = data.txns.find((t) => t.id === undoP.txnId);
+    return (
+      <Sheet title="Undo this partial payment?" sub={bill.name} onClose={closeModal}
+        footer={<><button className="btn" onClick={() => setUndoingPartial(null)}>Keep it</button>
+          <button className="btn primary" data-testid="undo-partial-confirm" disabled={saving} onClick={async () => { setSaving(true); if (await unpayPartial(undoP.txnId, alsoDelete)) { toast(`${money(undoP.amount)} no longer counts toward ${bill.name}`); closeModal(); } else setSaving(false); }}>Undo payment</button></>}>
+        <div className="stack gap12">
+          <div className="small">{money(undoP.amount)} stops counting toward {bill.name}{bill.isDebt ? ' and the amount owed is restored' : ''}. The remaining amount due goes back up.</div>
+          {pt && <label className="row gap12" style={{ alignItems: 'flex-start' }}><input type="checkbox" checked={alsoDelete} onChange={(e) => setAlsoDelete(e.target.checked)} style={{ marginTop: 3 }} /><span>Also delete the {money(pt.amount)} transaction<div className="small muted">Leave unticked if the money really was spent.</div></span></label>}
+        </div>
+      </Sheet>
+    );
+  }
 
   // ── already paid: show it, offer an undo ──
   if (occ.paid) {
@@ -666,6 +678,9 @@ export function BillSheet({ billId, date }: { billId: string; date: string }) {
         <div className="amt-hero num"><Money v={bill.amount} /></div>
         <div style={{ marginTop: 8, display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>{statusPill}{!occ.future && env && occ.short > 0 && <StatusPill status="warn">{money(occ.short, { cents: false })} not set aside</StatusPill>}</div>
         {paidSoFar > 0 && paidSoFar < bill.amount && <div className="small muted" style={{ marginTop: 8 }} data-testid="paid-so-far">Paid so far <b className="num">{money(paidSoFar)}</b> · <b className="num">{money(bill.amount - paidSoFar)}</b> remaining</div>}
+        {partials.length > 0 && <div className="group" style={{ marginTop: 10, textAlign: 'left' }} data-testid="partial-list">{partials.map((p) => { const pt = data.txns.find((t) => t.id === p.txnId); return (
+          <div className="rowx" key={p.txnId}><div className="grow"><div className="li-title" style={{ fontSize: 14 }}>{pt?.payee ?? 'Payment'}</div><div className="li-sub">{pt ? fmtDate(pt.date) : ''} · partial payment</div></div><div className="amt-md num"><Money v={p.amount} /></div>
+            <button className="btn sm" data-testid="undo-partial" onClick={() => { setAlsoDelete(false); setUndoingPartial(p.txnId); }}>Undo</button></div>); })}</div>}
       </div>
       <Seg block value={tab} onChange={setTab} options={[{ v: 'pay', label: 'Record payment' }, { v: 'link', label: 'Already recorded' }, { v: 'outside', label: 'Paid elsewhere' }]} />
 
@@ -691,7 +706,7 @@ export function BillSheet({ billId, date }: { billId: string; date: string }) {
             <div className="field grow"><label htmlFor="pay-date">Date</label><input id="pay-date" type="date" className="input" value={paidOn} max={data.today} onChange={(e) => setPaidOn(e.target.value)} /></div></div>
         </div>
       )}
-      {partial && <label className="row gap12" style={{ alignItems: 'flex-start', marginTop: 12 }}><input type="checkbox" checked={settle} onChange={(e) => setSettle(e.target.checked)} style={{ marginTop: 3 }} /><span>Count this as the full payment<div className="small muted">Unticked, it is recorded but {bill.name} stays due for the rest ({money(bill.amount - cents)}).</div></span></label>}
+      {partial && <label className="row gap12" style={{ alignItems: 'flex-start', marginTop: 12 }}><input type="checkbox" checked={settle} onChange={(e) => setSettle(e.target.checked)} style={{ marginTop: 3 }} /><span>Count this as the full payment<div className="small muted">Unticked, it is recorded but {bill.name} stays due for the rest ({money(bill.amount - paidSoFar - payCents)}).</div></span></label>}
       {rows.length > 0 && (
         <div className="card pad num" style={{ boxShadow: 'none', background: 'var(--surface-2)', marginTop: 14 }} data-testid="pay-preview">
           {rows.map((r) => <div className="row between small" key={r.k} style={{ padding: '3px 0', gap: 10 }}><span>{r.k}</span><span><span className="muted">{r.before}</span> → <b>{r.after}</b></span></div>)}
@@ -822,7 +837,11 @@ export function ReconcileSheet({ id }: { id: string }) {
   if (!a) return null;
   if (!a.baseline) return <CutoverSheet id={id} />; // never anchored: set the opening balance first
   const credit = a.type === 'credit';
-  const actual = toCents(val);
+  // Signed: a checking account can be overdrawn, so -128.38 is a valid target. A card's "amount owed" is entered as a positive number.
+  const typed = parseSignedCents(val);
+  const actual = typed ?? 0;
+  const entryError = val.trim() === '' || val.trim() === '-' ? '' : typed == null ? 'Enter an amount such as 1,250.00 or -128.38.' : credit && typed < 0 ? 'Enter what you owe as a positive number. (A card with a credit balance can’t be set here.)' : '';
+  const entryOk = typed != null && !entryError;
   const diff = actual - a.balance;
   const st = staleness(a, data.today);
   const isExpense = credit ? diff > 0 : diff < 0;
@@ -832,7 +851,7 @@ export function ReconcileSheet({ id }: { id: string }) {
 
   return (
     <Sheet title={`Reconcile ${a.name}`} onClose={closeModal}
-      footer={step === 1 ? <button className="btn primary lg" disabled={val === ''} onClick={() => setStep(2)}>Preview difference</button>
+      footer={step === 1 ? <button className="btn primary lg" disabled={!entryOk} onClick={() => setStep(2)}>Preview difference</button>
         : step === 2 ? <><button className="btn" onClick={() => setStep(1)}>Back</button><button className="btn primary" disabled={saving} onClick={async () => { setSaving(true); const r = await reconcile(id, actual); if (r) { setResult(r); setStep(3); } setSaving(false); }}>{saving ? 'Saving…' : diff === 0 ? 'Mark reconciled' : 'Record adjustment'}</button></>
           : <><button className="btn" onClick={closeModal}>Done</button>{result?.adjustmentTxnId && <button className="btn primary" onClick={() => openModal({ type: 'txn', mode: 'view', id: result.adjustmentTxnId })}>View adjustment</button>}</>}>
       <div className="stepper" aria-label={`Step ${step} of 3`}>{[1, 2, 3].map((n) => <i key={n} className={n <= step ? 'on' : ''} />)}</div>
@@ -851,9 +870,13 @@ export function ReconcileSheet({ id }: { id: string }) {
           <div className="field"><label htmlFor="act">{credit ? 'Amount owed per statement' : 'Actual balance'}</label>
             <div style={{ position: 'relative' }}>
               <span style={{ position: 'absolute', left: 14, top: 14, color: 'var(--ink-4)', fontSize: 20 }}>$</span>
-              <input id="act" className="input num" inputMode="decimal" autoFocus placeholder="0.00" value={val} onChange={(e) => setVal(e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1'))}
-                style={{ height: 56, fontSize: 26, fontWeight: 620, paddingLeft: 32, letterSpacing: '-0.03em' }} />
+              <input id="act" className="input num" inputMode={credit ? 'decimal' : 'text'} autoFocus placeholder="0.00" value={val} aria-invalid={!!entryError} aria-describedby={entryError ? 'act-err' : undefined}
+                onChange={(e) => setVal(credit ? e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1') : signedInput(e.target.value))}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (entryOk) setStep(2); } }}
+                style={{ height: 56, fontSize: 26, fontWeight: 620, paddingLeft: 32, letterSpacing: '-0.03em', ...(entryError ? { borderColor: 'var(--neg)' } : {}) }} />
             </div>
+            {entryError && <div className="small neg" id="act-err" role="alert" style={{ marginTop: 6 }}>{entryError}</div>}
+            {!credit && !entryError && <div className="xs muted" style={{ marginTop: 6 }}>Overdrawn? Enter a negative amount, like -128.38.</div>}
           </div>
         </div>
       )}
@@ -907,17 +930,17 @@ export function CutoverSheet({ id }: { id?: string }) {
   const [date, setDate] = useState(() => data.accounts.find((a) => a.baseline)?.baseline ?? addDays(data.today, -1));
   const [vals, setVals] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
-  const entered = list.filter((a) => vals[a.id] !== undefined && vals[a.id] !== '');
+  const entered = list.filter((a) => vals[a.id] !== undefined && vals[a.id] !== '' && vals[a.id] !== '-' && parseSignedCents(vals[a.id]) != null && !(a.type === 'credit' && parseSignedCents(vals[a.id])! < 0));
   const countAfter = (a: Account) => data.txns.filter((t) => t.date > date && (t.accountId === a.id || t.toAccountId === a.id)).length;
   const countBefore = (a: Account) => data.txns.filter((t) => t.date <= date && (t.accountId === a.id || t.toAccountId === a.id)).length;
-  const newBal = (a: Account) => toCents(vals[a.id]) + sum(data.txns.filter((t) => t.date > date), (t) => delta(a, t));
+  const newBal = (a: Account) => (parseSignedCents(vals[a.id]) ?? 0) + sum(data.txns.filter((t) => t.date > date), (t) => delta(a, t));
   const validDate = /^\d{4}-\d{2}-\d{2}$/.test(date) && date <= data.today;
   return (
     <Sheet title={id ? `Set opening balance` : 'Set opening balances'} wide onClose={closeModal}
       sub="Pick a date, then enter what each account really held at the end of that day."
       footer={<button className="btn primary lg" disabled={!entered.length || !validDate || saving} onClick={async () => {
         setSaving(true);
-        const ok = await setCutovers(date, entered.map((a) => ({ accountId: a.id, opening: toCents(vals[a.id]) })));
+        const ok = await setCutovers(date, entered.map((a) => ({ accountId: a.id, opening: parseSignedCents(vals[a.id])! })));
         if (ok) closeModal(); else setSaving(false);
       }}>{saving ? 'Saving…' : entered.length ? `Set ${entered.length} opening balance${entered.length > 1 ? 's' : ''}` : 'Enter at least one balance'}</button>}>
       <Callout tone="planned" icon={<Eye />}>Nothing is deleted or rewritten. Every past transaction stays saved and searchable; only transactions dated <b>after</b> the date you pick change the balance from here on. Use balances from your bank or card statements — Finances never guesses them.</Callout>
@@ -932,7 +955,7 @@ export function CutoverSheet({ id }: { id?: string }) {
               <div className="row between gap12" style={{ alignItems: 'flex-start' }}>
                 <div className="grow"><div className="li-title" style={{ fontSize: 14 }}>{a.name}</div>
                   <div className="xs muted">{a.baseline ? `Verified ${fmtDate(a.baseline)} · ` : 'Not verified yet · '}Recorded now <span className="num">{money(a.balance)}</span>{a.derived != null && a.derived !== a.balance ? <> · history implies <span className="num">{money(a.derived)}</span></> : null}</div></div>
-                <div style={{ width: 150 }}><MoneyInput value={v} onChange={(x) => setVals({ ...vals, [a.id]: x })} placeholder={credit ? 'Amount owed' : 'Balance'} /></div>
+                <div style={{ width: 150 }}><MoneyInput signed={!credit} value={v} onChange={(x) => setVals({ ...vals, [a.id]: x })} placeholder={credit ? 'Amount owed' : 'Balance'} /></div>
               </div>
               {v !== '' && validDate && (
                 <div className="xs muted num fade-in" style={{ marginTop: 6 }}>

@@ -75,6 +75,26 @@ export const toCents = (s: string) => {
   const n = parseFloat(String(s).replace(/[^0-9.]/g, ''));
   return Number.isFinite(n) ? Math.round(n * 100) : 0;
 };
+/** Signed currency → cents, or null when it isn't a usable amount. Understands -128.38, −$128.38, $-128.38, (128.38), 1,250.5 — never guesses. */
+export const parseSignedCents = (s: string): number | null => {
+  let t = String(s).trim().replace(/[−–—]/g, '-').replace(/[\s,$]/g, '');
+  let neg = false;
+  const p = /^\((.*)\)$/.exec(t); if (p) { neg = true; t = p[1]; }
+  if (t.startsWith('-')) { neg = true; t = t.slice(1); } // "(-5)" is just negative
+  const m = /^(\d*)(?:\.(\d*))?$/.exec(t);
+  if (!m || (!m[1] && !m[2])) return null;
+  const frac = (m[2] ?? '').padEnd(3, '0'); // exact decimal arithmetic — no floating point, so -128.38 is always exactly -12838
+  const c = Number(m[1] || '0') * 100 + Number(frac.slice(0, 2)) + (Number(frac[2]) >= 5 ? 1 : 0);
+  return neg && c !== 0 ? -c : c;
+};
+/** Keeps what is typed into a signed money field sane: digits, one dot, and a minus only at the start. "(128.38)" becomes -128.38. */
+export const signedInput = (v: string): string => {
+  let t = v.replace(/[−–—]/g, '-').replace(/\$/g, '');
+  const p = /^\s*\((.*)\)\s*$/.exec(t); if (p) t = '-' + p[1];
+  const neg = t.trim().startsWith('-');
+  t = t.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+  return (neg ? '-' : '') + t;
+};
 export const centsToInput = (c: number) => (Math.abs(c) / 100).toFixed(2);
 export const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a, n));
 export const sum = <T,>(xs: T[], f: (x: T) => number) => xs.reduce((s, x) => s + f(x), 0);

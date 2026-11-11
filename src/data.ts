@@ -28,7 +28,7 @@ export interface Category {
 export interface Txn {
   id: string; date: string; payee: string; amount: number; type: 'expense' | 'income' | 'transfer';
   accountId: string; toAccountId?: string; categoryId?: string; splits?: { categoryId: string; amount: number }[];
-  notes?: string; adjustment?: boolean; billId?: string; incomeId?: string; scheduled?: boolean; // scheduled = future-dated and not yet posted to balances
+  notes?: string; adjustment?: boolean; billId?: string; billPartial?: boolean; incomeId?: string; scheduled?: boolean; // scheduled = future-dated and not yet posted to balances
 }
 export type BillPeriod = 'Monthly' | 'Weekly' | 'Bi-Weekly' | 'Yearly';
 export interface Bill {
@@ -50,7 +50,10 @@ export interface Income {
 export interface Debt { id: string; name: string; balance: number; payment: number; dueDay: number; startBalance: number; billId?: string }
 export interface Planned { id: string; label: string; amount: number; dayOfMonth?: number; date?: string }
 export interface Reconciliation { id: string; accountId: string; date: string; recorded: number; actual: number; diff: number; adjustmentTxnId?: string; note?: string }
+/** A transaction explicitly linked as a PARTIAL payment toward one occurrence (due date) of a scheduled item. */
+export interface BillPartial { txnId: string; billId: string; due: string; amount: number }
 export interface DataState {
+  billPartials?: BillPartial[];
   accounts: Account[]; allAccounts: Account[]; groups: Group[]; categories: Category[]; txns: Txn[]; bills: Bill[]; archivedBills: Bill[];
   incomes: Income[]; debts: Debt[]; planned: Planned[]; reconciliations: Reconciliation[]; today: string;
   hiddenBusiness: { accounts: number; categories: number; transactions: number };
@@ -58,7 +61,7 @@ export interface DataState {
 }
 
 export function emptyData(): DataState {
-  return { accounts: [], allAccounts: [], groups: [], categories: [], txns: [], bills: [], archivedBills: [], incomes: [], debts: [], planned: [], reconciliations: [], today: todayISO(), hiddenBusiness: { accounts: 0, categories: 0, transactions: 0 }, credit: { scores: [], meta: {}, reported: [], ready: false } };
+  return { accounts: [], allAccounts: [], groups: [], categories: [], txns: [], bills: [], archivedBills: [], incomes: [], debts: [], planned: [], reconciliations: [], billPartials: [], today: todayISO(), hiddenBusiness: { accounts: 0, categories: 0, transactions: 0 }, credit: { scores: [], meta: {}, reported: [], ready: false } };
 }
 
 // ═════════ selectors ═════════
@@ -407,11 +410,47 @@ export const isVerified = (a: Account) => a.lastReconciled != null;
 export const drift = (a: Account) => (a.derived == null ? null : a.derived - a.balance);
 export { iso };
 
-/** How much has already been paid toward the CURRENT payment of a scheduled item by transactions that are not yet linked to a payment
- *  (partial payments). Display only: it never clears or advances an obligation. */
+/** How much has been paid toward the CURRENT payment of a scheduled item — only by transactions explicitly linked to it as partial payments
+ *  (never by other spending that happens to share the category). Display and matching only: it never clears or advances an obligation. */
 export function paidTowardCurrent(d: DataState, bill: Bill): number {
   if (!bill.date) return 0;
-  const span = bill.recurring ? ({ Weekly: 7, 'Bi-Weekly': 14, Monthly: 31, Yearly: 366 } as const)[bill.period] : 90;
-  const from = addDays(bill.date, -span);
-  return sum(d.txns.filter((t) => t.categoryId === bill.categoryId && (t.type === 'expense' || t.type === 'transfer') && !t.adjustment && !t.scheduled && !t.billId && t.date > from && t.date <= d.today), (t) => t.amount);
+  return sum((d.billPartials ?? []).filter((p) => p.billId === bill.id && p.due === bill.date), (p) => p.amount);
+}
+
+/** The From/To of the most recently SAVED transfer (highest id = last one recorded, whatever its date). Never read from an unsaved form.
+ *  Only usable parts are returned: an archived or missing account is dropped, and the two sides can never be the same account. */
+export function lastTransferPair(d: DataState): { from?: string; to?: string } {
+  let best: Txn | undefined;
+  for (const t of d.txns) if (t.type === 'transfer' && !t.adjustment && t.toAccountId && (!best || Number(t.id) > Number(best.id))) best = t;
+  if (!best) return {};
+  const live = (id?: string) => (id && d.accounts.some((a) => a.id === id) ? id : undefined);
+  const from = live(best.accountId); const to = live(best.toAccountId);
+  return { from, to: to && to !== from ? to : undefined };
+}
+
+export type PayAskReason = 'partial' | 'large' | 'backlog';
+export type PayMatch =
+  | { kind: 'none' }
+  | { kind: 'auto'; bill: Bill; due: string; paidBefore: number }
+  | { kind: 'ask'; bill: Bill; due: string; reason: PayAskReason; paidBefore: number; remaining: number; missed: number };
+const EARLY_DAYS: Record<BillPeriod, number> = { Weekly: 3, 'Bi-Weekly': 7, Monthly: 15, Yearly: 45 };
+/** Does a transaction that was just recorded look like a payment toward a scheduled item?
+ *  auto  = exactly one obligation, right category, a sensible date, and it covers what is still owed → link it.
+ *  ask   = plausible but not certain (smaller than what is owed, an unusually large amount, or several missed payments) → the user decides.
+ *  none  = anything else, including every transaction in a category with no active schedule → just an ordinary transaction. */
+export function matchBillPayment(d: DataState, t: Pick<Txn, 'type' | 'categoryId' | 'amount' | 'date' | 'splits' | 'scheduled' | 'adjustment'>): PayMatch {
+  const none: PayMatch = { kind: 'none' };
+  if (t.type === 'income' || t.splits?.length || !t.categoryId || t.scheduled || t.adjustment || t.date > d.today || t.amount <= 0) return none;
+  const bill = d.bills.find((b) => b.categoryId === t.categoryId);
+  if (!bill || bill.paused || !bill.date || bill.paid[bill.date]) return none;
+  if (t.date < addDays(bill.date, -(bill.recurring ? EARLY_DAYS[bill.period] : 30))) return none; // too early to be for this occurrence
+  const lastPaidDue = Object.keys(bill.paid).sort().pop();
+  if (lastPaidDue && t.date <= lastPaidDue) return none; // dated inside a cycle that is already paid
+  const paidBefore = paidTowardCurrent(d, bill);
+  const remaining = Math.max(0, bill.amount - paidBefore);
+  const missed = groupBills(upcomingBills(d, 60)).find((g) => g.bill.id === bill.id)?.missed ?? 0;
+  if (missed > 1) return { kind: 'ask', bill, due: bill.date, reason: 'backlog', paidBefore, remaining, missed };
+  if (t.amount < remaining) return { kind: 'ask', bill, due: bill.date, reason: 'partial', paidBefore, remaining, missed };
+  if (t.amount > bill.amount * 2) return { kind: 'ask', bill, due: bill.date, reason: 'large', paidBefore, remaining, missed };
+  return { kind: 'auto', bill, due: bill.date, paidBefore };
 }

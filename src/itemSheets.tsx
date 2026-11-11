@@ -69,7 +69,7 @@ export function ItemDetail({ id }: { id: string }) {
             {showMissed && <div className="occ fade-in" style={{ margin: '0 16px 12px' }}>{grp.occs.filter((o) => o.status === 'overdue').map((o) => <div className="r" key={o.date}><span className="muted">{fmtDate(o.date)} · {-diffDays(o.date, data.today)} days late</span><b className="num">{money(o.bill.amount)}</b></div>)}
               <div className="xs muted" style={{ marginTop: 6 }}>Pay the oldest first. The money set aside is counted once, toward the oldest payment.</div></div>}
           </>)}
-          {!bill.paused && <div className="rowx" style={{ justifyContent: 'flex-end' }}><button className="btn primary" data-testid="record-payment" onClick={() => openModal({ type: 'bill', billId: id, date: bill.date! })}>Record payment</button></div>}
+          {!bill.paused && <div className="rowx" style={{ justifyContent: 'flex-end' }}><button className="btn" data-testid="record-payment" onClick={() => openModal({ type: 'bill', billId: id, date: bill.date! })}>Record payment</button></div>}
         </div>
       )}
 
