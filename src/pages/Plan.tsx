@@ -3,7 +3,7 @@ import { Archive, Bell, ChevronLeft, ChevronRight, Info, Pencil, Plus, Receipt, 
 import { useStore } from '../store';
 import { envelope } from '../data';
 import {
-  billOccurrences, buildForecast, cashEvents, incomeOccurrences, shortfall, upcomingBills, type BillOcc,
+  billOccurrences, buildForecast, cashEvents, expectedIncomeSummary, incomeOccurrences, shortfall, upcomingBills, type BillOcc,
 } from '../data';
 import { addDays, cn, compact, daysInMonth, diffDays, fmtDate, mon, money, monthKey, monthLabel, monthShift, parse, relDay, sum } from '../lib';
 import { Callout, Empty, Money, Seg, StatusPill } from '../ui';
@@ -119,11 +119,12 @@ function BillsTab() {
 export function IncomeTab() {
   const { data, openModal } = useStore();
   const [days, setDays] = useState(60);
-  const occ = incomeOccurrences(data, addDays(data.today, 1), addDays(data.today, days));
-  const g = sum(occ.filter((o) => o.inc.certainty === 'guaranteed'), (o) => o.amount);
-  const a = sum(occ.filter((o) => o.inc.certainty === 'anticipated'), (o) => o.amount);
+  // One calculation shared with Home: everything pending that arrives within the window, overdue (still unconfirmed) entries included.
+  const sum_ = expectedIncomeSummary(data, days);
+  const g = sum_.guaranteed, a = sum_.anticipated;
+  const occ = incomeOccurrences(data, data.today, addDays(data.today, days)).filter((o) => !o.overdue);
   const received = data.txns.filter((t) => t.type === 'income' && !t.adjustment && t.date <= data.today).slice(0, 4);
-  const waiting = data.incomes.filter((i) => i.date <= data.today).sort((x, y) => x.date.localeCompare(y.date));
+  const waiting = sum_.overdue;
   return (
     <div className="fade-in">
       <div className="row between" style={{ marginBottom: 14, gap: 12, flexWrap: 'wrap' }}>
@@ -132,7 +133,7 @@ export function IncomeTab() {
       </div>
       <div className="grid g12" style={{ marginBottom: 16 }}>
         <div className="card pad" style={{ gridColumn: 'span 4', borderColor: 'color-mix(in srgb, var(--proj) 35%, var(--line))' }}>
-          <div className="eyebrow">Conservative · guaranteed only</div><div className="amt-xl num c-proj" style={{ marginTop: 4 }}><Money v={g} cents={false} /></div><div className="small muted" style={{ marginTop: 2 }}>{g === 0 && waiting.length > 0 ? `Nothing guaranteed ahead — ${waiting.length} past-due ${waiting.length === 1 ? 'entry is' : 'entries are'} waiting below, not counted until confirmed` : g === 0 ? `No guaranteed income in the next ${days} days` : 'Paychecks you can count on'}</div></div>
+          <div className="eyebrow">Conservative · guaranteed only</div><div className="amt-xl num c-proj" style={{ marginTop: 4 }}><Money v={g} cents={false} /></div><div className="small muted" style={{ marginTop: 2 }}>{g === 0 ? `No guaranteed income pending in the next ${days} days` : `Pending, not received${waiting.some((w) => w.certainty === 'guaranteed') ? ' · includes entries awaiting confirmation' : ''}`}</div></div>
         <div className="card pad" style={{ gridColumn: 'span 4', borderStyle: 'dashed', borderColor: 'color-mix(in srgb, var(--proj) 55%, var(--line))' }}>
           <div className="eyebrow">Plus anticipated</div><div className="amt-xl num c-proj" style={{ marginTop: 4, opacity: 0.85 }}><Money v={a} cents={false} /></div><div className="small muted" style={{ marginTop: 2 }}>Invoices &amp; side income, if they land</div></div>
         <div className="card pad" style={{ gridColumn: 'span 4' }}>
@@ -143,9 +144,10 @@ export function IncomeTab() {
           <div className="pad" style={{ paddingBottom: 6 }}><div className="sect-head" style={{ marginBottom: 0 }}><h2 className="sect-title">Did it arrive?</h2><span className="small muted">Confirm or mark as not coming</span></div></div>
           <div className="list">{waiting.map((i) => (
             <button key={i.id} className="li" style={{ padding: '14px 20px' }} onClick={() => openModal({ type: 'income', mode: 'view', id: i.id })}>
-              <div className="datebox proj"><b className="num">{fmtDate(i.date, 'day')}</b><span>{mon(i.date)}</span></div>
-              <div className="grow"><div className="li-title ellipsis">{i.label}</div><div className="li-sub">Expected {relDay(i.date, data.today).toLowerCase()} · not counted until you confirm</div></div>
-              <div className="right"><span className="amt-md num c-proj"><Money v={i.amount} /></span></div>
+              <div className="datebox late"><b className="num">{fmtDate(i.date, 'day')}</b><span>{mon(i.date)}</span></div>
+              <div className="grow"><div className="li-title ellipsis">{i.label}</div><div className="li-sub">Awaiting confirmation · originally expected {fmtDate(i.originalDate!)} · shown as arriving today</div></div>
+              <div className="right stack" style={{ alignItems: 'flex-end', gap: 5 }}><span className="amt-md num c-proj">+<Money v={i.amount} /></span>
+                {i.certainty === 'guaranteed' ? <StatusPill status="proj">Guaranteed</StatusPill> : <span className="pill" style={{ border: '1px dashed var(--ink-4)', background: 'transparent' }}>Anticipated</span>}</div>
             </button>))}</div>
         </section>
       )}

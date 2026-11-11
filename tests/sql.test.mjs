@@ -220,6 +220,29 @@ describe('expected income recurrence (SQL = app)', () => {
   }));
 });
 
+describe('confirming overdue expected income', () => {
+  it('receiving an overdue entry credits the account and Ready to Assign once, keeps the stored date, and schedules the next from the ORIGINAL date', () => sandbox(async (tx) => {
+    await tx.query(`insert into projected_income (label, amount, expected_date, status, certainty, is_repeating, repeat_period, account_id, entity_id) values ('Weekly gig', 100, '2026-11-02', 'pending', 'guaranteed', true, 'Weekly', 1, 'personal')`);
+    const id = await num(tx, `select max(id) from projected_income`);
+    const checking = await bal(tx, 1), rta = await rtaOf(tx);
+    await tx.query(`select fos_receive_income($1, '2026-11-10', 100, 1, '22222222-2222-2222-2222-222222222222')`, [id]);
+    await fails(tx, `select fos_receive_income($1, '2026-11-10', 100, 1, null)`, [id], /already received/); // a second confirmation is refused
+    expect(await bal(tx, 1)).toBeCloseTo(checking + 100, 2);
+    expect(await rtaOf(tx)).toBeCloseTo(rta + 100, 2);
+    const r = await one(tx, `select status, expected_date::text as d from projected_income where id=$1`, [id]);
+    expect(r).toMatchObject({ status: 'received', d: '2026-11-02' });
+    const next = await rows(tx, `select expected_date::text as d from projected_income where status='pending' and label='Weekly gig'`);
+    expect(next.map((x) => x.d)).toEqual(['2026-11-09']); // exactly one follow-up, on the original schedule
+  }));
+  it('marking an overdue entry "not coming" (skip) creates no transaction and changes no balance', () => sandbox(async (tx) => {
+    await tx.query(`insert into projected_income (label, amount, expected_date, status, certainty, is_repeating, repeat_period, account_id, entity_id) values ('One-off', 80, '2026-11-09', 'pending', 'guaranteed', false, 'None', 1, 'personal')`);
+    const id = await num(tx, `select max(id) from projected_income`); const checking = await bal(tx, 1), n = await num(tx, 'select count(*) from transactions');
+    await tx.query(`select fos_skip_income_occurrence($1, null)`, [id]);
+    expect(await bal(tx, 1)).toBe(checking); expect(await num(tx, 'select count(*) from transactions')).toBe(n);
+    expect((await one(tx, `select status from projected_income where id=$1`, [id])).status).toBe('cancelled');
+  }));
+});
+
 describe('budget rules enforced by the server', () => {
   it('moving more than a category holds is refused; a valid move changes no bank balance and keeps Ready to Assign', () => sandbox(async (tx) => {
     await fails(tx, `select fos_move_money(9, 7, 500)`, [], /not enough available/);

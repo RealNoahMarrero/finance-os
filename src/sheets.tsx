@@ -943,7 +943,7 @@ export function IncomeSheet({ mode, id }: { mode: 'view' | 'add'; id?: string })
       <div style={{ textAlign: 'center', padding: '4px 0 18px' }}>
         <div className="amt-hero num c-proj"><Money v={inc.amount} /></div>
         <div style={{ marginTop: 10, display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
-          <StatusPill status="proj">Projected</StatusPill><StatusPill status="muted">{fmtDate(inc.date, 'long')}</StatusPill>
+          {inc.date < data.today ? <StatusPill status="warn">Awaiting confirmation</StatusPill> : <StatusPill status="proj">Projected</StatusPill>}<StatusPill status="muted">{inc.date < data.today ? `Originally ${fmtDate(inc.date, 'long')}` : fmtDate(inc.date, 'long')}</StatusPill>
         </div>
       </div>
       <Callout tone="proj" icon={<FlaskConical />}>This is a <b>projection</b>. It does not appear in {acct.name} or in Ready to Assign until you confirm it arrived.</Callout>

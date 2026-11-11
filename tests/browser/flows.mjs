@@ -148,9 +148,9 @@ await test('SCHEDULED: opening the app on/after the date posts it exactly once',
 await test('HOME: Expected income section shows totals, overdue confirmation, status, and links to the full view', async (page) => {
   await go(page, '/');
   const t = await page.evaluate(() => document.querySelector('[data-testid=ov-income]').innerText);
-  for (const w of ['Acme Payroll', 'Freelance invoice', 'Client refund', 'Guaranteed', 'Anticipated', 'Confirm', 'past the expected date']) if (!t.includes(w)) throw new Error(`missing "${w}"`);
+  for (const w of ['Acme Payroll', 'Freelance invoice', 'Client refund', 'Guaranteed', 'Anticipated', 'Confirm', 'awaiting confirmation', 'originally Nov 5']) if (!t.includes(w)) throw new Error(`missing "${w}"`);
   const total = await page.evaluate(() => document.querySelector('[data-testid=ov-income-total]').innerText);
-  if (!/\$5,720/.test(total)) throw new Error('30-day total ' + total);
+  if (!/\$5,870/.test(total)) throw new Error('30-day pending total ' + total); // paychecks 4,820 + invoice 900 + the overdue $150 refund, shown as arriving today
   const rta = await page.evaluate(() => document.querySelector('[data-testid=ov-rta-value]').innerText);
   if (!/\$3,645\.15/.test(rta)) throw new Error('Ready to Assign changed: ' + rta);
   const before = await page.evaluate(() => location.hash);
@@ -167,6 +167,22 @@ await test('HOME: Expected income empty state, and mobile layout does not overfl
     results.push(['HOME: Expected income empty state, and mobile layout does not overflow', true]);
   } catch (e) { results.push(['HOME: Expected income empty state, and mobile layout does not overflow', false, e.message]); }
   await page.close();
+});
+
+await test('INCOME: an overdue entry is awaiting confirmation (dated today, original date kept) and confirming it records it once', async (page) => {
+  await go(page, '/');
+  const t = await page.evaluate(() => document.querySelector('[data-testid=ov-income]').innerText);
+  if (!/Awaiting confirmation · originally Nov 5/.test(t)) throw new Error('overdue label missing: ' + t.slice(0, 160));
+  const [raw] = await sql(`select expected_date::text as d, status from projected_income where label='Client refund'`);
+  if (raw.d !== '2026-11-05' || raw.status !== 'pending') throw new Error('stored entry was altered: ' + JSON.stringify(raw));
+  const b0 = Number((await sql('select balance from accounts where id=1'))[0].balance);
+  await page.evaluate(() => [...document.querySelectorAll('[data-testid=ov-income] button')].find((b) => b.innerText.includes('Client refund')).click()); await sleep(500);
+  const sheet = await page.evaluate(() => document.querySelector('[role=dialog]').innerText); if (!/Awaiting confirmation/.test(sheet) || !/Originally/.test(sheet)) throw new Error('sheet lacks pending info');
+  await click(page, 'Mark as received'); await click(page, 'Record income');
+  const [a] = await sql(`select (select balance from accounts where id=1) as b, (select status from projected_income where label='Client refund') as st`);
+  if (a.st !== 'received' || Math.abs(Number(a.b) - (b0 + 150)) > 0.001) throw new Error(JSON.stringify(a));
+  await go(page, '/'); const total = await page.evaluate(() => document.querySelector('[data-testid=ov-income-total]').innerText);
+  if (!/\$5,720/.test(total)) throw new Error('pending total after confirming: ' + total);
 });
 
 await browser.close(); await new Promise((r) => pv.httpServer.close(r)); backend.close(); fs.rmSync(outDir, { recursive: true, force: true });

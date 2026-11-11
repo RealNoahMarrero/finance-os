@@ -62,7 +62,7 @@ function Attention({ d }: { d: DataState }) {
   for (const e of overspent(d)) items.push({ id: `o${e.cat.id}`, tone: 'warn', title: `${e.cat.name} is over by ${money(-e.env.avail)}`, sub: 'Cover it from Ready to Assign or another category', action: 'Cover', run: () => openModal({ type: 'move', to: e.cat.id, amount: -e.env.avail }) });
   const rta = readyToAssign(d);
   if (rta < 0) items.push({ id: 'rta', tone: 'warn', title: `${money(-rta)} more is set aside than you have`, sub: 'Move money back to Ready to Assign', action: 'Review', run: () => openModal({ type: 'move', to: 'rta', amount: -rta }) });
-  for (const i of d.incomes.filter((x) => x.date <= d.today)) items.push({ id: `i${i.id}`, tone: '', title: `${i.label} hasn’t been marked received`, sub: `Expected ${fmtDate(i.date)} · ${money(i.amount)}`, action: 'Review', run: () => openModal({ type: 'income', mode: 'view', id: i.id }) });
+  for (const i of d.incomes.filter((x) => x.date <= d.today)) items.push({ id: `i${i.id}`, tone: '', title: `${i.label} hasn’t been marked received`, sub: `Awaiting confirmation · originally ${fmtDate(i.date)} · ${money(i.amount)}`, action: 'Review', run: () => openModal({ type: 'income', mode: 'view', id: i.id }) });
   if (!items.length) return <div className="alert"><CircleCheck size={18} style={{ color: 'var(--pos)' }} /><div className="small">You’re all caught up.</div></div>;
   return (
     <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'minmax(0, 1fr)' }}>
@@ -138,23 +138,23 @@ export function Overview() {
               <div className="small muted">Nothing expected in the next 30 days. Add a paycheck or invoice to see money coming in next to what’s going out.</div>
             ) : (<>
               <div className="sum-row" style={{ gap: 24, marginBottom: 6 }}>
-                <div><div className="eyebrow">Next 30 days</div><div className="amt-lg num" data-testid="ov-income-total"><Money v={inc.guaranteed + inc.anticipated} cents={false} /></div></div>
+                <div><div className="eyebrow">Pending · next 30 days</div><div className="amt-lg num" data-testid="ov-income-total"><Money v={inc.total} cents={false} /></div></div>
                 <div><div className="eyebrow">Guaranteed</div><div className="amt-lg num c-proj" data-testid="ov-income-g"><Money v={inc.guaranteed} cents={false} /></div></div>
                 <div><div className="eyebrow">Anticipated</div><div className="amt-lg num muted" data-testid="ov-income-a"><Money v={inc.anticipated} cents={false} /></div></div>
               </div>
-              {inc.overdue.length > 0 && <div className="alert warn" style={{ margin: '10px 0 4px' }}><div className="grow small"><b>{plural(inc.overdue.length, 'entry', 'entries')} past the expected date</b> · {money(inc.overdueTotal, { cents: false })} not confirmed yet. Open one to mark it received or not coming.</div></div>}
+              {inc.overdue.length > 0 && <div className="alert warn" style={{ margin: '10px 0 4px' }}><div className="grow small"><b>{plural(inc.overdue.length, 'entry', 'entries')} awaiting confirmation</b> · {money(inc.overdueTotal, { cents: false })}, shown as arriving today. Open one to mark it received or not coming.</div></div>}
               <div className="list">
                 {inc.rows.slice(0, 5).map((r) => (
                   <button key={r.id + r.date} className="rowx" onClick={() => openModal({ type: 'income', mode: 'view', id: r.id })}>
                     <div className={`datebox ${r.overdue ? 'late' : 'proj'}`}><b className="num">{fmtDate(r.date, 'day')}</b><span>{fmtDate(r.date).split(' ')[0]}</span></div>
                     <div className="grow"><div className="row gap8"><span className="li-title ellipsis">{r.label}</span>{r.overdue && <StatusPill status="warn">Confirm</StatusPill>}</div>
-                      <div className="li-sub ellipsis">{r.overdue ? 'Expected' : ''} {fmtDate(r.date)}{r.repeats ? ' · repeats' : ''}</div></div>
+                      <div className="li-sub ellipsis">{r.overdue ? `Awaiting confirmation · originally ${fmtDate(r.originalDate!)}` : fmtDate(r.date)}{r.repeats ? ' · repeats' : ''}</div></div>
                     <div className="right"><div className="amt-md num pos">+{money(r.amount, { cents: false })}</div><div className="xs muted">{r.certainty === 'guaranteed' ? 'Guaranteed' : 'Anticipated'}</div></div>
                   </button>
                 ))}
               </div>
               {inc.rows.length > 5 && <div className="xs muted" style={{ marginTop: 6 }}>+ {inc.rows.length - 5} more in the full view</div>}
-              <div className="xs muted" style={{ marginTop: 8 }}>Expected money isn’t in your balances or Ready to Assign until you mark it received.</div>
+              <div className="xs muted" style={{ marginTop: 8 }}>Pending, not received: it isn’t in your balances or Ready to Assign until you mark it received.</div>
             </>)}
           </section>
           <section className="card pad" aria-label="Recent activity">

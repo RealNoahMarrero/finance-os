@@ -101,24 +101,88 @@ describe('billOccurrences basics still hold', () => {
   });
 });
 
-describe('Home: expected income summary (reuses the existing income data; never counted as cash)', () => {
-  const d = state();
+const inc = (id: number, label: string, amount: number, date: string, extra: Record<string, unknown> = {}) => ({ id, label, amount, expected_date: date, status: 'pending', certainty: 'guaranteed', is_repeating: false, repeat_period: 'None', account_id: 1, entity_id: 'personal', ...extra });
+const flex = [inc(11, 'Amazon Flex', 50, '2026-11-09'), inc(12, 'Amazon Flex', 60, '2026-11-09'), inc(13, 'Amazon Flex', 50, '2026-11-09')];
+
+describe('expected income: overdue entries are pending money dated today (was: $0 Guaranteed and $0 total on Home)', () => {
+  const d = state({ income: [...tables.projected_income, ...flex] });
   const s = expectedIncomeSummary(d, 30);
-  it('splits the next 30 days into guaranteed and anticipated', () => {
-    expect(s.guaranteed).toBe(241000 * 2);   // two biweekly paychecks (Nov 13, Nov 27)
-    expect(s.anticipated).toBe(90000);        // the freelance invoice
-    expect(s.upcoming.every((r) => r.date > d.today)).toBe(true);
+  it('three Guaranteed entries totalling $160 expected Nov 9 are $160 pending Guaranteed on Nov 10', () => {
+    const f = s.rows.filter((r) => r.label === 'Amazon Flex');
+    expect(f).toHaveLength(3);
+    expect(f.every((r) => r.date === '2026-11-10' && r.originalDate === '2026-11-09' && r.overdue && r.certainty === 'guaranteed')).toBe(true);
+    expect(f.reduce((n, r) => n + r.amount, 0)).toBe(16000);
+    expect(s.overdueTotal).toBe(16000 + 15000); // plus the demo's $150 anticipated refund, also past its date
   });
-  it('flags entries past their date as needing confirmation, separately from the 30-day total', () => {
-    expect(s.overdue.map((r) => r.label)).toEqual(['Client refund']);
-    expect(s.overdue[0].overdue).toBe(true);
-    expect(s.guaranteed + s.anticipated).toBe(241000 * 2 + 90000);
+  it('totals include overdue entries and keep each entry’s own classification', () => {
+    expect(s.guaranteed).toBe(241000 * 2 + 16000);
+    expect(s.anticipated).toBe(90000 + 15000);
+    expect(s.total).toBe(s.guaranteed + s.anticipated);
   });
-  it('overdue entries first, then upcoming by date', () => expect(s.rows.map((r) => r.label)).toEqual(['Client refund', 'Acme Payroll', 'Freelance invoice', 'Acme Payroll']));
-  it('expected income does not change cash or Ready to Assign', () => {
+  it('Home and Bills read the same calculation (the Bills tab totals equal the summary for the same window)', () => {
+    for (const days of [30, 60, 90]) {
+      const x = expectedIncomeSummary(d, days);
+      const occ = incomeOccurrences(d, d.today, addDays(d.today, days));
+      expect(x.guaranteed).toBe(occ.filter((o) => o.inc.certainty === 'guaranteed').reduce((n, o) => n + o.amount, 0));
+      expect(x.anticipated).toBe(occ.filter((o) => o.inc.certainty === 'anticipated').reduce((n, o) => n + o.amount, 0));
+    }
+  });
+  it('received, cancelled and skipped entries are never pending', () => {
+    const dd = state({ income: [...flex, inc(14, 'Done', 999, '2026-11-09', { status: 'received' }), inc(15, 'Skipped', 888, '2026-11-09', { status: 'cancelled' })] });
+    expect(expectedIncomeSummary(dd, 30).rows.map((r) => r.label)).not.toContain('Done');
+    expect(expectedIncomeSummary(dd, 30).rows.map((r) => r.label)).not.toContain('Skipped');
+  });
+  it('expected money is not cash and not Ready to Assign', () => {
     const none = state({ income: [] });
     expect(readyToAssign(d)).toBe(readyToAssign(none));
     expect(cashCheck(d).cash).toBe(cashCheck(none).cash);
   });
-  it('empty state when nothing is expected', () => expect(expectedIncomeSummary(state({ income: [] }), 30).rows).toHaveLength(0));
+});
+
+describe('expected income: the effective date follows today without rewriting anything', () => {
+  it('moves forward as days pass, and the original date is preserved', () => {
+    const raw1 = raw({ income: flex });
+    for (const today of ['2026-11-10', '2026-11-12', '2026-12-01']) {
+      const d = toDataState(raw1, today);
+      const rows = expectedIncomeSummary(d, 30).rows.filter((r) => r.label === 'Amazon Flex');
+      expect(rows.map((r) => r.date)).toEqual([today, today, today]);
+      expect(rows.every((r) => r.originalDate === '2026-11-09')).toBe(true);
+      expect(d.incomes.filter((i) => i.label === 'Amazon Flex').every((i) => i.date === '2026-11-09')).toBe(true); // stored date untouched
+    }
+  });
+  it('before the scheduled date it is simply upcoming', () => {
+    const d = toDataState(raw({ income: flex }), '2026-11-08');
+    const r = expectedIncomeSummary(d, 30).rows.filter((x) => x.label === 'Amazon Flex');
+    expect(r.every((x) => !x.overdue && x.date === '2026-11-09' && x.originalDate === undefined)).toBe(true);
+  });
+});
+
+describe('expected income: recurring entries (no duplicates, recurrence untouched)', () => {
+  const weekly = inc(20, 'Weekly gig', 100, '2026-11-02', { is_repeating: true, repeat_period: 'Weekly', certainty: 'guaranteed' });
+  const d = state({ income: [weekly] });
+  const rows = expectedIncomeSummary(d, 30).rows;
+  it('an overdue repeating entry appears once (today), then its real future occurrences — the missed cycles are not invented', () => {
+    expect(rows.map((r) => r.date)).toEqual(['2026-11-10', '2026-11-16', '2026-11-23', '2026-11-30', '2026-12-07']);
+    expect(rows[0]).toMatchObject({ overdue: true, originalDate: '2026-11-02', repeats: true });
+  });
+  it('the stored schedule is unchanged', () => expect(d.incomes[0]).toMatchObject({ date: '2026-11-02', repeat: 'weekly' }));
+  it('the Calendar shows it on today (not on its old date and not on skipped cycles)', () => {
+    const cal = incomeOccurrences(d, '2026-11-01', '2026-11-30').map((o) => o.date);
+    expect(cal).toEqual(['2026-11-10', '2026-11-16', '2026-11-23', '2026-11-30']);
+  });
+});
+
+describe('expected income in the forecast', () => {
+  it('guaranteed income awaiting confirmation is counted (from tomorrow) in the conservative forecast; anticipated only in the optimistic', () => {
+    const none = buildForecast(state({ income: [] }), 5), withFlex = buildForecast(state({ income: [...flex, inc(16, 'Maybe', 70, '2026-11-09', { certainty: 'anticipated' })] }), 5);
+    expect(withFlex.conservative[1].balance - none.conservative[1].balance).toBe(16000);
+    expect(withFlex.optimistic[1].balance - none.optimistic[1].balance).toBe(16000 + 7000);
+    expect(withFlex.conservative[0].balance).toBe(none.conservative[0].balance); // today's balance is untouched
+  });
+  it('the event list and the chart agree', () => {
+    const d = state({ income: flex });
+    const ev = cashEvents(d, addDays(d.today, 1), addDays(d.today, 5)).filter((e) => e.label === 'Amazon Flex');
+    expect(ev).toHaveLength(3);
+    expect(ev.every((e) => e.date === '2026-11-11' && e.kind === 'income-g')).toBe(true);
+  });
 });
