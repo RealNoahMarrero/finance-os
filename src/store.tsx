@@ -106,7 +106,7 @@ export function StoreProvider({ children, email }: { children: ReactNode; email:
     const apply = () => {
       const dark = theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
       document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#0d1311' : '#f6f7f5');
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#000000' : '#f2f2f7');
     };
     apply();
     const mq = matchMedia('(prefers-color-scheme: dark)');
