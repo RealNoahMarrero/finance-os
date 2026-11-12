@@ -1,11 +1,11 @@
-import { Plus, Landmark, ChevronRight, CircleCheck, ArrowLeftRight, CalendarClock, Coins, ListChecks, Receipt, TriangleAlert } from 'lucide-react';
+import { Plus, Landmark, ChevronRight, CircleCheck, ArrowLeftRight, CalendarClock, Coins, ListChecks, TriangleAlert } from 'lucide-react';
 import { useStore } from '../store';
 import {
   cashCheck, cardsOwed, loansOwed, netWorth, netWorthSeries, upcomingBills, groupBills, allEnvelopes, overspent, readyToAssign, underfunded, monthlyFlow, usualSpend, expectedIncomeSummary, staleness, type DataState, type Account,
 } from '../data';
 import { daysInMonth, diffDays, fmtDate, money, monthKey, parse, plural, sum } from '../lib';
 import { Empty, Money, StatusPill } from '../ui';
-import { PageHead, TxnRow } from '../shared';
+import { PageHead } from '../shared';
 import { BillList } from './PlanPage';
 
 export interface Insight { id: string; tone: 'pos' | 'warn' | 'planned' | 'proj'; title: string; text: string; href?: string }
@@ -76,7 +76,6 @@ export function Overview() {
   const dueGroups = groupBills(upcomingBills(data, 14));
   const dueTotal = sum(dueGroups, (g) => g.occs.filter((o) => diffDays(o.date, data.today) <= 14).reduce((n, o) => n + o.bill.amount, 0));
   const overdueTotal = sum(dueGroups, (g) => g.total);
-  const recent = data.txns.filter((t) => t.date <= data.today).slice(0, 5);
   const rta = cc.rta;
   const inc = expectedIncomeSummary(data, 30);
   const accountRow = (a: Account) => {
@@ -110,10 +109,16 @@ export function Overview() {
       </div>
 
       <div className="home-grid">
-        <div>
-          <div className="section-h"><h2><CalendarClock />Upcoming</h2><span className="row gap12"><span className="small muted num" data-testid="ov-due">{dueTotal > 0 ? `${money(dueTotal, { cents: false })} due in 14 days` : 'Nothing due in 14 days'}</span><a className="sect-link" href="#/plan">Plan<ChevronRight size={14} /></a></span></div>
-          {groups.length ? <BillList groups={groups} /> : <div className="group pad small muted">Nothing due in the next 30 days.</div>}
-
+        <section aria-label="Accounts" data-testid="home-accounts">
+          <div className="section-h"><h2><Landmark />Accounts</h2><a className="sect-link" href="#/accounts">All<ChevronRight size={14} /></a></div>
+          <div className="group">
+            {cash.map(accountRow)}
+            {cards.map(accountRow)}
+            <div className="rowx" style={{ background: 'var(--surface-2)' }}><div className="grow li-sub">Net worth{owed > 0 || loans > 0 ? ` · after ${money(owed + loans, { cents: false })} owed` : ''}</div><div className="small num" style={{ fontWeight: 600 }} data-testid="ov-position"><Money v={position} cents={false} /></div></div>
+          </div>
+          <span hidden data-testid="ov-owed">{money(owed)}</span>
+        </section>
+        <section aria-label="Expected income section" data-testid="home-expected-income-section">
           <div className="section-h"><h2><Coins />Expected income</h2>
             <span className="row gap12"><button className="sect-link" onClick={() => openModal({ type: 'income', mode: 'add' })}>Add</button><a className="sect-link" href="#/plan?view=income" data-testid="ov-income-all">View all<ChevronRight size={14} /></a></span></div>
           <section data-testid="ov-income" aria-label="Expected income">
@@ -137,23 +142,15 @@ export function Overview() {
               <div className="xs muted" style={{ margin: '8px 4px 0' }}>Pending, not received: not in your balances or Ready to Assign until you mark it received.</div>
             </>)}
           </section>
-        </div>
-
-        <div>
+        </section>
+        <section aria-label="Upcoming" data-testid="home-upcoming">
+          <div className="section-h"><h2><CalendarClock />Upcoming</h2><span className="row gap12"><span className="small muted num" data-testid="ov-due">{dueTotal > 0 ? `${money(dueTotal, { cents: false })} due in 14 days` : 'Nothing due in 14 days'}</span><a className="sect-link" href="#/plan">Plan<ChevronRight size={14} /></a></span></div>
+          {groups.length ? <BillList groups={groups} /> : <div className="group pad small muted">Nothing due in the next 30 days.</div>}
+        </section>
+        <section aria-label="Needs attention" data-testid="home-needs-attention">
           <div className="section-h"><h2><TriangleAlert />Needs attention{attentionCount > 0 && <span className="count-pill">{attentionCount}</span>}</h2></div>
           <Attention d={data} />
-
-          <div className="section-h"><h2><Landmark />Accounts</h2><a className="sect-link" href="#/accounts">All<ChevronRight size={14} /></a></div>
-          <div className="group">
-            {cash.map(accountRow)}
-            {cards.map(accountRow)}
-            <div className="rowx" style={{ background: 'var(--surface-2)' }}><div className="grow li-sub">Net worth{owed > 0 || loans > 0 ? ` · after ${money(owed + loans, { cents: false })} owed` : ''}</div><div className="small num" style={{ fontWeight: 600 }} data-testid="ov-position"><Money v={position} cents={false} /></div></div>
-          </div>
-          <span hidden data-testid="ov-owed">{money(owed)}</span>
-
-          <div className="section-h"><h2><Receipt />Recent activity</h2><a className="sect-link" href="#/activity">All<ChevronRight size={14} /></a></div>
-          {recent.length ? <div className="group">{recent.map((t) => <TxnRow key={t.id} t={t} onOpen={() => openModal({ type: 'txn', mode: 'view', id: t.id })} />)}</div> : <div className="group pad small muted">No transactions yet.</div>}
-        </div>
+        </section>
       </div>
     </div>
   );

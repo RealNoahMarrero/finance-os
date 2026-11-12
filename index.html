@@ -21,6 +21,8 @@
         var t = localStorage.getItem('fos-theme') || 'system';
         var dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
         document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+        // system bars (Android status/navigation area) follow the page background before first paint
+        document.querySelector('meta[name="theme-color"]').setAttribute('content', dark ? '#121214' : '#f2f2f7');
       } catch (e) { document.documentElement.dataset.theme = 'light'; }
     </script>
   </head>

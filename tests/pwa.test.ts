@@ -22,7 +22,7 @@ describe('PWA manifest', () => {
   });
   it('shortcut icons exist and the theme colour is the app blue', () => {
     for (const s of manifest.shortcuts) for (const i of s.icons) expect(exists(i.src), i.src).toBe(true);
-    expect(manifest.theme_color).toBe('#0071e3'); expect(manifest.start_url).toBe('/'); expect(manifest.display).toBe('standalone');
+    expect(manifest.theme_color).toBe('#f2f2f7'); expect(manifest.background_color).toBe('#f2f2f7'); // neutral, like the app background — never the old green expect(manifest.start_url).toBe('/'); expect(manifest.display).toBe('standalone');
   });
 });
 
@@ -54,5 +54,12 @@ describe('service worker', () => {
   });
   it('still never caches data and still serves the manifest fresh', () => {
     expect(sw).toContain('url.origin !== self.location.origin'); expect(sw).toContain("url.pathname === '/manifest.webmanifest'");
+  });
+});
+
+describe('no leftover green identity in anything the app ships', () => {
+  it('no source, style, manifest or html file uses the old brand green', () => {
+    const root = path.resolve(__dirname, '..'); const files = ['index.html', 'public/manifest.webmanifest', 'public/favicon.svg', 'src/styles.css', 'src/store.tsx'];
+    for (const f of files) expect(fs.readFileSync(path.join(root, f), 'utf8'), f).not.toMatch(/0f5c4d|f6f7f5/i);
   });
 });

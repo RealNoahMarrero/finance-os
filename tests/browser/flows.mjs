@@ -298,7 +298,7 @@ await test('HOME: two summary areas, an action row beneath them, and distinct se
   if (!/Cash & savings/i.test(m.text) || !/Ready to assign/i.test(m.text)) throw new Error('missing summary: ' + m.text);
   if (m.inlineLinks !== 0) throw new Error('inline links remain inside the summary cards');
   if (!m.below || !m.primary || m.plan) throw new Error('action row: ' + JSON.stringify(m));
-  for (const h of ['Upcoming', 'Needs attention', 'Expected income', 'Accounts', 'Recent activity']) if (!m.heads.includes(h)) throw new Error(`section "${h}" missing: ${m.heads}`);
+  for (const h of ['Upcoming', 'Needs attention', 'Expected income', 'Accounts']) if (!m.heads.includes(h)) throw new Error(`section "${h}" missing: ${m.heads}`);
 });
 await test('THEME: quick toggle in the sidebar switches light/dark at once, and from Automatic picks an explicit theme', async (page) => {
   await go(page, '/');
@@ -616,6 +616,51 @@ await test('RECOGNIZE: several missed payments → asks which; confirming pays t
   const n0 = await nTxn(); await click(page, 'Confirm', '[data-testid=advance-due]'); await sleep(1000);
   const [a] = await sql(`select (select balance::float from categories where id=5) owed, (select due_date::text from categories where id=5) d, (select count(*) from bill_payments where category_id=5) bp`);
   if (a.owed !== 8080 || a.d !== '2026-10-27' || Number(a.bp) !== 1 || await nTxn() !== n0) throw new Error(JSON.stringify(a));
+});
+
+await test('HOME order: Cash & savings, Ready to assign, actions, Accounts, Expected income, Upcoming, Needs attention; no Recent activity', async (page) => {
+  await go(page, '/');
+  const m = await page.evaluate(() => {
+    const top = (el) => el.getBoundingClientRect(); const q = (s) => document.querySelector(s);
+    const heads = [...document.querySelectorAll('.section-h h2')].map((h) => ({ t: h.innerText.replace(/\d+$/, '').trim(), r: top(h) }));
+    const cards = [...document.querySelectorAll('.home-top .stat')].map((c) => c.querySelector('.eyebrow').innerText);
+    return { heads: heads.map((h) => h.t), cards, cash: q('[data-testid=ov-cash]').innerText, text: document.body.innerText,
+      secs: ['home-accounts', 'home-expected-income-section', 'home-upcoming', 'home-needs-attention'].map((id) => { const r = top(q(`[data-testid=${id}]`)); return { id, left: Math.round(r.left), top: Math.round(r.top) }; }),
+      actions: top(q('.home-actions')).top, grid: top(q('.home-grid')).top, stat: top(q('.home-top')).bottom };
+  });
+  if (m.cards.length !== 2 || !/cash & savings/i.test(m.cards[0]) || !/ready to assign|over-assigned/i.test(m.cards[1])) throw new Error('summary cards: ' + m.cards);
+  if (/Cash Wallet.*Savings.*Cash/.test(m.cards.join(' '))) throw new Error('Cash and Savings split');
+  if (m.heads.join('|') !== 'Accounts|Expected income|Upcoming|Needs attention') throw new Error('section order: ' + m.heads);
+  if (/Recent activity/i.test(m.text)) throw new Error('Recent activity is still on Home');
+  if (!(m.stat <= m.actions && m.actions < m.grid)) throw new Error('summary → actions → sections order');
+  const [a, e, u, n] = m.secs; // desktop: two columns read top-to-bottom, left then right
+  if (!(a.left === e.left && u.left === n.left && u.left > a.left && a.top < e.top && u.top < n.top)) throw new Error('desktop columns: ' + JSON.stringify(m.secs));
+  if (Math.abs(a.top - u.top) > 2) throw new Error('column tops are not level: ' + JSON.stringify(m.secs));
+  // actions still work
+  await click(page, 'Open plan', '[data-testid=ov-open-plan]'); await sleep(400); if (!/#\/plan/.test(await page.evaluate(() => location.hash))) throw new Error('Open plan');
+  await go(page, '/'); await click(page, 'Move money', '[data-testid=ov-rta-action]'); if (!(await page.evaluate(() => /Move money/.test(document.querySelector('[role=dialog]')?.innerText ?? '')))) throw new Error('Move money');
+});
+await test('HOME order (phone): one column in the exact order, no overflow', async () => {
+  const page = await fresh({ width: 390, height: 844, isMobile: true, hasTouch: true }); const name = 'HOME order (phone): one column in the exact order, no overflow';
+  try {
+    await go(page, '/');
+    const m = await page.evaluate(() => {
+      const els = ['[data-testid=ov-cash]', '[data-testid=ov-rta-value]', '.home-actions', '[data-testid=home-accounts]', '[data-testid=home-expected-income-section]', '[data-testid=home-upcoming]', '[data-testid=home-needs-attention]'].map((s) => document.querySelector(s).getBoundingClientRect());
+      return { tops: els.map((r) => Math.round(r.top)), lefts: els.slice(3).map((r) => Math.round(r.left)), over: document.documentElement.scrollWidth > innerWidth + 1, recent: /Recent activity/i.test(document.body.innerText) };
+    });
+    const t = m.tops; for (let i = 1; i < t.length; i++) if (t[i] <= t[i - 1]) throw new Error('order: ' + t);
+    if (new Set(m.lefts).size !== 1 || m.over || m.recent) throw new Error(JSON.stringify(m));
+    results.push([name, true]);
+  } catch (e) { results.push([name, false, e.message]); }
+  await page.close();
+});
+await test('SYSTEM BARS: theme-color follows the page background in light and dark; manifest is neutral', async (page) => {
+  await go(page, '/'); const meta = () => page.evaluate(() => document.querySelector('meta[name=theme-color]').getAttribute('content'));
+  const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  if (await meta() !== '#f2f2f7' || await bg() !== 'rgb(242, 242, 247)') throw new Error('light: ' + await meta() + ' ' + await bg());
+  await click(page, 'Dark mode', '[data-testid=theme-toggle]'); await sleep(300);
+  if (await meta() !== '#121214' || await bg() !== 'rgb(18, 18, 20)') throw new Error('dark: ' + await meta() + ' ' + await bg());
+  const mf = await page.evaluate(() => fetch('/manifest.webmanifest').then((r) => r.json())); if (mf.theme_color !== '#f2f2f7' || mf.background_color !== '#f2f2f7') throw new Error('manifest colours');
 });
 await browser.close(); await new Promise((r) => pv.httpServer.close(r)); backend.close(); fs.rmSync(outDir, { recursive: true, force: true });
 for (const [n, ok, why] of results) console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${why ? '  — ' + why : ''}`);
